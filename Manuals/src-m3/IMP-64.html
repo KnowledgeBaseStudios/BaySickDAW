@@ -23,71 +23,59 @@ of the audio block, rather than through a queue with a lock in it.</p>
         juce::String deviceName;                         // empty = any device
         juce::String formula;                            // empty = linear (I-3c)
     };</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\MidiLearn\MidiLearnRegistry.h (registry + event queue, entire mechanism)</summary><pre><code>// MidiLearnRegistry.h -- class banner + learn handshake (verbatim, lines 8-45 + 99-123)
-// ─────────────────────────────────────────────────────────────────────────────
-// MidiLearnRegistry - Phase I-3b (2026-05-02)
-// ─────────────────────────────────────────────────────────────────────────────
-// App-wide MIDI Learn registry.  Maps incoming hardware MIDI events to APVTS
-// param updates so the user can right-click any knob, pick &quot;MIDI Learn&quot;, and
-// bind a hardware control to it.
-//
-// FL-mirrored mapping granularity (locked 2026-05-02):
-//   * Each mapping captures {message type, CC# / pitch-bend / aftertouch,
-//     channel, device name} so two keyboards on different ports can each
-//     control different params.
-//   * User can later edit a mapping to widen channel to Omni or change device.
-//   * Pitch-bend and channel-aftertouch are first-class learnable types
-//     alongside CC; poly aftertouch deferred (rare in beginner gear).
-//
-// Threading:
-//   * Mutators (setMapping / removeMapping / load / save) on message thread
-//     under mLock (juce::SpinLock).
-//   * Audio thread dispatch (`dispatchEvent`) try-locks; if it can&#x27;t, skips
-//     the event (one missed CC frame is unnoticeable for human-driven CCs).
-//   * Lookup is O(N mappings) per dispatch -- expected count is small (&lt;100).
-//     Keeps the data model simple; can switch to a hashed lookup if profiling
-//     shows it.
-//
-// Persistence:
-//   * Per-project: serialised inside the project&#x27;s PluginProcessor::getState
-//     output as a `&lt;MidiCCMappings&gt;` ValueTree child.  Loaded by
-//     setStateInformation on project open.
-//   * Global default: Documents/BaySickDAW/MidiMappings.xml -- saved when
-//     the user picks &quot;Save as global default&quot; in the right-click menu (I-3c).
-//     Loaded at app launch BEFORE per-project state restores; per-project
-//     mappings overlay on top of globals.
-//
-// Value mapping curve:
-//   * v1 ships LINEAR only (CC 0..127 -&gt; param min..max via NormalisableRange).
-//   * Per-mapping `formula` field reserved for I-3c power-user formula
-//     evaluation (FL-style).  Empty formula = linear.
-// ─────────────────────────────────────────────────────────────────────────────
+<details class="fullfn"><summary>Full function &mdash; Source\MidiLearn\MidiLearnRegistry.cpp (beginLearn line 208, tryCaptureLearn line 291, takeCapturedMapping line 233 &mdash; the arm / capture / complete handshake)</summary><pre><code>// MidiLearnRegistry.cpp -- learn handshake, arm -&gt; capture -&gt; complete
+// (verbatim, lines 208-219 + 291-313 + 233-246)
+void MidiLearnRegistry::beginLearn (const juce::String&amp; paramId)
+{
+    {
+        const juce::SpinLock::ScopedLockType lk (mLock);
+        mLearnTargetParamId = paramId;
+        // Drop any stale capture on THIS thread, so the audio thread only ever
+        // assigns into empty strings (see takeCapturedMapping).
+        mPendingCapture = {};
+        mCaptureReady.store (false, std::memory_order_relaxed);
+    }
+    if (onChanged) onChanged();
+}
 
-    // ── Learn-mode capture (used by I-3c right-click menu) ───────────────────
-    // The UI calls beginLearn(paramId), then polls takeCapturedMapping() on the
-    // message thread and commits with setMapping().
-    //
-    // 2026-07-19: the capture callback was REMOVED.  It ran on the audio thread
-    // and, between the std::function copy, the callback&#x27;s own
-    // MessageManager::callAsync, the std::map insert, and the onChanged()
-    // notify, put four separate heap allocations in the render callback.  The
-    // audio thread now only fills a pre-constructed Mapping under the existing
-    // lock (refcount traffic on already-owned strings, no allocation) and sets
-    // a flag; every allocating step moved to the message thread.  Same handshake
-    // shape as DrumTriggerMap.
-    void beginLearn (const juce::String&amp; paramId);
-    void cancelLearn();
-    bool isLearning() const noexcept;
-    juce::String getLearnTargetParamId() const;
+bool MidiLearnRegistry::tryCaptureLearn (const juce::String&amp; sourceDeviceName,
+                                          const juce::MidiMessage&amp; msg)
+{
+    // Audio thread.  Everything below stays inside the existing try-lock and
+    // touches only pre-constructed storage: no allocation, no map insert, no
+    // std::function, no onChanged() notify.  The message thread does all of
+    // that when it drains via takeCapturedMapping().
+    const juce::SpinLock::ScopedTryLockType tryLk (mLock);
+    if (! tryLk.isLocked()) return false;
+    if (mLearnTargetParamId.isEmpty()) return false;
 
-    // Message thread.  Returns true and fills `out` exactly once per capture.
-    bool takeCapturedMapping (Mapping&amp; out);
+    // Assigning into mPendingCapture only moves refcounts: paramId&#x27;s source is
+    // mLearnTargetParamId (still alive at this point) and deviceName&#x27;s is the
+    // event queue&#x27;s interned name table, which outlives the queue&#x27;s events.
+    // Neither assignment can drop a last reference, so neither can free.
+    if (! buildMappingFromEvent (mPendingCapture, sourceDeviceName, msg))
+        return false;   // not a learnable event type; fall through to dispatch
 
-    // Audio-thread (or MIDI thread): if a learn target is active and this event
-    // is a learnable type, record it for the message thread and return true
-    // (caller suppresses the event from regular dispatch).
-    bool tryCaptureLearn (const juce::String&amp; sourceDeviceName,
-                          const juce::MidiMessage&amp; msg);</code></pre></details>
+    mPendingCapture.paramId = mLearnTargetParamId;
+    mLearnTargetParamId     = {};
+    mCaptureReady.store (true, std::memory_order_release);
+    return true;   // captured -- suppress regular dispatch
+}
+
+bool MidiLearnRegistry::takeCapturedMapping (Mapping&amp; out)
+{
+    if (! mCaptureReady.load (std::memory_order_acquire)) return false;
+    const juce::SpinLock::ScopedLockType lk (mLock);
+    if (! mCaptureReady.exchange (false, std::memory_order_acq_rel)) return false;
+    out = mPendingCapture;
+    // Release our reference HERE, on the message thread.  If this is left for
+    // the audio thread&#x27;s next assignment to overwrite, and the mapping this
+    // paramId belonged to has since been removed, that overwrite drops the last
+    // reference and frees in the render callback -- the same defect one level
+    // down.  `out` holds a reference at this point, so this cannot free either.
+    mPendingCapture = {};
+    return out.paramId.isNotEmpty();
+}</code></pre></details>
 <pre class="formulas">- Binding record: `Mapping { paramId, msgType, ccNumber 0..127, channel (0 = Omni, 1..16), deviceName (empty = any device), formula (empty = linear) }`. One paramId has AT MOST one mapping; re-learning replaces. Learnable types: CC, PitchBend (14-bit 0..16383 -&gt; 0..1), ChannelPressure (7-bit); poly aftertouch deferred.
 - Match rule (`eventMatchesMapping`): msgType + ccNumber + channel + deviceName all must match; channel 0 (Omni) matches any channel, empty deviceName matches any device.
 - Value curve: v1 is LINEAR only — CC 0..127 -&gt; param min..max via NormalisableRange; `formula` field reserved for FL-style formulas (I-3c).

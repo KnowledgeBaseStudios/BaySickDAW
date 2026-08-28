@@ -1,7 +1,7 @@
 <p>A chain of allpass filters producing moving notches. Unlike a flanger the
 notches are not evenly spaced, which is why it swirls rather than whooshes.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/PhaserDSP.h</div><pre><code>// PhaserDSP::process (allpass cascade core)
+<div class="codeblock"><div class="codehead">- Source/DSP/PhaserDSP.cpp</div><pre><code>// PhaserDSP::process (allpass cascade core)
 // sec.7a: log-scaled LFO -&gt; frequency mapping
 const float logMinHz = std::log (minHz);
 const float logMaxHz = std::log (maxHz);
@@ -27,7 +27,7 @@ for (int s = 0; s &lt; activeStages; ++s)
     procL = yL;
     procR = yR;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/PhaserDSP.h</summary><pre><code>// PhaserDSP::process
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/PhaserDSP.cpp</summary><pre><code>// PhaserDSP::process
 void PhaserDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;

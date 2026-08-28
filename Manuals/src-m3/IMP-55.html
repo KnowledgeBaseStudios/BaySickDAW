@@ -27,11 +27,45 @@ decoder &mdash; which is switched off at build time.</p>
 
         std::vector&lt;short&gt; pcmL ((size_t) kPcmSlack), pcmR ((size_t) kPcmSlack);
         std::vector&lt;float&gt; outL, outR;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\MpglibAudioFormat.h (decode — MpglibReader / MpglibAudioFormat over vendored LAME mpglib)</summary><pre><code>        hip_t hip = hip_decode_init();
+<details class="fullfn"><summary>Full function &mdash; Source\MpglibAudioFormat.h (MpglibReader::MpglibReader + readSamples, lines 62-190)</summary><pre><code>// MpglibAudioFormat.h -- MpglibReader constructor decode loop + readSamples (lines 62-190)
+    MpglibReader (juce::InputStream* sourceStream)
+        : juce::AudioFormatReader (sourceStream, "MP3")
+    {
+        usesFloatingPointData = true;
+        bitsPerSample         = 32;
+
+        if (input-&gt;getTotalLength() &gt; MpglibAudio::kMaxEncodedBytes)
+            return;
+
+        juce::MemoryBlock encoded;
+        input-&gt;readIntoMemoryBlock (encoded);
+
+        if (encoded.getSize() == 0)
+            return;
+
+        hip_t hip = hip_decode_init();
 
         if (hip == nullptr)
             return;
-        ...
+
+        // ONE FRAME PER CALL, then drain the decoder with len = 0.
+        //
+        // hip_decode_headers is NOT a one-frame call, whatever its name suggests:
+        // it loops internally (mpglib_interface.c:400-418) writing at
+        // `pcm_l + totsize` until the decoder is empty, so ITS output buffer must
+        // hold every frame contained in the pushed chunk.  A 32 kbps 48 kHz file
+        // has 96-byte frames, so a 1024-byte push decodes ten of them - 11,520
+        // samples - and a 24 kbps MPEG-2 file is worse.  That is an ordinary
+        // low-bitrate MP3 overrunning the heap, not a crafted one.
+        //
+        // hip_decode1_headers returns AT MOST one frame (lame.h says so), which
+        // is what makes the buffer below sufficient rather than hopeful.
+        constexpr int kMaxFrame = 1152;
+        constexpr int kPcmSlack = kMaxFrame * 8;
+
+        std::vector&lt;short&gt; pcmL ((size_t) kPcmSlack), pcmR ((size_t) kPcmSlack);
+        std::vector&lt;float&gt; outL, outR;
+
         mp3data_struct info {};
         auto* src = static_cast&lt;unsigned char*&gt; (encoded.getData());
         const auto total = encoded.getSize();
@@ -72,7 +106,57 @@ decoder &mdash; which is switched off at build time.</p>
 
         numChannels    = (info.stereo &gt; 1) ? 2u : 1u;
         sampleRate     = (double) info.samplerate;
-        lengthInSamples = (juce::int64) outL.size();</code></pre></details>
+        lengthInSamples = (juce::int64) outL.size();
+
+        mDecoded.setSize ((int) numChannels, (int) outL.size());
+
+        // setSize allocates through HeapBlock WITHOUT throwOnFailure, so a failed
+        // allocation leaves a null buffer that setSample below would write
+        // through.  Fail the reader instead.
+        if (mDecoded.getNumSamples() != (int) outL.size())
+        {
+            lengthInSamples = 0;
+            return;
+        }
+
+        // int16 -&gt; float, the scale JUCE's float readers use.
+        constexpr float kScale = 1.0f / 32768.0f;
+
+        for (size_t i = 0; i &lt; outL.size(); ++i)
+            mDecoded.setSample (0, (int) i, (float) outL[i] * kScale);
+
+        if (numChannels &gt; 1)
+            for (size_t i = 0; i &lt; outL.size(); ++i)
+                mDecoded.setSample (1, (int) i,
+                                    (i &lt; outR.size() ? (float) outR[i] : 0.0f) * kScale);
+    }
+
+    bool readSamples (int* const* destChannels, int numDestChannels,
+                      int startOffsetInDestBuffer, juce::int64 startSampleInFile,
+                      int numSamples) override
+    {
+        // Past the end reads as silence, which is the contract every JUCE reader
+        // follows and what a clip streamer relies on at a loop boundary.
+        for (int ch = 0; ch &lt; numDestChannels; ++ch)
+        {
+            if (destChannels[ch] == nullptr)
+                continue;
+
+            auto* dest = reinterpret_cast&lt;float*&gt; (destChannels[ch]) + startOffsetInDestBuffer;
+            const int src = juce::jmin (ch, mDecoded.getNumChannels() - 1);
+
+            for (int i = 0; i &lt; numSamples; ++i)
+            {
+                const auto pos = startSampleInFile + i;
+
+                dest[i] = (src &gt;= 0 &amp;&amp; pos &gt;= 0 &amp;&amp; pos &lt; lengthInSamples)
+                            ? mDecoded.getSample (src, (int) pos)
+                            : 0.0f;
+            }
+        }
+
+        return true;
+    }</code></pre></details>
 <pre class="formulas">- Everything is behind `BAYSICK_HAS_LAME`; the decoder replaced JUCE&#x27;s `JUCE_USE_MP3AUDIOFORMAT` (a ~3,185-line unaudited decompiler-port), switched off in CMakeLists (`JUCE_USE_WINDOWS_MEDIA_FORMAT=0` per MF-4). `libs/lame/mpglib/*.c` is already compiled into the BaySickLame target with `HAVE_MPGLIB`.
 - Decode ceilings: `kMaxDecodedSamples = 48000 * 60 * 22` (~22 min of 48 kHz — ~512 MB decoded stereo float, real peak ~double with intermediates alive); `kMaxEncodedBytes = 512 MB` pre-check (MP3 compresses ~10x at worst-useful bitrates). Overflow = refuse the file, not truncate.
 - Decode loop: 1024-byte pushes into `hip_decode1_headers` (AT MOST one frame per call), then drain with `len = 0`; `kMaxFrame = 1152`, PCM scratch `kPcmSlack = kMaxFrame * 8` shorts per channel. int16 → float scale `1.0f / 32768.0f`. `AudioBuffer::setSize` failure detected explicitly (HeapBlock without throwOnFailure → null buffer).

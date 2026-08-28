@@ -24,7 +24,7 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
     const double resampRatio = (region-&gt;fileSampleRate / mSampleRate) * pitchRatio
                                * (double) juce::jlimit (0.5f, 2.0f, mStretch);</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickPlayerVoice::startNote / renderNextBlock)</summary><pre><code>void BaySickPlayerVoice::startNote (int midiNote, float velocity,
-                            juce::SynthesiserSound* /*sound*/,
+                            juce::SynthesiserSound*,
                             int /*pitchWheelPos*/)
 {
     releaseResources();

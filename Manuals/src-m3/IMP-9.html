@@ -2,7 +2,7 @@
 peaks and notches. Through-zero flanging sweeps the delay through zero for the
 jet-engine effect.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/FlangerDSP.h</div><pre><code>// FlangerDSP::process (feedback-path core)
+<div class="codeblock"><div class="codehead">- Source/DSP/FlangerDSP.cpp</div><pre><code>// FlangerDSP::process (feedback-path core)
 // Write to delay buffer (input + feedback from previous output)
 mBufL[mWritePos] = inL + fb * mFbL;
 mBufR[mWritePos] = inR + fb * mFbR;
@@ -33,7 +33,7 @@ if (invertWet) { delL = -delL; delR = -delR; }
 // Mix: dry + wet + cross
 if (L) L[n] = dryScale * inL + wetScale * delL + crossScale * delR;
 if (R) R[n] = dryScale * inR + wetScale * delR + crossScale * delL;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/FlangerDSP.h</summary><pre><code>// FlangerDSP::process
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/FlangerDSP.cpp</summary><pre><code>// FlangerDSP::process
 void FlangerDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;

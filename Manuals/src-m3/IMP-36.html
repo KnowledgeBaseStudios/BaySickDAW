@@ -38,7 +38,8 @@ cap to edge. The side view looks like it should do that. It does not.</p>
     // Off-axis darkening high shelf: past ~15 deg, max ~-8 dB at +/-90.
     const float angleAbs = std::abs (mAngleDeg);
     const float angle01  = juce::jlimit (0.0f, 1.0f, (angleAbs - 15.0f) / 75.0f);
-    const float darkenDb = ((mPolar == Polar::Omni) ? 0.0f : -8.0f) * angle01;
+    const float darkenMax = (mPolar == Polar::Omni) ? 0.0f : -8.0f;
+    const float darkenDb  = darkenMax * angle01;
 
     // Distance ~1/sqrt(r) + polar gain.
     const float distGain = juce::jlimit (0.1f, 1.5f,

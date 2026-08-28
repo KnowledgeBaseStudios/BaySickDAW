@@ -16,7 +16,7 @@ play correctly while you listen and be missing from the exported file.</p>
 run across each <em>note</em> on a 0-1 phase; automation clips run on song
 position in ticks. The two are deliberately not shared.</p>
 
-<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15425-15537)</div><pre><code>// StandaloneEditor.cpp -- registerModelEngineAutomation: the model-scoped applicator
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15528+)</div><pre><code>// StandaloneEditor.cpp -- registerModelEngineAutomation: the model-scoped applicator
             if (VKnobAutomation::sOnRegisterApplicator)
                 VKnobAutomation::sOnRegisterApplicator (pid,
                     [resolveTarget, which, paramId, gated] (float v01)
@@ -31,7 +31,7 @@ position in ticks. The two are deliberately not shared.</p>
                             if (auto* param = ap-&gt;getParameter (paramId))
                                 param-&gt;setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
                     });   // model-scoped: re-resolves through the rig at apply time</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15425-15537)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::registerModelEngineAutomation
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15528+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::registerModelEngineAutomation
 // (full function, lines 15425-15537)
 void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
 {

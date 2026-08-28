@@ -27,7 +27,7 @@ switch (ch)
     case EqChannel::left:   xl = aOut; break;
     case EqChannel::right:  xr = aOut; break;
 }</code></pre></div>
-<div class="codeblock"><div class="codehead">- Source/DSP/StripEq.cpp (StripEq::pushBand - the audio-thread sync, one compare per untouched band; abridged - the shipped compare spans all 31 band fields)</div><pre><code>void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
+<div class="codeblock"><div class="codehead">- Source/DSP/StripEq.cpp (StripEq::pushBand - the audio-thread sync, one compare per untouched band; abridged - the shipped compare spans all 32 band fields)</div><pre><code>void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
 {
     if (i &lt; 0 || i &gt;= kBands) return;
     auto&amp; c = mCached[(size_t) i];

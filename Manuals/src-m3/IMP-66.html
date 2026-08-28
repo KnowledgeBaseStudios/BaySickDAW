@@ -5,7 +5,7 @@ performance, and none of those belong in a file.</p>
 <p>Audio device changes are written down and applied on the next launch rather
 than swapped under a running engine.</p>
 
-<div class="codeblock"><div class="codehead">Source\PluginProcessor.h (MetroDSP struct, lines 1844-1880)</div><pre><code>// PluginProcessor.cpp -- the swing push (scheduling-time transform, in scheduleRollWindows)
+<div class="codeblock"><div class="codehead">Source\PluginProcessor.h (MetroDSP struct, lines 1888+)</div><pre><code>// PluginProcessor.cpp -- the swing push (scheduling-time transform, in scheduleRollWindows)
                     // SW-2/SW-4 (QA-G3Smoke Swing): scheduling-time transform.
                     // An off-beat 16th (odd index in the PATTERN-LOCAL grid;
                     // floor keeps humanized starts coherent) is pushed by
@@ -20,7 +20,7 @@ than swapped under a running engine.</p>
                         localStart += swingAmt;
                         swung = true;
                     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\PluginProcessor.h (MetroDSP struct, lines 1844-1880)</summary><pre><code>// PluginProcessor.h -- struct MetroDSP (full struct, lines 1845-1880)
+<details class="fullfn"><summary>Full function &mdash; Source\PluginProcessor.h (MetroDSP struct, lines 1888+)</summary><pre><code>// PluginProcessor.h -- struct MetroDSP (full struct, lines 1845-1880)
     struct MetroDSP {
         enum SoundType { Sine = 0, Click, Wood, Bell };
 

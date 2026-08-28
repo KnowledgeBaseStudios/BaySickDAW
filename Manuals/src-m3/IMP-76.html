@@ -11,7 +11,7 @@ song sounds like.</p>
 normal read-ahead by design, so waiting for the disk is correct there and would
 be a dropout anywhere else.</p>
 
-<div class="codeblock"><div class="codehead">- Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7644-7715, endOfflineRender lines 7717+)</div><pre><code>// BaySickDAWProcessor::beginOfflineRender (PluginProcessor.cpp) - entry gate + suspend
+<div class="codeblock"><div class="codehead">- Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7939+, endOfflineRender lines 8041+)</div><pre><code>// BaySickDAWProcessor::beginOfflineRender (PluginProcessor.cpp) - entry gate + suspend
 bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
 {
     if (renderSampleRate &lt;= 0.0 || renderBlockSize &lt;= 0) return false;
@@ -34,7 +34,7 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
     mOfflinePrevBlk  = getBlockSize();
     mOfflinePrevSong = isSongMode();
     mOfflinePrevHead = getPlayHead();</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7644-7715, endOfflineRender lines 7717+)</summary><pre><code>    // A freeze re-render during project load arrives with the load shield
+<details class="fullfn"><summary>Full function &mdash; - Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7939+, endOfflineRender lines 8041+)</summary><pre><code>    // A freeze re-render during project load arrives with the load shield
     // raised, and processBlock&#x27;s shield bail would clear every block of the
     // render (the offline loop calls processBlock directly, so the suspension
     // above does not gate it).  Dropping the shield here is safe because the

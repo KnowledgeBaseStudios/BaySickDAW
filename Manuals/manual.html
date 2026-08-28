@@ -297,6 +297,66 @@ name exactly as you typed it.</p>
 // `library:` / `mysamples:` string, not copied - they are reachable from any
 // project on this install, so a copy would duplicate factory content per
 // project.  Only volatile sources (Downloads, Desktop, USB) land in Samples\.</code></pre></div>
+<div class="codeblock"><div class="codehead">Source\ProjectManager.cpp (isDirty line 96, markSaved 101, markDirty 106, clearDirty 118 + writeBackup head, line 205)</div><pre><code>// ProjectManager.cpp -- the dirty trio (verbatim, lines 96-126) + writeBackup head (lines 205-229)
+bool ProjectManager::isDirty() const
+{
+    return mProcessor.mTxTracker.isDirty();
+}
+
+void ProjectManager::markSaved()
+{
+    mProcessor.mTxTracker.onSave();
+}
+
+void ProjectManager::markDirty()
+{
+    if (mIgnoreDirty) return;
+    // TS7 §3.3: the stamp moves on EVERY edit -- version capture needs &quot;did
+    // anything change since the last pass&quot;.  QA-UndoCoverage Task 9: the bool
+    // half is GONE; dirty is the transaction-pointer mismatch, fed by the
+    // editor&#x27;s UndoManager ChangeListener.  The ~18 direct markDirty call
+    // sites stay AS the stamp feed (removing them would shrink version
+    // capture&#x27;s change-detection scope).
+    mChangeStamp.fetch_add (1, std::memory_order_relaxed);
+}
+
+void ProjectManager::clearDirty()
+{
+    // QA-UndoCoverage Task 9 -- load boundary: loads don&#x27;t transact.  History
+    // + snapshot store + pointers reset together so the first post-load edit
+    // is row 1 and the project opens clean.
+    mProcessor.mUndoManager.clearUndoHistory();
+    UndoSnapshotStore::sweepAll();
+    mProcessor.mTxTracker.onLoadReset();
+}
+
+...
+
+bool ProjectManager::writeBackup()
+{
+    // Two paths: project open -&gt; backup goes inside that project&#x27;s Backups/.
+    // No project open -&gt; backup goes under Documents\BaySickDAW\Backups\Unsaved\
+    // so the user can recover from an unsaved session after a crash.
+    juce::File backupsDir;
+    juce::String stem;
+
+    if (hasProject())
+    {
+        backupsDir = mCurrentFolder.getChildFile (&quot;Backups&quot;);
+        stem = mCurrentFolder.getFileName();
+
+        // Migrate legacy: any old `project.xml.bak` at the project root from
+        // pre-2026-04-23 builds is silently removed (it was never user-loadable).
+        auto legacy = mCurrentFolder.getChildFile (&quot;project.xml.bak&quot;);
+        if (legacy.existsAsFile()) legacy.deleteFile();
+    }
+    else
+    {
+        backupsDir = AppPaths::appRoot()
+                          .getChildFile (&quot;Backups&quot;)
+                          .getChildFile (&quot;Unsaved&quot;);
+        stem = &quot;Untitled&quot;;
+    }</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\ProjectManager.h (folder conventions, dirty model)</summary><pre><code>// ProjectManager.cpp -- ProjectManager::saveProject (full function, lines 329-340)
 bool ProjectManager::saveProject()
 {
@@ -803,7 +863,7 @@ thirty-block drag undo in a single press.</p>
     // unit test permanently over, making minimumTransactionsToKeep the exact
     // retained count.
     mUndoManager.setMaxNumberOfStoredUnits (1, 100);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\UndoActions.h (UndoContext, typed actions, StructuralOpAction)</summary><pre><code>// UndoActions.h -- struct UndoContext (full struct, lines 17-46)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\UndoActions.h (UndoContext, lines 17-46; StructuralOpAction, lines 325-370)</summary><pre><code>// UndoActions.h -- struct UndoContext (full struct, lines 17-46)
 struct UndoContext
 {
     juce::UndoManager* manager { nullptr };
@@ -833,6 +893,54 @@ struct UndoContext
     std::function&lt;juce::Component*()&gt; resolveOwnerPage;
 
     bool isValid() const { return manager != nullptr &amp;&amp; (bool)perform; }
+};
+
+// UndoActions.h -- class StructuralOpAction (full class, lines 325-370)
+// ── StructuralOpAction (QA-UndoCoverage Task 7) ───────────────────────────────
+// One structural user gesture (tab add / delete / duplicate, engine pick or
+// swap, kit load) as one undoable transaction.  The op has ALREADY happened
+// when this action is performed (skip-first convention); undoFn reverses it
+// and redoFn re-applies it.  Snapshot temp files referenced by the lambdas
+// are owned here -- deleted when the action dies (depth-cap drop, history
+// clear, manager teardown), which is what keeps the UndoSnapshots store
+// bounded by the history depth.
+// ─────────────────────────────────────────────────────────────────────────────
+class StructuralOpAction : public juce::UndoableAction
+{
+public:
+    StructuralOpAction (std::function&lt;void()&gt; undoFn,
+                        std::function&lt;void()&gt; redoFn,
+                        juce::Array&lt;juce::File&gt; ownedSnapshots = {})
+        : mUndo (std::move (undoFn))
+        , mRedo (std::move (redoFn))
+        , mSnapshots (std::move (ownedSnapshots))
+    {}
+
+    ~StructuralOpAction() override
+    {
+        for (const auto&amp; f : mSnapshots)
+            f.deleteFile();
+    }
+
+    bool perform() override
+    {
+        if (mFirstPerform) { mFirstPerform = false; return true; }
+        if (mRedo) mRedo();
+        return true;
+    }
+    bool undo() override
+    {
+        if (mUndo) mUndo();
+        return true;
+    }
+    int getSizeInUnits() override { return (int) sizeof (*this); }
+
+private:
+    std::function&lt;void()&gt;  mUndo, mRedo;
+    juce::Array&lt;juce::File&gt; mSnapshots;
+    bool                   mFirstPerform { true };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StructuralOpAction)
 };</code></pre></details>
 <pre class="formulas">- ONE app-wide `juce::UndoManager`, owned by the processor, threaded by EngineRig into every engine APVTS ctor (each stamped with an undoOwnerTag so a parameter transaction re-resolves to its target after the engine is destroyed and re-created). Pages hold only an `UndoContext` by value.
 - Depth trick: `setMaxNumberOfStoredUnits(1, N)` — maxUnits = 1 keeps JUCE&#x27;s unit test PERMANENTLY over, so `minimumTransactionsToKeep` (the second argument) IS the retained transaction count. Menu depths: 100 (default) / 250 / 500 / 1000 (menu ids 510-513). The old (n, 30) shape silently collapsed every setting to ~30 transactions.
@@ -2047,7 +2155,7 @@ inline int snapDivToTicks (int idx) noexcept
         default: return 0;                   // 0 Off / 1 Line: not a fixed grid
     }
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickConstants.h (kTicksPerBeat, snap grid)</summary><pre><code>// PatternManager.h -- beats&lt;-&gt;ticks converters (full functions, lines 9-19)
+<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (beatsToTicks / ticksToBeats, lines 12-19; struct ArrangementBlock, lines 353-441) + Source\BaySickConstants.h (kTicksPerBeat, snap grid, block above)</summary><pre><code>// PatternManager.h -- beats&lt;-&gt;ticks converters (full functions, lines 9-19)
 // QA-Ee (96 PPQ): beats&lt;-&gt;ticks converters.  kTicksPerBeat (a plain int) lives
 // in BaySickConstants.h; these need juce::int64 so they live here, where every
 // tick consumer already includes PatternManager.h.
@@ -2058,7 +2166,61 @@ inline juce::int64 beatsToTicks (double beats) noexcept
 inline double ticksToBeats (juce::int64 ticks) noexcept
 {
     return (double) ticks / (double) kTicksPerBeat;
-}</code></pre></details>
+}
+
+// PatternManager.h -- struct ArrangementBlock (verbatim, lines 353-393 + 434-441)
+struct ArrangementBlock
+{
+    // kLengthTicksUnset (-1) = &quot;use lengthBars * 4&quot; (bar-precision length).
+    static constexpr juce::int64 kLengthTicksUnset = -1;
+
+    int  trackRow     { 0 };   // which row this block sits on (free-form, user assigns)
+    int  patternIndex { 0 };
+    // 8A (QA-G3Smoke, G-5): the block START is beats-authoritative -- ONE double
+    // in the musical map-position domain, read by scheduler, ruler, playhead and
+    // paint alike.  The old startBar(int)+startTicks(int64) pair let the bar-
+    // index and map-position domains diverge (they agreed only with no TS
+    // marker); the bar index is now DERIVED for display + serialization only.
+    // May be negative (slip-edit drag-left exposes pre-roll audio).  XML keeps
+    // writing/reading startBar+startTicks -- full precision, no migration.
+    double startBeats { 0.0 };
+    int    lengthBars { 4 };
+    // QA-Ee (96 PPQ): exact length in TICKS for sub-bar precision (audio clips
+    // dropped by Record naturally end mid-bar).  kLengthTicksUnset (-1) = use
+    // lengthBars * 4.  setLengthBeats() bridges a beats value -&gt; ticks; a user
+    // resize wanting bar precision sets lengthTicks back to kLengthTicksUnset.
+    juce::int64 lengthTicks { kLengthTicksUnset };
+
+    // Display-only derived bar index (floor; a negative slip-edit start floors
+    // to its containing bar).
+    int displayStartBar() const noexcept { return (int) std::floor (startBeats / 4.0); }
+
+    void setStartBeats  (double beats) noexcept { startBeats = beats; }
+    void setLengthBeats (double beats) noexcept { lengthTicks = (beats &gt; 0.0) ? beatsToTicks (beats) : kLengthTicksUnset; }
+    bool layerTrack   { true };
+
+    // Phase 4B - clip type + audio/automation fields
+    ClipType     clipType           { ClipType::Pattern };
+    juce::String audioFilePath      {};                 // Audio clips only
+    juce::String displayAlias       {};                 // optional per-clip display name (Browser rename)
+    float        pitchSemitones     { 0.f };            // per-clip pitch shift (semitones)
+    float        originalBPM        { 120.f };          // original BPM for time-stretch
+    bool         stretchMode        { true };           // true=Stretch (pitch locked), false=Resample
+    bool         muted              { false };          // muted clips are skipped during playback
+
+    // Phase 4C - automation lane data (only used for ClipType::Automation)
+    AutomationLane automationLane;
+
+    ...
+
+    // QA-G Task 5 (slice content-offset): pattern-content phase for this
+    // block, in grid ticks (384/bar).  The block plays its pattern starting
+    // at this offset into the cycle; preview + playback tile from it, so a
+    // sliced piece keeps its notes in place instead of restarting.  Only
+    // meaningful for ClipType::Pattern (Audio continues via
+    // contentStartSamples; Automation lanes are physically split at the cut).
+    juce::int64 contentOffsetTicks { 0 };
+};</code></pre></details>
 <pre class="formulas">- Tick model: `kTicksPerBeat = 96` (96 PPQ) — every straight AND triplet division is an integer tick count: Bar=384, Beat=96, 1/2 Beat=48, 1/3 Beat (8th triplet)=32, Step (1/16)=24, 1/2 Step (1/32)=12, 1/3 Step (1/32 triplet)=8, 1/4 Step (1/64)=6, 1/6 Step (1/64 triplet)=4. Rides ABOVE the int64-sample transport (QA-Ed). Converters: `beatsToTicks = llround(beats * 96)`, `ticksToBeats = ticks / 96.0`.
 - Unified snap: 11-index scheme shared by Builder / PianoRoll / Record-Quantize (`kNumUnifiedSnapDivs = 11`; idx 0 = Off, 1 = Line [dynamic ladder Bar/Beat/1-8/1-16/1-32/1-64, rung live when g/384 * pixelsPerBar &gt;= min-line-px], 2..10 = fixed tick grid above).
 - Note persistence: `PianoNote.startTicks`/`durationTicks` (serialized `st`/`dt`) are AUTHORITATIVE ON DISK; startBeat/durationBeats are the in-memory editing values, kept tick-aligned by the snap engine, derived at save, refilled at load (legacy beats migrated). Field-order invariant: tick fields and later additions stay LAST — positional brace-inits elsewhere stop at field 7 (`type`). Note defaults: midiNote 60, durationBeats 0.25 (= 24 ticks = 1/16), velocity 0.8.
@@ -2761,71 +2923,59 @@ of the audio block, rather than through a queue with a lock in it.</p>
         juce::String deviceName;                         // empty = any device
         juce::String formula;                            // empty = linear (I-3c)
     };</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\MidiLearn\MidiLearnRegistry.h (registry + event queue, entire mechanism)</summary><pre><code>// MidiLearnRegistry.h -- class banner + learn handshake (verbatim, lines 8-45 + 99-123)
-// ─────────────────────────────────────────────────────────────────────────────
-// MidiLearnRegistry - Phase I-3b (2026-05-02)
-// ─────────────────────────────────────────────────────────────────────────────
-// App-wide MIDI Learn registry.  Maps incoming hardware MIDI events to APVTS
-// param updates so the user can right-click any knob, pick &quot;MIDI Learn&quot;, and
-// bind a hardware control to it.
-//
-// FL-mirrored mapping granularity (locked 2026-05-02):
-//   * Each mapping captures {message type, CC# / pitch-bend / aftertouch,
-//     channel, device name} so two keyboards on different ports can each
-//     control different params.
-//   * User can later edit a mapping to widen channel to Omni or change device.
-//   * Pitch-bend and channel-aftertouch are first-class learnable types
-//     alongside CC; poly aftertouch deferred (rare in beginner gear).
-//
-// Threading:
-//   * Mutators (setMapping / removeMapping / load / save) on message thread
-//     under mLock (juce::SpinLock).
-//   * Audio thread dispatch (`dispatchEvent`) try-locks; if it can&#x27;t, skips
-//     the event (one missed CC frame is unnoticeable for human-driven CCs).
-//   * Lookup is O(N mappings) per dispatch -- expected count is small (&lt;100).
-//     Keeps the data model simple; can switch to a hashed lookup if profiling
-//     shows it.
-//
-// Persistence:
-//   * Per-project: serialised inside the project&#x27;s PluginProcessor::getState
-//     output as a `&lt;MidiCCMappings&gt;` ValueTree child.  Loaded by
-//     setStateInformation on project open.
-//   * Global default: Documents/BaySickDAW/MidiMappings.xml -- saved when
-//     the user picks &quot;Save as global default&quot; in the right-click menu (I-3c).
-//     Loaded at app launch BEFORE per-project state restores; per-project
-//     mappings overlay on top of globals.
-//
-// Value mapping curve:
-//   * v1 ships LINEAR only (CC 0..127 -&gt; param min..max via NormalisableRange).
-//   * Per-mapping `formula` field reserved for I-3c power-user formula
-//     evaluation (FL-style).  Empty formula = linear.
-// ─────────────────────────────────────────────────────────────────────────────
+<details class="fullfn"><summary>Full function &mdash; Source\MidiLearn\MidiLearnRegistry.cpp (beginLearn line 208, tryCaptureLearn line 291, takeCapturedMapping line 233 &mdash; the arm / capture / complete handshake)</summary><pre><code>// MidiLearnRegistry.cpp -- learn handshake, arm -&gt; capture -&gt; complete
+// (verbatim, lines 208-219 + 291-313 + 233-246)
+void MidiLearnRegistry::beginLearn (const juce::String&amp; paramId)
+{
+    {
+        const juce::SpinLock::ScopedLockType lk (mLock);
+        mLearnTargetParamId = paramId;
+        // Drop any stale capture on THIS thread, so the audio thread only ever
+        // assigns into empty strings (see takeCapturedMapping).
+        mPendingCapture = {};
+        mCaptureReady.store (false, std::memory_order_relaxed);
+    }
+    if (onChanged) onChanged();
+}
 
-    // ── Learn-mode capture (used by I-3c right-click menu) ───────────────────
-    // The UI calls beginLearn(paramId), then polls takeCapturedMapping() on the
-    // message thread and commits with setMapping().
-    //
-    // 2026-07-19: the capture callback was REMOVED.  It ran on the audio thread
-    // and, between the std::function copy, the callback&#x27;s own
-    // MessageManager::callAsync, the std::map insert, and the onChanged()
-    // notify, put four separate heap allocations in the render callback.  The
-    // audio thread now only fills a pre-constructed Mapping under the existing
-    // lock (refcount traffic on already-owned strings, no allocation) and sets
-    // a flag; every allocating step moved to the message thread.  Same handshake
-    // shape as DrumTriggerMap.
-    void beginLearn (const juce::String&amp; paramId);
-    void cancelLearn();
-    bool isLearning() const noexcept;
-    juce::String getLearnTargetParamId() const;
+bool MidiLearnRegistry::tryCaptureLearn (const juce::String&amp; sourceDeviceName,
+                                          const juce::MidiMessage&amp; msg)
+{
+    // Audio thread.  Everything below stays inside the existing try-lock and
+    // touches only pre-constructed storage: no allocation, no map insert, no
+    // std::function, no onChanged() notify.  The message thread does all of
+    // that when it drains via takeCapturedMapping().
+    const juce::SpinLock::ScopedTryLockType tryLk (mLock);
+    if (! tryLk.isLocked()) return false;
+    if (mLearnTargetParamId.isEmpty()) return false;
 
-    // Message thread.  Returns true and fills `out` exactly once per capture.
-    bool takeCapturedMapping (Mapping&amp; out);
+    // Assigning into mPendingCapture only moves refcounts: paramId&#x27;s source is
+    // mLearnTargetParamId (still alive at this point) and deviceName&#x27;s is the
+    // event queue&#x27;s interned name table, which outlives the queue&#x27;s events.
+    // Neither assignment can drop a last reference, so neither can free.
+    if (! buildMappingFromEvent (mPendingCapture, sourceDeviceName, msg))
+        return false;   // not a learnable event type; fall through to dispatch
 
-    // Audio-thread (or MIDI thread): if a learn target is active and this event
-    // is a learnable type, record it for the message thread and return true
-    // (caller suppresses the event from regular dispatch).
-    bool tryCaptureLearn (const juce::String&amp; sourceDeviceName,
-                          const juce::MidiMessage&amp; msg);</code></pre></details>
+    mPendingCapture.paramId = mLearnTargetParamId;
+    mLearnTargetParamId     = {};
+    mCaptureReady.store (true, std::memory_order_release);
+    return true;   // captured -- suppress regular dispatch
+}
+
+bool MidiLearnRegistry::takeCapturedMapping (Mapping&amp; out)
+{
+    if (! mCaptureReady.load (std::memory_order_acquire)) return false;
+    const juce::SpinLock::ScopedLockType lk (mLock);
+    if (! mCaptureReady.exchange (false, std::memory_order_acq_rel)) return false;
+    out = mPendingCapture;
+    // Release our reference HERE, on the message thread.  If this is left for
+    // the audio thread&#x27;s next assignment to overwrite, and the mapping this
+    // paramId belonged to has since been removed, that overwrite drops the last
+    // reference and frees in the render callback -- the same defect one level
+    // down.  `out` holds a reference at this point, so this cannot free either.
+    mPendingCapture = {};
+    return out.paramId.isNotEmpty();
+}</code></pre></details>
 <pre class="formulas">- Binding record: `Mapping { paramId, msgType, ccNumber 0..127, channel (0 = Omni, 1..16), deviceName (empty = any device), formula (empty = linear) }`. One paramId has AT MOST one mapping; re-learning replaces. Learnable types: CC, PitchBend (14-bit 0..16383 -&gt; 0..1), ChannelPressure (7-bit); poly aftertouch deferred.
 - Match rule (`eventMatchesMapping`): msgType + ccNumber + channel + deviceName all must match; channel 0 (Omni) matches any channel, empty deviceName matches any device.
 - Value curve: v1 is LINEAR only — CC 0..127 -&gt; param min..max via NormalisableRange; `formula` field reserved for FL-style formulas (I-3c).
@@ -2983,7 +3133,56 @@ rather than in constructors, because a page can exist before it is ever framed.<
 //     space.  Positions here are consequently offset by the workspace&#x27;s own
 //     origin within the main window, NOT by screen coordinates -- see
 //     Workspace::originInParentClient.</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WorkspaceWindow.h (contract note, lines 13-42; Workspace anchor, lines 469-533)</summary><pre><code>// WorkspaceWindow.cpp -- WorkspaceWindow::attachTo (full function, lines 667-756)
+
+<div class="codeblock"><div class="codehead">Source\Standalone\WorkspaceWindow.cpp (attachTo WS_CHILD attach, lines 828-832; Workspace::originInParentClient, lines 1432-1447; saveBounds read-back, lines 1257-1278)</div><pre><code>// WorkspaceWindow.cpp -- the WS_CHILD attach (attachTo, lines 828-832)
+    setBounds (saved);
+
+    addToDesktop (0, parent);
+    const auto o = ws.originInParentClient();
+    setTopLeftPosition (saved.getX() + o.x, saved.getY() + o.y);
+
+// WorkspaceWindow.cpp -- Workspace::originInParentClient (full function, lines 1432-1447)
+juce::Point&lt;int&gt; Workspace::originInParentClient() const
+{
+    if (auto* peer = getPeer())
+    {
+        auto&amp; frame = peer-&gt;getComponent();
+        if (&amp;frame != this)
+        {
+            // The frame's origin expressed in OUR space; negating it gives our
+            // position in the frame's space, which is what the child peers'
+            // parent-client coordinates are measured from.
+            const auto frameOrigin = getLocalPoint (&amp;frame, juce::Point&lt;int&gt; (0, 0));
+            return { -frameOrigin.x, -frameOrigin.y };
+        }
+    }
+    return {};
+}
+
+// WorkspaceWindow.cpp -- saveBounds: the parent-client read-back (lines 1257-1278)
+void WorkspaceWindow::saveBounds() const
+{
+    // A programmatic clamp is not a placement the user chose -- see
+    // ScopedSaveSuppress.
+    if (savesSuppressed()) return;
+    if (mPersistKey.isEmpty()) return;
+    // No workspace = no way to convert into workspace-local space; a raw save
+    // here would be the coordinate-space drift bug again.  Keep the last good
+    // save instead.
+    if (workspace() == nullptr) return;
+
+    // Lifetime 1: the map is the one live store.  Workspace-local, not
+    // parent-client -- storing raw peer bounds re-added the workspace origin
+    // on every close/reopen, so windows crept down-right each cycle; and the
+    // workspace moves when the main chrome changes height.
+    auto b = getBounds();
+    if (auto* ws = workspace())
+    {
+        const auto o = ws-&gt;originInParentClient();
+        b.translate (-o.x, -o.y);
+    }
+    sessionBounds()[mPersistKey] = b;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WorkspaceWindow.cpp (WorkspaceWindow::attachTo, lines 775-864)</summary><pre><code>// WorkspaceWindow.cpp -- WorkspaceWindow::attachTo (full function, lines 775-864)
 void WorkspaceWindow::attachTo (Workspace&amp; ws)
 {
     mWorkspace = &amp;ws;
@@ -3124,33 +3323,68 @@ namespace WindowChrome
     // and it minimises with the owner.  That is exactly the relationship wanted.
     void ownToMainWindow (juce::Component&amp; win, const juce::Component&amp; insideMain);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WindowChrome.h (shared chrome metrics)</summary><pre><code>// WorkspaceWindow.h -- the THREE-LIFETIME persistence model (verbatim, lines 130-156)
-    // QA-Layout T5: the THREE-LIFETIME model (Jeff&#x27;s 2026-07-28 ruling).
-    //
-    //   Lifetime 1 -- the in-memory map -- is the ONE live store.  EVERY
-    //   window (Disk or Session) writes it on move/resize/close and reads it
-    //   on open, so close/reopen returns to the same spot universally.
-    //   Lifetime 2 -- settings.xml -- written ONCE at app exit from a
-    //   FILTERED view of the map (writeSessionToSettings): sizes for every
-    //   Disk-marked window, placement only for keys registered
-    //   placement-persistent (the four default tabs).  Read only as a seed
-    //   when the map misses.  The old parse-and-rewrite-per-close is gone.
-    //   Lifetime 3 -- the project file -- StandaloneEditor serializes the
-    //   full map + per-window open state and REPLACES the map on load.
-    //
-    //   Disk    - eligible for the settings.xml exit write.  Jeff, 2026-08-04:
-    //             this is ONLY the four default tabs (Builder / Mixer /
-    //             Effects / Piano Roll), size AND position.  Nothing else goes
-    //             in that file.  It previously defaulted to Disk for every page
-    //             window and wrote every window&#x27;s SIZE globally, gating only
-    //             POSITION to the four -- the exact inverse of the ruling, and
-    //             what left 143 records in settings.xml feeding stale sizes to
-    //             players on every cold start.
-    //   Session - map only.  EVERY other window: players, effect windows,
-    //             satellites.  Their size and placement are session state
-    //             (lifetime 1) and project content (lifetime 3); a cold start
-    //             with no project opens them at their DEFAULT size.
-    enum class Persistence { Disk, Session };</code></pre></details>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WindowChrome.cpp (paintFrame line 24, paintTitleBar line 31, applyToDesktopWindow line 47, ownToMainWindow line 53)</summary><pre><code>// WindowChrome.cpp -- the shared chrome painters + ownership helper (lines 24-84)
+    void paintFrame (juce::Graphics&amp; g, juce::Rectangle&lt;int&gt; full)
+    {
+        g.fillAll (kFrameBg);
+        g.setColour (kFrameEdge);
+        g.drawRect (full, 1);
+    }
+
+    void paintTitleBar (juce::Graphics&amp; g, juce::Rectangle&lt;int&gt; area,
+                        bool live, const juce::String&amp; title)
+    {
+        g.setColour (titleBg (live));
+        g.fillRect (area);
+
+        if (title.isEmpty()) return;
+
+        g.setColour (kTitleText);
+        g.setFont (juce::Font (13.0f));
+        // Left-aligned with the same 8px inset the PageMenuBar uses, so a
+        // desktop window's title sits where a contained window's does.
+        g.drawText (title, area.reduced (8, 0), juce::Justification::centredLeft,
+                    true);
+    }
+
+    void applyToDesktopWindow (juce::DocumentWindow&amp; win)
+    {
+        win.setUsingNativeTitleBar (false);
+        win.setTitleBarHeight (kTitleH);
+    }
+
+    void ownToMainWindow (juce::Component&amp; win, const juce::Component&amp; insideMain)
+    {
+        auto* mainTop = insideMain.getTopLevelComponent();
+        if (mainTop == nullptr || mainTop == &amp;win) return;
+
+        auto* mainPeer = mainTop-&gt;getPeer();
+        auto* ownPeer  = win.getPeer();
+        if (mainPeer == nullptr || ownPeer == nullptr) return;
+
+       #if JUCE_WINDOWS
+        // NOT addToDesktop (flags, nativeParent).  That was the first attempt and
+        // it is wrong: JUCE passes the handle to CreateWindowEx as the PARENT and
+        // ORs in WS_CHILD (juce_Windowing_windows.cpp, "if (parentToAddTo !=
+        // nullptr) result |= WS_CHILD"), which makes a CHILD window -- clipped to
+        // the app frame, undraggable outside it, and with getBounds() silently
+        // switching to parent-client space so any save/restore of bounds around
+        // the call re-plants the window somewhere else.
+        //
+        // OWNED is a different relationship and Win32 has no JUCE-level API for
+        // it: setting GWLP_HWNDPARENT on an ALREADY-CREATED top-level window sets
+        // the owner WITHOUT WS_CHILD.  That gives exactly what §9.4 asks for --
+        // the OS keeps it above its owner, above nothing else, and minimises it
+        // with the owner -- while it stays a real top-level window the user can
+        // drag anywhere on screen.
+        auto* hwnd  = static_cast&lt;HWND&gt; (ownPeer -&gt;getNativeHandle());
+        auto* owner = static_cast&lt;HWND&gt; (mainPeer-&gt;getNativeHandle());
+        if (hwnd != nullptr &amp;&amp; owner != nullptr)
+            SetWindowLongPtr (hwnd, GWLP_HWNDPARENT, (LONG_PTR) owner);
+       #else
+        juce::ignoreUnused (mainPeer, ownPeer);
+       #endif
+    }</code></pre></details>
 <pre class="formulas">- Chrome metrics: `WindowChrome::kTitleH = 26`, `WindowChrome::kBorderPx = 4`. `WorkspaceWindow::kTitleH` / `kBorderPx` are ALIASES of these (constexpr, ~40 call sites keep the old names). DocumentWindow&#x27;s own titleBarHeight also happens to be 26 — they match by coincidence unless routed through `applyToDesktopWindow`, which sets both the non-native title bar and the shared height.
 - Anti-degenerate floor: `kMinDegenerateW = 120`, `kMinDegenerateH = 80` (installed in ctor; only floor before a real default is known). Placeholder open size 480x320.
 - T8 sizing rule: minimum == default (&quot;smallest still readable&quot; measured numbers serve as both). `setDefaultWindowSize` sets default AND minimum; `setResizeFloor` lowers ONLY the floor (hosted plugin surfaces scale, ours don&#x27;t) and must be called AFTER `setDefaultWindowSize`.
@@ -3211,20 +3445,86 @@ project.</p>
         {
             mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex] = 0;   // wake
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\Engine\Tasks\InstStripTask.cpp (the idle-suspend gate + predicates, lines 203-271)</summary><pre><code>    // QA-C DSP-10 (2026-05-10): audition-pending peek so the idle-suspend
-    // predicate wakes the chain when an audition note is queued via
-    // auditionNote(int).  Without this, the dispatcher skips processBlock
-    // and the audition is silently swallowed.
-    bool isAuditionPending() const noexcept
-    {
-        return mAuditionNote.load (std::memory_order_acquire) != -1;
-    }
+<details class="fullfn"><summary>Full function &mdash; Source\Engine\Tasks\InstStripTask.cpp (InstStripTask::run, line 37; idle-suspend gate, lines 198-266)</summary><pre><code>// InstStripTask.cpp -- InstStripTask::run() (head, lines 37-45; idle gate, lines 198-266)
+void InstStripTask::run()
+{
+    if (mEngine == nullptr || mOutputBuffer == nullptr || mCtx == nullptr
+        || mGraph == nullptr || mProcessor == nullptr)
+        return;
 
-    // QA-G3Smoke Task 12: slide-tail peek for the same idle-suspend predicate.
-    // SlideSampler voices (gesture + ring-out tails + release zones) don&#x27;t
-    // count in sfizz&#x27;s getNumActiveVoices, so without this term the dispatcher
-    // suspends the chain mid-tail and the ring-out freezes.
-    bool isSlideActive() const noexcept { return mSlideSampler.isActive(); }</code></pre></details>
+    const int n = mCtx-&gt;numSamples;
+    if (n &lt;= 0)
+        return;
+    ...
+    // ── Idle suspend (sfizz-source only) ─────────────────────────────────────
+    // When the tab has no MIDI activity AND sfizz reports 0 active voices,
+    // stop rendering the whole chain.  Wakes on the next block where any gate
+    // fails.  Live-input Inst tabs are NOT suspended (live audio + arm/listen
+    // can fire even with no MIDI).
+    //
+    // The skip takes out the insert chain as well as the engine, so it cannot
+    // be instantaneous: whatever the rack / NAM cab is still ringing would be
+    // cut off in one sample.  The hold expiring starts a fade instead, the
+    // chain keeps running at falling gain for its duration, and only then does
+    // the cheap cleared path take over (IdleSuspendFade.h).  Stays unity on
+    // every non-sfizz strip, where isUnity() below skips the ramp outright.
+    IdleSuspendFade::Ramp suspendRamp;
+    if (sfizzActive)
+    {
+        int activeVoices = 0;
+        if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
+            activeVoices = g-&gt;getNumActiveVoices();
+        if (activeVoices == 0)
+            if (auto* b = mProcessor-&gt;getBaySickBasses (mIndex))
+                activeVoices = b-&gt;getNumActiveVoices();
+
+        const bool midiEmpty = mCtx-&gt;instPageMidi != nullptr
+                            &amp;&amp; mCtx-&gt;instPageMidi[mIndex].getNumEvents() == 0;
+        const bool noVoices  = activeVoices == 0;
+
+        // QA-C DSP-10 (2026-05-10): peek audition state from any sfizz engine
+        // bound to this Inst index.  An audition queued via auditionNote(int)
+        // must wake the chain so processBlock can mAuditionNote.exchange(-1)
+        // and produce sound.  Without this, audition during idle-suspend is
+        // silently swallowed.
+        bool auditionPending = false;
+        if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
+            auditionPending = g-&gt;isAuditionPending();
+        if (! auditionPending)
+            if (auto* b = mProcessor-&gt;getBaySickBasses (mIndex))
+                auditionPending = b-&gt;isAuditionPending();
+
+        // QA-G3Smoke Task 12: SlideSampler voices (gesture + ring-out tails)
+        // don&#x27;t count in sfizz&#x27;s active-voice total -- without this term the
+        // chain suspends mid-slide and the tail freezes.
+        bool slideActive = false;
+        if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
+            slideActive = g-&gt;isSlideActive();
+        if (! slideActive)
+            if (auto* b = mProcessor-&gt;getBaySickBasses (mIndex))
+                slideActive = b-&gt;isSlideActive();
+
+        bool holdExpired = false;
+        if (midiEmpty &amp;&amp; noVoices &amp;&amp; ! auditionPending &amp;&amp; ! slideActive)
+        {
+            auto&amp; counter = mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex];
+            if (counter &gt;= BaySickDAWProcessor::kIdleSuspendBlocks)
+                holdExpired = true;
+            else
+                ++counter;
+        }
+        else
+        {
+            mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex] = 0;   // wake
+        }
+
+        suspendRamp = mSuspendFade.advance (holdExpired, n, mProcessor-&gt;mSampleRate);
+        if (suspendRamp.suspended)
+        {
+            mOutputBuffer-&gt;clear();   // faded out already - suspended this block
+            return;
+        }
+    }</code></pre></details>
 <pre class="formulas">- Suspend predicate (all four must hold to advance the idle counter): `midiEmpty &amp;&amp; noVoices &amp;&amp; !auditionPending &amp;&amp; !slideActive`. Any failure resets the counter to 0 (immediate wake). Applies to sfizz-source Inst tabs and the Rusty kit only; live-input Inst tabs are NEVER suspended (live audio + arm/listen can fire with no MIDI).
 - `isAuditionPending()` = `mAuditionNote.load(memory_order_acquire) != -1` — a peek on the same atomic the engine-audition pattern uses (`processBlock` opens with `mAuditionNote.exchange(-1)`), added QA-C DSP-10 on the 3 sfizz engines (Guitars / Basses / RustyDrums) so an audition queued during suspend wakes the chain instead of being silently swallowed.
 - `isSlideActive()` — SlideSampler voices (gesture + ring-out tails + release zones) don&#x27;t count in sfizz&#x27;s `getNumActiveVoices`; without this term the chain suspends mid-slide and the tail freezes (QA-G3Smoke Task 12).
@@ -3237,7 +3537,74 @@ project.</p>
 waiting for the other. If the UI catches a write in progress it drops that frame
 and takes the next one.</p>
 <p><b>Dropping a frame is the correct outcome.</b> A visual is worth exactly
-nothing compared to an audio dropout, so the design makes the visual lose.</p></div>
+nothing compared to an audio dropout, so the design makes the visual lose.</p>
+
+<div class="codeblock"><div class="codehead">Source\DSP\SpectrumFeed.h (SpectrumFeed::push / SpectrumFeed::poll, lines 22-43)</div><pre><code>    // Audio thread - called every block.
+    void push(const float* src, int n)
+    {
+        mSeq.fetch_add(1, std::memory_order_release);   // odd  = writing
+        mCount = juce::jmin(n, kSize);
+        std::copy(src, src + mCount, mData);
+        mSeq.fetch_add(1, std::memory_order_release);   // even = done
+    }
+
+    // UI thread (30 Hz timer) - copies into caller's buffer.
+    // Returns false if audio was writing mid-copy (frame dropped - fine for a visualiser).
+    bool poll(float* outData, int&amp; outCount)
+    {
+        uint32_t s1 = mSeq.load(std::memory_order_acquire);
+        if (s1 &amp; 1u) return false;
+
+        outCount = mCount;
+        std::copy(mData, mData + outCount, outData);
+
+        uint32_t s2 = mSeq.load(std::memory_order_acquire);
+        return s1 == s2;
+    }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\SpectrumFeed.h (struct SpectrumFeed, banner + complete struct, lines 6-49)</summary><pre><code>// ─── SpectrumFeed ────────────────────────────────────────────────────────────
+// Lock-free, wait-free seqlock ring for moving one block of audio samples from
+// the audio thread to the UI thread for spectrum-analyser display.
+// The audio thread calls push() every block; the UI thread polls at ~30 Hz.
+// If the UI thread happens to poll mid-write, it drops the frame (fine for a
+// visualiser) rather than copying torn data.
+//
+// Extracted from BaySickGraph for reuse by DSP modules that want to expose their
+// own pre/post spectrum taps (the master analyzer's taps still ride this;
+// the EQ window's feeds moved to the vendored kbs SpectrumFeed).
+// `BaySickGraph::SpectrumFeed` is retained as a `using` alias for back-compat.
+// ─────────────────────────────────────────────────────────────────────────────
+struct SpectrumFeed
+{
+    static constexpr int kSize = 1024;
+
+    // Audio thread - called every block.
+    void push(const float* src, int n)
+    {
+        mSeq.fetch_add(1, std::memory_order_release);   // odd  = writing
+        mCount = juce::jmin(n, kSize);
+        std::copy(src, src + mCount, mData);
+        mSeq.fetch_add(1, std::memory_order_release);   // even = done
+    }
+
+    // UI thread (30 Hz timer) - copies into caller's buffer.
+    // Returns false if audio was writing mid-copy (frame dropped - fine for a visualiser).
+    bool poll(float* outData, int&amp; outCount)
+    {
+        uint32_t s1 = mSeq.load(std::memory_order_acquire);
+        if (s1 &amp; 1u) return false;
+
+        outCount = mCount;
+        std::copy(mData, mData + outCount, outData);
+
+        uint32_t s2 = mSeq.load(std::memory_order_acquire);
+        return s1 == s2;
+    }
+
+private:
+    std::atomic&lt;uint32_t&gt; mSeq   { 0 };
+    float                 mData[kSize] {};
+    int                   mCount { 0 };
+};</code></pre></details></div>
 <div class="tp" id="IMP-54"><h4 class="topichead">Audio clip streaming and the offline blocking read</h4>
 <p>Long files are streamed from disk rather than held in memory, with read-ahead.
 The <code>UND</code> and <code>PF</code> readouts are this subsystem reporting
@@ -3271,17 +3638,101 @@ bool AudioClipStreamer::ensureRangeBlockingForOffline (int64 needStart)
     mReady.store (true, std::memory_order_release);
     return mRingWriteHead.load (std::memory_order_acquire) &gt; needStart;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\AudioClipStreamer.h</summary><pre><code>// ── AudioClipStreamer ─────────────────────────────────────────────────────────
-// Disk-streaming audio engine for arrangement audio clips.
-//
-// Architecture:
-//   - SPSC ring buffer (4 seconds at file sample rate).
-//   - Background thread (TimeSliceClient) pre-fetches audio from disk.
-//   - Audio thread calls readAndMix() with a stateless file position each block.
-//   - Linear interpolation for sample-rate conversion.
-//   - Seek detection: if filePos jumps outside the ring window, the audio thread
-//     flags a seek and the background thread handles the refill asynchronously.
-//     The audio thread returns silence for any block during a seek.</code></pre></details>
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\AudioClipStreamer.cpp (readAndMix miss branch, lines 402-444; noteMiss, lines 59-84; fillIntoRing fill clock, lines 165-185)</summary><pre><code>// AudioClipStreamer.cpp -- readAndMix ring-window miss branch (lines 402-444)
+    else
+    {
+        int64 wh = mRingWriteHead.load (std::memory_order_acquire);
+
+        // The ring physically covers [wh - capacity, wh).
+        // Use coveredStart (not rh) as the lower bound - the stateless filePos
+        // (outPosInClip * readRatio) lands 1-2 samples behind rh every block due
+        // to the interpolation lookahead in numFileSamples.  Using rh caused a
+        // phantom seek on every single block even though the data was present.
+        int64 coveredStart = wh - (int64) mCapacity;
+        // G1 smoke round 5: lower bound extended by 1 - the Catmull-Rom
+        // kernel below reads one frame BEHIND the integer position.
+        if (startFloor - 1 &lt; coveredStart || startFloor + numFileSamples &gt; wh)
+        {
+            // CL-282: one synchronous refill attempt before conceding.  Live
+            // playback keeps the strict window test EXACTLY as before (the
+            // refill helper no-ops when not offline).
+            bool stillMissing = true;
+            if (ensureRangeBlockingForOffline (startFloor - 1))
+            {
+                wh           = mRingWriteHead.load (std::memory_order_acquire);
+                coveredStart = wh - (int64) mCapacity;
+                // Post-refill (offline only): covered-to-EOF counts as
+                // covered -- the refill spans [startFloor-1, EOF-or-prefill)
+                // by construction (4 s ring vs one block's need), and the
+                // per-sample EOF breaks below handle a clip tail shorter
+                // than the interpolation lookahead.
+                stillMissing = (startFloor - 1 &lt; coveredStart)
+                            || (startFloor + numFileSamples &gt; wh &amp;&amp; wh &lt; mTotalLength);
+            }
+            if (stillMissing)
+            {
+                if (startFloor &gt;= 0 &amp;&amp; startFloor &lt; mTotalLength)
+                    noteMiss (startFloor);
+                // Genuine position jump (backward scrub, loop, or first-block miss) -
+                // signal the background thread to seek.
+                mSeekTarget .store (startFloor, std::memory_order_release);
+                mSeekPending.store (true,       std::memory_order_release);
+                mReady      .store (false,      std::memory_order_release);
+                return 0.0f;
+            }
+        }
+    }
+
+// AudioClipStreamer.cpp -- noteMiss: the UND counter (full function, lines 59-84)
+void AudioClipStreamer::noteMiss (int64 filePos) noexcept
+{
+    // CALIBRATION (Rule 6 cat. 5): one max-ish block of slack.  Consecutive
+    // reads continue exactly where the last ended (readRaw) or within a
+    // fraction of a sample of it (readAndMix's ratio math), so anything
+    // inside this window is continuous playback and anything outside it is a
+    // seek the user asked for.
+    constexpr int64 kContiguitySlack = 4096;
+
+    const bool contiguous = mLastServedEnd &gt; 0
+                         &amp;&amp; std::llabs ((long long) (filePos - mLastServedEnd))
+                              &lt;= (long long) kContiguitySlack;
+
+    if (contiguous || sOfflineRender.load (std::memory_order_relaxed))
+    {
+        sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
+        // The Debug-build tripwire the entry asks for: during CONTINUOUS
+        // playback the ring should never be short, so this firing is a real
+        // finding rather than noise.
+        jassertfalse;
+    }
+
+    // Either way the next read starts a fresh run -- a seek's first block must
+    // not be judged against a position from before the jump.
+    mLastServedEnd = 0;
+}
+
+// AudioClipStreamer.cpp -- fillIntoRing's fill clock: the PF number (lines 165-185)
+void AudioClipStreamer::fillIntoRing (int64 fromFilePos, int numSamples)
+{
+    // CL-282: the fill IS the disk read, so its wall-clock is the number that
+    // predicts an underrun -- a fill slower than the ring's remaining headroom
+    // starves the next audio-thread read.  Session peak via CAS-max; runs on
+    // whichever thread is filling (message seek / background prefetch /
+    // offline blocking), never the audio thread.
+    const double fillT0 = juce::Time::getMillisecondCounterHiRes();
+    struct ScopedFillClock
+    {
+        double t0;
+        ~ScopedFillClock()
+        {
+            const float ms = (float) (juce::Time::getMillisecondCounterHiRes() - t0);
+            float cur = sPeakPrefillMs.load (std::memory_order_relaxed);
+            while (ms &gt; cur
+                   &amp;&amp; ! sPeakPrefillMs.compare_exchange_weak (cur, ms,
+                                                              std::memory_order_relaxed))
+            {}
+        }
+    } fillClock { fillT0 };</code></pre></details>
 <pre class="formulas">- `kBufSeconds = 4.0` — ring covers 4 s at the file&#x27;s native sample rate; `mCapacity = (int)(mFileSampleRate * kBufSeconds)`.
 - `kPrefillSeconds = 3.5` — synchronous pre-fill on seek (~88% of the ring); bumped from 2.0 in G-7 polish alongside bg-thread priority low → normal to kill the first-bar MP3 skip.
 - `kChunkSize = 8192` samples per background read.
@@ -3321,11 +3772,45 @@ decoder &mdash; which is switched off at build time.</p>
 
         std::vector&lt;short&gt; pcmL ((size_t) kPcmSlack), pcmR ((size_t) kPcmSlack);
         std::vector&lt;float&gt; outL, outR;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\MpglibAudioFormat.h (decode — MpglibReader / MpglibAudioFormat over vendored LAME mpglib)</summary><pre><code>        hip_t hip = hip_decode_init();
+<details class="fullfn"><summary>Full function &mdash; Source\MpglibAudioFormat.h (MpglibReader::MpglibReader + readSamples, lines 62-190)</summary><pre><code>// MpglibAudioFormat.h -- MpglibReader constructor decode loop + readSamples (lines 62-190)
+    MpglibReader (juce::InputStream* sourceStream)
+        : juce::AudioFormatReader (sourceStream, "MP3")
+    {
+        usesFloatingPointData = true;
+        bitsPerSample         = 32;
+
+        if (input-&gt;getTotalLength() &gt; MpglibAudio::kMaxEncodedBytes)
+            return;
+
+        juce::MemoryBlock encoded;
+        input-&gt;readIntoMemoryBlock (encoded);
+
+        if (encoded.getSize() == 0)
+            return;
+
+        hip_t hip = hip_decode_init();
 
         if (hip == nullptr)
             return;
-        ...
+
+        // ONE FRAME PER CALL, then drain the decoder with len = 0.
+        //
+        // hip_decode_headers is NOT a one-frame call, whatever its name suggests:
+        // it loops internally (mpglib_interface.c:400-418) writing at
+        // `pcm_l + totsize` until the decoder is empty, so ITS output buffer must
+        // hold every frame contained in the pushed chunk.  A 32 kbps 48 kHz file
+        // has 96-byte frames, so a 1024-byte push decodes ten of them - 11,520
+        // samples - and a 24 kbps MPEG-2 file is worse.  That is an ordinary
+        // low-bitrate MP3 overrunning the heap, not a crafted one.
+        //
+        // hip_decode1_headers returns AT MOST one frame (lame.h says so), which
+        // is what makes the buffer below sufficient rather than hopeful.
+        constexpr int kMaxFrame = 1152;
+        constexpr int kPcmSlack = kMaxFrame * 8;
+
+        std::vector&lt;short&gt; pcmL ((size_t) kPcmSlack), pcmR ((size_t) kPcmSlack);
+        std::vector&lt;float&gt; outL, outR;
+
         mp3data_struct info {};
         auto* src = static_cast&lt;unsigned char*&gt; (encoded.getData());
         const auto total = encoded.getSize();
@@ -3366,7 +3851,57 @@ decoder &mdash; which is switched off at build time.</p>
 
         numChannels    = (info.stereo &gt; 1) ? 2u : 1u;
         sampleRate     = (double) info.samplerate;
-        lengthInSamples = (juce::int64) outL.size();</code></pre></details>
+        lengthInSamples = (juce::int64) outL.size();
+
+        mDecoded.setSize ((int) numChannels, (int) outL.size());
+
+        // setSize allocates through HeapBlock WITHOUT throwOnFailure, so a failed
+        // allocation leaves a null buffer that setSample below would write
+        // through.  Fail the reader instead.
+        if (mDecoded.getNumSamples() != (int) outL.size())
+        {
+            lengthInSamples = 0;
+            return;
+        }
+
+        // int16 -&gt; float, the scale JUCE's float readers use.
+        constexpr float kScale = 1.0f / 32768.0f;
+
+        for (size_t i = 0; i &lt; outL.size(); ++i)
+            mDecoded.setSample (0, (int) i, (float) outL[i] * kScale);
+
+        if (numChannels &gt; 1)
+            for (size_t i = 0; i &lt; outL.size(); ++i)
+                mDecoded.setSample (1, (int) i,
+                                    (i &lt; outR.size() ? (float) outR[i] : 0.0f) * kScale);
+    }
+
+    bool readSamples (int* const* destChannels, int numDestChannels,
+                      int startOffsetInDestBuffer, juce::int64 startSampleInFile,
+                      int numSamples) override
+    {
+        // Past the end reads as silence, which is the contract every JUCE reader
+        // follows and what a clip streamer relies on at a loop boundary.
+        for (int ch = 0; ch &lt; numDestChannels; ++ch)
+        {
+            if (destChannels[ch] == nullptr)
+                continue;
+
+            auto* dest = reinterpret_cast&lt;float*&gt; (destChannels[ch]) + startOffsetInDestBuffer;
+            const int src = juce::jmin (ch, mDecoded.getNumChannels() - 1);
+
+            for (int i = 0; i &lt; numSamples; ++i)
+            {
+                const auto pos = startSampleInFile + i;
+
+                dest[i] = (src &gt;= 0 &amp;&amp; pos &gt;= 0 &amp;&amp; pos &lt; lengthInSamples)
+                            ? mDecoded.getSample (src, (int) pos)
+                            : 0.0f;
+            }
+        }
+
+        return true;
+    }</code></pre></details>
 <pre class="formulas">- Everything is behind `BAYSICK_HAS_LAME`; the decoder replaced JUCE&#x27;s `JUCE_USE_MP3AUDIOFORMAT` (a ~3,185-line unaudited decompiler-port), switched off in CMakeLists (`JUCE_USE_WINDOWS_MEDIA_FORMAT=0` per MF-4). `libs/lame/mpglib/*.c` is already compiled into the BaySickLame target with `HAVE_MPGLIB`.
 - Decode ceilings: `kMaxDecodedSamples = 48000 * 60 * 22` (~22 min of 48 kHz — ~512 MB decoded stereo float, real peak ~double with intermediates alive); `kMaxEncodedBytes = 512 MB` pre-check (MP3 compresses ~10x at worst-useful bitrates). Overflow = refuse the file, not truncate.
 - Decode loop: 1024-byte pushes into `hip_decode1_headers` (AT MOST one frame per call), then drain with `len = 0`; `kMaxFrame = 1152`, PCM scratch `kPcmSlack = kMaxFrame * 8` shorts per channel. int16 → float scale `1.0f / 32768.0f`. `AudioBuffer::setSize` failure detected explicitly (HeapBlock without throwOnFailure → null buffer).
@@ -3637,6 +4172,60 @@ mic placements should not also swap your vocal chain.</p>
 // name).  Loading uses setStateInformation so per-DSP state (Type
 // umbrella, A/B snapshots, etc.) round-trips faithfully.
 // ─────────────────────────────────────────────────────────────────────────────</code></pre></div>
+<div class="codeblock"><div class="codehead">Source\Standalone\EffectPresetIO.cpp (savePreset, line 213; loadPreset, line 250; &lt;EffectPreset&gt; wrapper tags, line 149)</div><pre><code>// EffectPresetIO.cpp -- wrapper tags (verbatim, lines 149-154) + savePreset (213-248) + loadPreset (250-256)
+    constexpr const char* kRootTag    = &quot;EffectPreset&quot;;
+    constexpr const char* kBlobAttr   = &quot;blob&quot;;
+    constexpr const char* kTypeAttr   = &quot;effectType&quot;;
+    constexpr const char* kNameAttr   = &quot;name&quot;;
+    constexpr const char* kVersionTag = &quot;version&quot;;
+    constexpr int         kPresetVersion = 1;
+
+...
+
+bool savePreset (DSPBase&amp; dsp, EffectType type,
+                  const juce::String&amp; presetName, juce::String&amp; outErr)
+{
+    if (type == EffectType::None)
+    {
+        outErr = &quot;Cannot save preset for empty effect slot.&quot;;
+        return false;
+    }
+    juce::MemoryBlock blob;
+    dsp.getStateInformation (blob);
+    if (blob.getSize() == 0)
+    {
+        outErr = &quot;DSP returned empty state.&quot;;
+        return false;
+    }
+    // resolveTarget rather than UserFileSave::writeXmlAsync: the write helpers
+    // raise the family&#x27;s warning box themselves, and this function reports
+    // through outErr for a caller that raises its own - the pair would stack
+    // two dialogs on one failure.  Naming and collision policy still come from
+    // the one place, so a second save of &quot;Big Hall&quot; suffixes instead of
+    // destroying the first.
+    const auto file = UserFileSave::resolveTarget (myPresetsDir (type), presetName);
+    if (file == juce::File())
+    {
+        outErr = presetName.trim().isEmpty()
+                     ? juce::String (&quot;Type a name for it first.&quot;)
+                     : UserFileSave::unusableNameMessage (presetName);
+        return false;
+    }
+
+    // The name attribute has to be the resolved one: the suffix means the file
+    // is not always &lt;typed name&gt;.xml, and metadata that disagrees with the
+    // filename is how a preset ends up displaying as its own overwritten twin.
+    return writePresetXml (file, type, file.getFileNameWithoutExtension(),
+                            blob, outErr);
+}
+
+bool loadPreset (DSPBase&amp; dsp, const juce::File&amp; presetFile, juce::String&amp; outErr)
+{
+    juce::MemoryBlock blob;
+    if (! readPresetXml (presetFile, blob, outErr)) return false;
+    dsp.setStateInformation (blob.getData(), (int) blob.getSize());
+    return true;
+}</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\Standalone\EffectPresetIO.h (per-effect preset IO + factory seeding)</summary><pre><code>// EffectPresetIO.h -- API surface (verbatim, lines 38-113, comments trimmed to signatures)
 namespace EffectPresetIO
 {
@@ -7756,12 +8345,46 @@ alternating signs.</p>
                 Rout += uniSaw * (0.5f * (1.0f + pan));
             }
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthVoice.cpp (in-voice detuned saw stack, section 10c of renderNextBlock; shared by BaySickBass)</summary><pre><code>    // Stagger unison phases so the stack sounds naturally detuned even at t=0.
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthVoice.cpp (startNote phase stagger, lines 242-247; renderNextBlock unison stack + 1/sqrt(N) law, lines 869-899; shared by BaySickBass &mdash; Harmless mirror: Source\Harmless\AdditiveVoice.cpp line 436, uniNorm)</summary><pre><code>// BaySickSynthVoice.cpp -- startNote phase stagger (verbatim, lines 242-247)
+    // Stagger unison phases so the stack sounds naturally detuned even at t=0.
     for (int u = 0; u &lt; 6; ++u)
     {
         mDriftRngState = mDriftRngState * 1664525u + 1013904223u;
         mUniPhase[u] = (double)((int) mDriftRngState) * (1.0 / 2147483648.0) * 0.5 + 0.5;
-    }</code></pre></details>
+    }
+
+// BaySickSynthVoice.cpp -- renderNextBlock section 10c (verbatim, lines 869-899)
+        // ── 10c. Unison (P3.11) - detuned saw stack, stereo-spread ────────────
+        //   Adds (mUnisonVoices - 1) saw copies at slightly detuned frequencies,
+        //   panned symmetrically across stereo by spread. Main voice stays centred.
+        //   Applied post-amp-env + velocity so overall level tracks the note.
+        float Lout = sample;
+        float Rout = sample;
+        if (mUnisonVoices &gt; 1 &amp;&amp; playFreq &gt; 1.0f)
+        {
+            const int   N   = mUnisonVoices;
+            const float maxCents = mUnisonDetune * 50.0f;   // ±50 cents at max
+            const float envGain  = ampVal * velScale;
+            const float levelN   = 1.0f / std::sqrt ((float) N);
+
+            for (int u = 1; u &lt; N; ++u)
+            {
+                // Symmetric position in [-1, +1] across the N-1 extra voices
+                const float pos       = ((float)(u - 1) / (float)(N - 1)) * 2.0f - 1.0f;
+                const float detuneHz  = playFreq * (std::pow (2.0f, pos * maxCents / 1200.0f) - 1.0f);
+                const float uniFreq   = playFreq + detuneHz;
+
+                mUniPhase[u - 1] += (double) uniFreq / (double) sr;
+                if (mUniPhase[u - 1] &gt;= 1.0) mUniPhase[u - 1] -= 1.0;
+
+                float uniSaw = (1.0f - 2.0f * (float) mUniPhase[u - 1]) * envGain * levelN;
+
+                // Pan: pos * spread (-1 = left, +1 = right)
+                const float pan = pos * mUnisonSpread;
+                Lout += uniSaw * (0.5f * (1.0f - pan));
+                Rout += uniSaw * (0.5f * (1.0f + pan));
+            }
+        }</code></pre></details>
 <pre class="formulas">- sqrt(N) gain compensation (QA-Soundness gain-staging pass, both synth engines): stack level `levelN = 1 / sqrt(N)`. Rationale: detuned copies are incoherent, powers add, so `1/sqrt(N)` holds perceived level constant as voices are added (`1/N` made it quieter per voice).
   - BaySickSynth/Bass: `const float levelN = 1.0f / std::sqrt ((float) N);` (each extra saw scaled by it; main voice stays at unity, centered).
   - Harmless: `const float uniNorm = 1.0f / std::sqrt (float (mNumUnison));` applied to the summed slot output.
@@ -8820,7 +9443,7 @@ reserved and unused:</p>
 <p>A hosted effect can also take a sidechain: the host lends the plugin its
 strip's sidechain receive buffer for exactly one call, then takes it back.</p>
 
-<div class="codeblock"><div class="codehead">- Source\Hosting\PluginBridgeProtocol.h (the whole wire format, kProtocolVersion = 6)</div><pre><code>// Hosting::Bridge protocol version history + version constant (PluginBridgeProtocol.h)
+<div class="codeblock"><div class="codehead">Source\Hosting\PluginBridgeProtocol.h (kProtocolVersion = 6 + packed wire structs, lines 97-182)</div><pre><code>// Hosting::Bridge protocol version history + version constant (PluginBridgeProtocol.h)
 // 6 (2026-08-10): ScanFile / ScanResult -- plugin SCANNING moved out of
 // process.  It used to run in-process on a background thread, which broke
 // JUCE&#x27;s documented &quot;VST3 scan must be on the message thread&quot; contract AND let
@@ -8832,7 +9455,79 @@ inline constexpr std::uint32_t kProtocolVersion = 6;
 // The ChildProcess handshake id.  Both sides must agree, so it lives here with
 // the rest of the protocol rather than being redeclared in each .cpp (it was,
 // identically, in two).
-inline constexpr const char* kBridgeUid = &quot;BaySickPluginBridge&quot;;</code></pre></div>
+inline constexpr const char* kBridgeUid = &quot;BaySickPluginBridge&quot;;
+
+// PluginBridgeProtocol.h -- packed wire structs (verbatim, lines 97-158 + 178-182)
+#pragma pack (push, 1)
+
+// Every message opens with this.  `payloadBytes` counts what follows the
+// header, so a reader can skip a message type it does not know.
+struct Header
+{
+    std::uint32_t type;          // MessageType
+    std::uint32_t payloadBytes;
+    std::uint32_t sequence;      // echoed in replies, so a late reply is discardable
+    std::uint32_t reserved;      // keeps the header 16 bytes on both architectures
+};
+
+struct HandshakePayload
+{
+    std::uint32_t protocolVersion;
+    std::uint32_t hostArchBits;   // 32 or 64 -- logged, never used to branch layout
+};
+
+struct PreparePayload
+{
+    double        sampleRate;
+    std::uint32_t maxBlockSize;
+    std::uint32_t numChannels;
+};
+
+// Per-block MIDI cap.  A block never carries anywhere near this; the bound
+// exists so a runaway buffer cannot overrun the control header&#x27;s fixed area.
+inline constexpr std::uint32_t kMaxMidiBytesPerBlock = 4096;
+
+// v3: NOTHING per-block rides this protocol.  Audio, MIDI, transport and the
+// reply all live in the shared mapping&#x27;s control header (see
+// BridgeSharedMemory.h SharedBlockControl), and a pair of named auto-reset
+// events is the rendezvous -- the audio thread never touches the pipe.  MIDI
+// wire format inside the control area, written and read by hand rather than by
+// copying JUCE&#x27;s MidiBuffer storage (the helper may be x86): per event,
+// int32 samplePosition, int32 numBytes, then numBytes of raw MIDI.
+
+struct SetParameterPayload
+{
+    std::uint32_t paramIndex;
+    float         value01;
+};
+
+struct EditorPayload
+{
+    std::uint64_t parentWindowHandle;   // HWND as an integer -- never a pointer type
+    std::int32_t  width;
+    std::int32_t  height;
+};
+
+struct LoadReplyPayload
+{
+    std::uint32_t ok;                 // 0 = failed; message text follows on Error
+    std::uint32_t numParameters;
+    std::uint32_t latencySamples;
+    std::uint32_t sharedMemoryBytes;
+    // v3: what the loaded plugin actually IS.  A 32-bit plugin cannot be
+    // opened by the 64-bit scanner, so its scan-time description is a
+    // filename-only guess -- the first real load corrects it from here.
+    std::uint32_t isInstrument;       // 0/1
+    std::uint32_t acceptsMidi;        // 0/1
+};
+
+...
+
+#pragma pack (pop)
+
+// A padding difference between the x64 and x86 builds would silently shift
+// every field after it, so the layout is asserted rather than trusted.
+static_assert (sizeof (Header)              == 16, &quot;Bridge::Header must be 16 bytes on every target&quot;);</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; - Source\Hosting\PluginBridgeProtocol.h (the whole wire format, kProtocolVersion = 6)</summary><pre><code>enum class MessageType : std::uint32_t
 {
     // host -&gt; helper
@@ -10628,7 +11323,7 @@ inline float waveSample (double phase01, const WaveMix&amp; mix)
             mEnvelope = coef * mEnvelope + (1.0f - coef) * absX;
             float s = waveSample (mPhase, mix);
             s *= mEnvelope;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\SynthStyleDSP.cpp</summary><pre><code>    // 1. Build mono mix for YIN.
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\SynthStyleDSP.cpp (SynthStyleDSP::process, line 266: mono-mix build lines 279-289, mono branch lines 333-365)</summary><pre><code>    // 1. Build mono mix for YIN.
     {
         float* mono = mMonoIn.getWritePointer (0);
         const float* l = buffer.getReadPointer (0);
@@ -10638,7 +11333,42 @@ inline float waveSample (double phase01, const WaveMix&amp; mix)
     }
     // 2-3. QA-EffectsReview Task 4: mono (YIN, 1 voice) vs poly (FFT tracker + voice pool).
     const auto&amp;  profile = kProfiles[(int) mType];
-    const WaveMix mix    = variationMix (mType, mVariation);</code></pre></details>
+    const WaveMix mix    = variationMix (mType, mVariation);
+
+// SynthStyleDSP::process, mono branch (lines 333-365): YIN drives the oscillator
+        mYin.pushAudio (monoIn, n);
+        const float trackedHz  = mYin.getFrequencyHz();
+        const float confidence = mYin.getConfidence();
+        if (trackedHz &gt; 0.0f &amp;&amp; confidence &gt; 0.2f)
+        {
+            const float shifted = trackedHz * std::pow (2.0f, profile.octaveShift / 12.0f);
+            mPhaseInc = (double) shifted / mSampleRate;
+        }
+        // Else: keep last mPhaseInc (note rings on, then the envelope decays).
+
+        for (int i = 0; i &lt; n; ++i)
+        {
+            const float absX = std::abs (monoIn[i]);
+            const float coef = (absX &gt; mEnvelope) ? mEnvCoefAtt : mEnvCoefRel;
+            mEnvelope = coef * mEnvelope + (1.0f - coef) * absX;
+
+            mLfoPhase += mLfoPhaseInc;
+            if (mLfoPhase &gt;= 1.0) mLfoPhase -= 1.0;
+
+            float s = waveSample (mPhase, mix);
+            mPhase += mPhaseInc;
+            if (mPhase &gt;= 1.0) mPhase -= 1.0;
+            s *= mEnvelope;
+
+            if (profile.lfoModulatesAmp)
+            {
+                const float lfo01 = 0.5f * (1.0f + std::sin ((float) mLfoPhase
+                                                              * juce::MathConstants&lt;float&gt;::twoPi));
+                s *= (1.0f - mDepth + mDepth * lfo01);
+            }
+            synthL[i] = s;
+            if (numCh &gt; 1) synthR[i] = s;
+        }</code></pre></details>
 <pre class="formulas">- Pitch-to-synth: mono mode tracks YIN (accepts frequency at confidence &gt; 0.2, else holds last pitch and lets the envelope decay); poly mode uses the FFT PolyPitchTracker feeding a voice pool (Guitar: 70-1300 Hz full poly; Bass: 35-400 Hz, max 2 notes).
 - Oscillator: `out = sine*sin(2*pi*p) + saw*(2p - 1) + sqr*(p &lt; 0.5 ? +1 : -1)` with per-Type/Variation crossfade weights (table above); Variation 1..11 maps to `v = (variation-1)/10`.
 - Type octave shift: `freq * 2^(octaveShift/12)` — Bass -12 semitones, Bell +12.
@@ -11533,7 +12263,7 @@ namespace MixerChannelIds
     constexpr int kInstBase  = 700;  // R1: Inst insert 0..29 → 700..729
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
     constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.h (MixerChannelIds registry, RoutingGraph class, BaySickGraph topology banner)</summary><pre><code>// BaySickGraph.cpp -- BaySickGraph::rebuildRoutingFromApvts (full function, lines 3206-3244)
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.cpp (BaySickGraph::rebuildRoutingFromApvts, lines 3217-3255; RoutingGraph::rebuildFromApvts, lines 2682-2787)</summary><pre><code>// BaySickGraph.cpp -- BaySickGraph::rebuildRoutingFromApvts (full function, lines 3217-3255)
 void BaySickGraph::rebuildRoutingFromApvts()
 {
     if (mApvts == nullptr) return;
@@ -11572,6 +12302,114 @@ void BaySickGraph::rebuildRoutingFromApvts()
     // Same shape for the pre-fader send tap: re-flag its sources from the fresh
     // edge list, and clear each armed tap before any strip runs this block.
     armPreFaderTaps();
+}
+
+// BaySickGraph.cpp -- RoutingGraph::rebuildFromApvts (full function, lines 2682-2787)
+bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState&amp; apvts,
+                                     const std::vector&lt;std::pair&lt;int, juce::String&gt;&gt;&amp; activeChannels)
+{
+    mEdges.clear();
+    mEdges.reserve(activeChannels.size() * (kMaxMainOutsPerStrip + kMaxSendsPerStrip));
+    mScEdges.clear();
+    mScEdges.reserve(activeChannels.size() * kMaxScRecvsPerStrip);
+
+    auto loadInt = [&amp;](const juce::String&amp; id, int fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return (int) p-&gt;load();
+        return fallback;
+    };
+    auto loadFloat = [&amp;](const juce::String&amp; id, float fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return p-&gt;load();
+        return fallback;
+    };
+    auto loadBool = [&amp;](const juce::String&amp; id, bool fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return p-&gt;load() &gt; 0.5f;
+        return fallback;
+    };
+
+    for (const auto&amp; [chId, prefix] : activeChannels)
+    {
+        // Compose this channel's ids only when they are missing or its prefix
+        // changed; steady state is a map lookup plus a string compare.
+        auto&amp; pid = mChannelParamIds[chId];
+        if (pid.prefix != prefix)
+        {
+            pid.prefix     = prefix;
+            for (int m = 0; m &lt; kMaxMainOutsPerStrip; ++m)
+                pid.mainOutTo[(size_t) m] = MixerChannelIds::mainOutParamId (prefix, m);
+            for (int s = 0; s &lt; kMaxSendsPerStrip; ++s)
+            {
+                const juce::String sp = prefix + "_send" + juce::String(s);
+                pid.sendTo     [(size_t) s] = sp + "_to";
+                pid.sendAmount [(size_t) s] = sp + "_amount";
+                pid.sendPrePost[(size_t) s] = sp + "_prepost";
+            }
+            for (int s = 0; s &lt; kMaxScRecvsPerStrip; ++s)
+                pid.scFrom[(size_t) s] = prefix + "_sc_recv" + juce::String(s) + "_from";
+        }
+
+        // Main-out lines.  Line 0 falls back to the natural parent (a strip
+        // always has one main out); lines 1..3 fall back to -1 = inactive, which
+        // is also what a project saved before they existed resolves to.
+        // Duplicate destinations across two lines of the SAME strip are dropped
+        // here as well as refused by the UI: two edges src -&gt; dst would sum that
+        // strip into the destination twice, i.e. +6 dB, not a second route.
+        int mainDsts[kMaxMainOutsPerStrip] = {};
+        int numMainDsts = 0;
+        for (int m = 0; m &lt; kMaxMainOutsPerStrip; ++m)
+        {
+            const int fallback = (m == 0) ? MixerChannelIds::defaultSendTo(chId) : -1;
+            const int dst = loadInt(pid.mainOutTo[(size_t) m], fallback);
+            if (dst &lt; 0 || dst == chId) continue;
+
+            bool dup = false;
+            for (int k = 0; k &lt; numMainDsts; ++k)
+                if (mainDsts[k] == dst) { dup = true; break; }
+            if (dup) continue;
+            mainDsts[numMainDsts++] = dst;
+
+            Edge e; e.srcId = chId; e.dstId = dst;
+            e.amountDb = 0.f; e.prePost = false; e.isMainOut = true;
+            mEdges.push_back(e);
+        }
+        for (int s = 0; s &lt; kMaxSendsPerStrip; ++s)
+        {
+            const int dst = loadInt(pid.sendTo[(size_t) s], -1);
+            if (dst &lt; 0 || dst == chId) continue;
+            Edge e; e.srcId = chId; e.dstId = dst;
+            e.amountDb = loadFloat(pid.sendAmount [(size_t) s], 0.f);
+            e.prePost  = loadBool (pid.sendPrePost[(size_t) s], false);
+            e.isMainOut = false;
+            mEdges.push_back(e);
+        }
+
+        // C.4 Phase 1 (2026-04-30): SC receive lines.  Each strip reads up
+        // to 4 _sc_recv{N}_from params (channel id of the source, -1 = empty).
+        // Build SC edges as src -&gt; this strip on receive line N.
+        for (int s = 0; s &lt; kMaxScRecvsPerStrip; ++s)
+        {
+            const int src = loadInt(pid.scFrom[(size_t) s], -1);
+            if (src &lt; 0 || src == chId) continue;
+            ScEdge e; e.srcId = src; e.dstId = chId; e.dstSlot = s;
+            mScEdges.push_back(e);
+        }
+    }
+
+    mTopoIds.clear();
+    mTopoIds.reserve(activeChannels.size());
+    for (const auto&amp; [chId, _] : activeChannels) mTopoIds.push_back(chId);
+    const bool topoOk = computeTopo(mTopoIds);
+
+    // AFTER computeTopo: a cycle makes it erase edges from mEdges, and an edge
+    // that no longer exists must not keep a tap armed for a consumer that will
+    // never pull it.
+    mHasPreFaderSend = false;
+    for (const auto&amp; e : mEdges)
+        if (e.prePost &amp;&amp; ! e.isMainOut) { mHasPreFaderSend = true; break; }
+
+    return topoOk;
 }</code></pre></details>
 <pre class="formulas">- Channel-id ranges (MixerChannelIds): buses 0-18 (kOutput=0, kLayersBus=1, kBassBus=2, kDrumsBus=3, kMaster=4, kFxBus=5, kClipsBus=6, kVoxBus=7, kInstBus=8, kVoxBus2=9, kInstBus2=10, kInstBus3=11, kRustyDrumsBus=12, kPluginsBus=13, kLayersBus2=14, kBassBus2=15, kClipsBus2=16, kPluginsBus2=17, kDrumsBus2=18); Aux 100-117; Layer inserts 200+; Bass 300+; Audio 400-499 (ends flush at kDrumBase); Drum 500-531; Vox 600+; Inst 700+; Rusty 800-812; Plugin 900+.
 - Strip caps DERIVE from page caps in BaySickConstants.h (`kMaxLayerStrips = kMaxLayerPages` etc.) — one page of a kind owns exactly one insert strip; a one-sided raise silently leaves extra pages with no strip/EQ/routing. Non-page caps: `kMaxAuxStrips = 18`, `kMaxRustyStrips = 13`.
@@ -15697,12 +16535,77 @@ public:
             mBufs[i] = nullptr;
         mCount = n;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\EngineSidechainHelper.h (ISidechainEngine tag interface + EngineSidechainHelper primitive)</summary><pre><code>class ISidechainEngine
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\EngineSidechainHelper.h (ISidechainEngine, lines 13-19; class EngineSidechainHelper, lines 37-99)</summary><pre><code>class ISidechainEngine
 {
 public:
     virtual ~ISidechainEngine() = default;
     virtual void setSidechainBuffers (juce::AudioBuffer&lt;float&gt;* const* bufs, int count) noexcept = 0;
     virtual float getSidechainLevel() const noexcept = 0;
+};
+
+// EngineSidechainHelper.h -- the per-engine primitive (complete class, lines 37-99)
+class EngineSidechainHelper
+{
+public:
+    static constexpr int kMaxSlots = 4;   // matches RoutingGraph::kMaxScRecvsPerStrip
+
+    // C.4 Phase 2.2 fix (2026-05-01): COPY pointers into our own fixed-size
+    // array.  Caller previously passed a stack-local array; storing its
+    // pointer caused a dangling-pointer crash on the next audio block once
+    // the lambda that built it had returned.  Now we hold our own copy.
+    void setSidechainBuffers (juce::AudioBuffer&lt;float&gt;* const* bufs, int count) noexcept
+    {
+        const int n = juce::jlimit (0, kMaxSlots, count);
+        for (int i = 0; i &lt; n; ++i)
+            mBufs[i] = bufs[i];
+        for (int i = n; i &lt; kMaxSlots; ++i)
+            mBufs[i] = nullptr;
+        mCount = n;
+    }
+
+    // Compute a peak-of-receivers RMS level across all connected SC slots
+    // for the current block.  O(numSlots * numChans * numSamples) - cheap
+    // when count is 0 (early exit) or no slot has data.
+    void updateLevel (int numSamples) noexcept
+    {
+        if (mCount &lt;= 0 || numSamples &lt;= 0)
+        {
+            mLevel.store (0.0f, std::memory_order_relaxed);
+            return;
+        }
+
+        float maxRms = 0.0f;
+        for (int i = 0; i &lt; mCount; ++i)
+        {
+            const auto* b = mBufs[i];
+            if (b == nullptr || b-&gt;getNumSamples() &lt; numSamples) continue;
+            const int chCount = juce::jmin (2, b-&gt;getNumChannels());
+            if (chCount &lt;= 0) continue;
+
+            float sumSq = 0.0f;
+            for (int ch = 0; ch &lt; chCount; ++ch)
+            {
+                const float* d = b-&gt;getReadPointer (ch);
+                for (int s = 0; s &lt; numSamples; ++s) sumSq += d[s] * d[s];
+            }
+            const float rms = std::sqrt (sumSq / (float) (numSamples * chCount));
+            if (rms &gt; maxRms) maxRms = rms;
+        }
+        mLevel.store (maxRms, std::memory_order_relaxed);
+    }
+
+    // UI-thread / modulation-source readable per-block RMS level (0..~1).
+    float getLevel() const noexcept { return mLevel.load (std::memory_order_relaxed); }
+
+    // Direct buffer access for engine internals that want raw SC samples
+    // rather than the pre-computed level (e.g. a per-sample env follower).
+    juce::AudioBuffer&lt;float&gt;* const* getBuffers() const noexcept { return mBufs; }
+    int                              getCount()   const noexcept { return mCount; }
+
+private:
+    juce::AudioBuffer&lt;float&gt;* mBufs[kMaxSlots] { nullptr, nullptr, nullptr, nullptr };
+    int                       mCount { 0 };
+    std::atomic&lt;float&gt;        mLevel { 0.0f };
 };</code></pre></details>
 <pre class="formulas">- `RoutingGraph::kMaxScRecvsPerStrip = 4` (BaySickGraph.h line 321); `BaySickGraph::kMaxScRecvSlots = RoutingGraph::kMaxScRecvsPerStrip` (line 816). `EngineSidechainHelper::kMaxSlots = 4` mirrors it.
 - Also per strip: `kMaxSendsPerStrip = 4`; `kMaxMainOutsPerStrip = MixerChannelIds::kMaxMainOutsPerStrip`.

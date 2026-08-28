@@ -4,7 +4,7 @@ sides genuinely independent times inside a 5-50&nbsp;ms window &mdash; the range
 where a copy reads as a second performer rather than an echo.</p>
 <p>Tempo sync is single-valued for the whole effect; Vocal Doubler has no sync at
 all, because a doubler is about milliseconds rather than beats.</p>
-<div class="codeblock"><div class="codehead">- Source/DSP/DelayDSP.h</div><pre><code>// DelayDSP::recalcTargetDelay -- sync division + Spread/Pan tap offsets
+<div class="codeblock"><div class="codehead">- Source/DSP/DelayDSP.cpp</div><pre><code>// DelayDSP::recalcTargetDelay -- sync division + Spread/Pan tap offsets
 void DelayDSP::recalcTargetDelay()
 {
     float ms = delayMs;
@@ -28,7 +28,7 @@ void DelayDSP::recalcTargetDelay()
     mTargDelayL = juce::jlimit(1.0f, maxDelay, samples - spreadHalf - panOffset);
     mTargDelayR = juce::jlimit(1.0f, maxDelay, samples + spreadHalf + panOffset);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DelayDSP.h</summary><pre><code>// DelayDSP::process -- VocalDoubler branch (verbatim)
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DelayDSP.cpp</summary><pre><code>// DelayDSP::process -- VocalDoubler branch (verbatim)
     // H-8: VocalDoubler Type runs an entirely different algorithm (dual
     // detuned taps, no feedback, no diffusion / lo-fi / mod LFO chain).
     if (mType == Type::VocalDoubler)

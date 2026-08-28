@@ -45,7 +45,56 @@ rather than in constructors, because a page can exist before it is ever framed.<
 //     space.  Positions here are consequently offset by the workspace&#x27;s own
 //     origin within the main window, NOT by screen coordinates -- see
 //     Workspace::originInParentClient.</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WorkspaceWindow.h (contract note, lines 13-42; Workspace anchor, lines 469-533)</summary><pre><code>// WorkspaceWindow.cpp -- WorkspaceWindow::attachTo (full function, lines 667-756)
+
+<div class="codeblock"><div class="codehead">Source\Standalone\WorkspaceWindow.cpp (attachTo WS_CHILD attach, lines 828-832; Workspace::originInParentClient, lines 1432-1447; saveBounds read-back, lines 1257-1278)</div><pre><code>// WorkspaceWindow.cpp -- the WS_CHILD attach (attachTo, lines 828-832)
+    setBounds (saved);
+
+    addToDesktop (0, parent);
+    const auto o = ws.originInParentClient();
+    setTopLeftPosition (saved.getX() + o.x, saved.getY() + o.y);
+
+// WorkspaceWindow.cpp -- Workspace::originInParentClient (full function, lines 1432-1447)
+juce::Point&lt;int&gt; Workspace::originInParentClient() const
+{
+    if (auto* peer = getPeer())
+    {
+        auto&amp; frame = peer-&gt;getComponent();
+        if (&amp;frame != this)
+        {
+            // The frame's origin expressed in OUR space; negating it gives our
+            // position in the frame's space, which is what the child peers'
+            // parent-client coordinates are measured from.
+            const auto frameOrigin = getLocalPoint (&amp;frame, juce::Point&lt;int&gt; (0, 0));
+            return { -frameOrigin.x, -frameOrigin.y };
+        }
+    }
+    return {};
+}
+
+// WorkspaceWindow.cpp -- saveBounds: the parent-client read-back (lines 1257-1278)
+void WorkspaceWindow::saveBounds() const
+{
+    // A programmatic clamp is not a placement the user chose -- see
+    // ScopedSaveSuppress.
+    if (savesSuppressed()) return;
+    if (mPersistKey.isEmpty()) return;
+    // No workspace = no way to convert into workspace-local space; a raw save
+    // here would be the coordinate-space drift bug again.  Keep the last good
+    // save instead.
+    if (workspace() == nullptr) return;
+
+    // Lifetime 1: the map is the one live store.  Workspace-local, not
+    // parent-client -- storing raw peer bounds re-added the workspace origin
+    // on every close/reopen, so windows crept down-right each cycle; and the
+    // workspace moves when the main chrome changes height.
+    auto b = getBounds();
+    if (auto* ws = workspace())
+    {
+        const auto o = ws-&gt;originInParentClient();
+        b.translate (-o.x, -o.y);
+    }
+    sessionBounds()[mPersistKey] = b;</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WorkspaceWindow.cpp (WorkspaceWindow::attachTo, lines 775-864)</summary><pre><code>// WorkspaceWindow.cpp -- WorkspaceWindow::attachTo (full function, lines 775-864)
 void WorkspaceWindow::attachTo (Workspace&amp; ws)
 {
     mWorkspace = &amp;ws;

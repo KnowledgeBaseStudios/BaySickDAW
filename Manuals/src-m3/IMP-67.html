@@ -2,7 +2,7 @@
 ribbon is showing. The Drum Kit is the same window with a drum tab bound to it
 &mdash; the rows become drums instead of pitches.</p>
 
-<div class="codeblock"><div class="codehead">Source\PatternManager.h (PianoNote — the note model, lines 179-220)</div><pre><code>// BaySickBassProcessor.cpp -- the auditionNote atomic-exchange pattern, top of processBlock
+<div class="codeblock"><div class="codehead">Source\BaySickBass\BaySickBassProcessor.cpp (auditionNote drain, top of processBlock) + Source\PatternManager.h (PianoNote, line 179)</div><pre><code>// BaySickBassProcessor.cpp -- the auditionNote atomic-exchange pattern, top of processBlock
     const int auditNote = mAuditionNote.exchange (-1);
     if (auditNote &gt;= 0 &amp;&amp; auditNote &lt;= 127)
     {

@@ -7,7 +7,7 @@ drum named with a number in it can be read as a pitch. Drum pages therefore load
 their samples pinned to a fixed reference note, which is why a kick on a Drums
 tab plays as recorded instead of far too high.</p>
 
-<div class="codeblock"><div class="codehead">- Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickSampleManager::detectRootNote, lines 511-574; loaders at lines 30-88) —</div><pre><code>// BaySickDAWProcessor::resolveProjectFile (PluginProcessor.cpp)
+<div class="codeblock"><div class="codehead">- Source\PluginProcessor.cpp (resolveProjectFile, line 7276) + Source\BaySickPlayer\BaySickPlayerDSP.cpp (detectRootNote, lines 511-574)</div><pre><code>// BaySickDAWProcessor::resolveProjectFile (PluginProcessor.cpp)
 juce::File BaySickDAWProcessor::resolveProjectFile (const juce::String&amp; storedPath) const
 {
     if (storedPath.isEmpty()) return {};

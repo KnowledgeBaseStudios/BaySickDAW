@@ -21,12 +21,77 @@ public:
             mBufs[i] = nullptr;
         mCount = n;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\EngineSidechainHelper.h (ISidechainEngine tag interface + EngineSidechainHelper primitive)</summary><pre><code>class ISidechainEngine
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\EngineSidechainHelper.h (ISidechainEngine, lines 13-19; class EngineSidechainHelper, lines 37-99)</summary><pre><code>class ISidechainEngine
 {
 public:
     virtual ~ISidechainEngine() = default;
     virtual void setSidechainBuffers (juce::AudioBuffer&lt;float&gt;* const* bufs, int count) noexcept = 0;
     virtual float getSidechainLevel() const noexcept = 0;
+};
+
+// EngineSidechainHelper.h -- the per-engine primitive (complete class, lines 37-99)
+class EngineSidechainHelper
+{
+public:
+    static constexpr int kMaxSlots = 4;   // matches RoutingGraph::kMaxScRecvsPerStrip
+
+    // C.4 Phase 2.2 fix (2026-05-01): COPY pointers into our own fixed-size
+    // array.  Caller previously passed a stack-local array; storing its
+    // pointer caused a dangling-pointer crash on the next audio block once
+    // the lambda that built it had returned.  Now we hold our own copy.
+    void setSidechainBuffers (juce::AudioBuffer&lt;float&gt;* const* bufs, int count) noexcept
+    {
+        const int n = juce::jlimit (0, kMaxSlots, count);
+        for (int i = 0; i &lt; n; ++i)
+            mBufs[i] = bufs[i];
+        for (int i = n; i &lt; kMaxSlots; ++i)
+            mBufs[i] = nullptr;
+        mCount = n;
+    }
+
+    // Compute a peak-of-receivers RMS level across all connected SC slots
+    // for the current block.  O(numSlots * numChans * numSamples) - cheap
+    // when count is 0 (early exit) or no slot has data.
+    void updateLevel (int numSamples) noexcept
+    {
+        if (mCount &lt;= 0 || numSamples &lt;= 0)
+        {
+            mLevel.store (0.0f, std::memory_order_relaxed);
+            return;
+        }
+
+        float maxRms = 0.0f;
+        for (int i = 0; i &lt; mCount; ++i)
+        {
+            const auto* b = mBufs[i];
+            if (b == nullptr || b-&gt;getNumSamples() &lt; numSamples) continue;
+            const int chCount = juce::jmin (2, b-&gt;getNumChannels());
+            if (chCount &lt;= 0) continue;
+
+            float sumSq = 0.0f;
+            for (int ch = 0; ch &lt; chCount; ++ch)
+            {
+                const float* d = b-&gt;getReadPointer (ch);
+                for (int s = 0; s &lt; numSamples; ++s) sumSq += d[s] * d[s];
+            }
+            const float rms = std::sqrt (sumSq / (float) (numSamples * chCount));
+            if (rms &gt; maxRms) maxRms = rms;
+        }
+        mLevel.store (maxRms, std::memory_order_relaxed);
+    }
+
+    // UI-thread / modulation-source readable per-block RMS level (0..~1).
+    float getLevel() const noexcept { return mLevel.load (std::memory_order_relaxed); }
+
+    // Direct buffer access for engine internals that want raw SC samples
+    // rather than the pre-computed level (e.g. a per-sample env follower).
+    juce::AudioBuffer&lt;float&gt;* const* getBuffers() const noexcept { return mBufs; }
+    int                              getCount()   const noexcept { return mCount; }
+
+private:
+    juce::AudioBuffer&lt;float&gt;* mBufs[kMaxSlots] { nullptr, nullptr, nullptr, nullptr };
+    int                       mCount { 0 };
+    std::atomic&lt;float&gt;        mLevel { 0.0f };
 };</code></pre></details>
 <pre class="formulas">- `RoutingGraph::kMaxScRecvsPerStrip = 4` (BaySickGraph.h line 321); `BaySickGraph::kMaxScRecvSlots = RoutingGraph::kMaxScRecvsPerStrip` (line 816). `EngineSidechainHelper::kMaxSlots = 4` mirrors it.
 - Also per strip: `kMaxSendsPerStrip = 4`; `kMaxMainOutsPerStrip = MixerChannelIds::kMaxMainOutsPerStrip`.

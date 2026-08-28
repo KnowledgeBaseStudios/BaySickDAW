@@ -29,7 +29,7 @@ inline int snapDivToTicks (int idx) noexcept
         default: return 0;                   // 0 Off / 1 Line: not a fixed grid
     }
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickConstants.h (kTicksPerBeat, snap grid)</summary><pre><code>// PatternManager.h -- beats&lt;-&gt;ticks converters (full functions, lines 9-19)
+<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (beatsToTicks / ticksToBeats, lines 12-19; struct ArrangementBlock, lines 353-441) + Source\BaySickConstants.h (kTicksPerBeat, snap grid, block above)</summary><pre><code>// PatternManager.h -- beats&lt;-&gt;ticks converters (full functions, lines 9-19)
 // QA-Ee (96 PPQ): beats&lt;-&gt;ticks converters.  kTicksPerBeat (a plain int) lives
 // in BaySickConstants.h; these need juce::int64 so they live here, where every
 // tick consumer already includes PatternManager.h.
@@ -40,7 +40,61 @@ inline juce::int64 beatsToTicks (double beats) noexcept
 inline double ticksToBeats (juce::int64 ticks) noexcept
 {
     return (double) ticks / (double) kTicksPerBeat;
-}</code></pre></details>
+}
+
+// PatternManager.h -- struct ArrangementBlock (verbatim, lines 353-393 + 434-441)
+struct ArrangementBlock
+{
+    // kLengthTicksUnset (-1) = &quot;use lengthBars * 4&quot; (bar-precision length).
+    static constexpr juce::int64 kLengthTicksUnset = -1;
+
+    int  trackRow     { 0 };   // which row this block sits on (free-form, user assigns)
+    int  patternIndex { 0 };
+    // 8A (QA-G3Smoke, G-5): the block START is beats-authoritative -- ONE double
+    // in the musical map-position domain, read by scheduler, ruler, playhead and
+    // paint alike.  The old startBar(int)+startTicks(int64) pair let the bar-
+    // index and map-position domains diverge (they agreed only with no TS
+    // marker); the bar index is now DERIVED for display + serialization only.
+    // May be negative (slip-edit drag-left exposes pre-roll audio).  XML keeps
+    // writing/reading startBar+startTicks -- full precision, no migration.
+    double startBeats { 0.0 };
+    int    lengthBars { 4 };
+    // QA-Ee (96 PPQ): exact length in TICKS for sub-bar precision (audio clips
+    // dropped by Record naturally end mid-bar).  kLengthTicksUnset (-1) = use
+    // lengthBars * 4.  setLengthBeats() bridges a beats value -&gt; ticks; a user
+    // resize wanting bar precision sets lengthTicks back to kLengthTicksUnset.
+    juce::int64 lengthTicks { kLengthTicksUnset };
+
+    // Display-only derived bar index (floor; a negative slip-edit start floors
+    // to its containing bar).
+    int displayStartBar() const noexcept { return (int) std::floor (startBeats / 4.0); }
+
+    void setStartBeats  (double beats) noexcept { startBeats = beats; }
+    void setLengthBeats (double beats) noexcept { lengthTicks = (beats &gt; 0.0) ? beatsToTicks (beats) : kLengthTicksUnset; }
+    bool layerTrack   { true };
+
+    // Phase 4B - clip type + audio/automation fields
+    ClipType     clipType           { ClipType::Pattern };
+    juce::String audioFilePath      {};                 // Audio clips only
+    juce::String displayAlias       {};                 // optional per-clip display name (Browser rename)
+    float        pitchSemitones     { 0.f };            // per-clip pitch shift (semitones)
+    float        originalBPM        { 120.f };          // original BPM for time-stretch
+    bool         stretchMode        { true };           // true=Stretch (pitch locked), false=Resample
+    bool         muted              { false };          // muted clips are skipped during playback
+
+    // Phase 4C - automation lane data (only used for ClipType::Automation)
+    AutomationLane automationLane;
+
+    ...
+
+    // QA-G Task 5 (slice content-offset): pattern-content phase for this
+    // block, in grid ticks (384/bar).  The block plays its pattern starting
+    // at this offset into the cycle; preview + playback tile from it, so a
+    // sliced piece keeps its notes in place instead of restarting.  Only
+    // meaningful for ClipType::Pattern (Audio continues via
+    // contentStartSamples; Automation lanes are physically split at the cut).
+    juce::int64 contentOffsetTicks { 0 };
+};</code></pre></details>
 <pre class="formulas">- Tick model: `kTicksPerBeat = 96` (96 PPQ) — every straight AND triplet division is an integer tick count: Bar=384, Beat=96, 1/2 Beat=48, 1/3 Beat (8th triplet)=32, Step (1/16)=24, 1/2 Step (1/32)=12, 1/3 Step (1/32 triplet)=8, 1/4 Step (1/64)=6, 1/6 Step (1/64 triplet)=4. Rides ABOVE the int64-sample transport (QA-Ed). Converters: `beatsToTicks = llround(beats * 96)`, `ticksToBeats = ticks / 96.0`.
 - Unified snap: 11-index scheme shared by Builder / PianoRoll / Record-Quantize (`kNumUnifiedSnapDivs = 11`; idx 0 = Off, 1 = Line [dynamic ladder Bar/Beat/1-8/1-16/1-32/1-64, rung live when g/384 * pixelsPerBar &gt;= min-line-px], 2..10 = fixed tick grid above).
 - Note persistence: `PianoNote.startTicks`/`durationTicks` (serialized `st`/`dt`) are AUTHORITATIVE ON DISK; startBeat/durationBeats are the in-memory editing values, kept tick-aligned by the snap engine, derived at save, refilled at load (legacy beats migrated). Field-order invariant: tick fields and later additions stay LAST — positional brace-inits elsewhere stop at field 7 (`type`). Note defaults: midiNote 60, durationBeats 0.25 (= 24 ticks = 1/16), velocity 0.8.

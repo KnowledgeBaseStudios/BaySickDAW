@@ -45,20 +45,86 @@ project.</p>
         {
             mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex] = 0;   // wake
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\Engine\Tasks\InstStripTask.cpp (the idle-suspend gate + predicates, lines 203-271)</summary><pre><code>    // QA-C DSP-10 (2026-05-10): audition-pending peek so the idle-suspend
-    // predicate wakes the chain when an audition note is queued via
-    // auditionNote(int).  Without this, the dispatcher skips processBlock
-    // and the audition is silently swallowed.
-    bool isAuditionPending() const noexcept
-    {
-        return mAuditionNote.load (std::memory_order_acquire) != -1;
-    }
+<details class="fullfn"><summary>Full function &mdash; Source\Engine\Tasks\InstStripTask.cpp (InstStripTask::run, line 37; idle-suspend gate, lines 198-266)</summary><pre><code>// InstStripTask.cpp -- InstStripTask::run() (head, lines 37-45; idle gate, lines 198-266)
+void InstStripTask::run()
+{
+    if (mEngine == nullptr || mOutputBuffer == nullptr || mCtx == nullptr
+        || mGraph == nullptr || mProcessor == nullptr)
+        return;
 
-    // QA-G3Smoke Task 12: slide-tail peek for the same idle-suspend predicate.
-    // SlideSampler voices (gesture + ring-out tails + release zones) don&#x27;t
-    // count in sfizz&#x27;s getNumActiveVoices, so without this term the dispatcher
-    // suspends the chain mid-tail and the ring-out freezes.
-    bool isSlideActive() const noexcept { return mSlideSampler.isActive(); }</code></pre></details>
+    const int n = mCtx-&gt;numSamples;
+    if (n &lt;= 0)
+        return;
+    ...
+    // ── Idle suspend (sfizz-source only) ─────────────────────────────────────
+    // When the tab has no MIDI activity AND sfizz reports 0 active voices,
+    // stop rendering the whole chain.  Wakes on the next block where any gate
+    // fails.  Live-input Inst tabs are NOT suspended (live audio + arm/listen
+    // can fire even with no MIDI).
+    //
+    // The skip takes out the insert chain as well as the engine, so it cannot
+    // be instantaneous: whatever the rack / NAM cab is still ringing would be
+    // cut off in one sample.  The hold expiring starts a fade instead, the
+    // chain keeps running at falling gain for its duration, and only then does
+    // the cheap cleared path take over (IdleSuspendFade.h).  Stays unity on
+    // every non-sfizz strip, where isUnity() below skips the ramp outright.
+    IdleSuspendFade::Ramp suspendRamp;
+    if (sfizzActive)
+    {
+        int activeVoices = 0;
+        if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
+            activeVoices = g-&gt;getNumActiveVoices();
+        if (activeVoices == 0)
+            if (auto* b = mProcessor-&gt;getBaySickBasses (mIndex))
+                activeVoices = b-&gt;getNumActiveVoices();
+
+        const bool midiEmpty = mCtx-&gt;instPageMidi != nullptr
+                            &amp;&amp; mCtx-&gt;instPageMidi[mIndex].getNumEvents() == 0;
+        const bool noVoices  = activeVoices == 0;
+
+        // QA-C DSP-10 (2026-05-10): peek audition state from any sfizz engine
+        // bound to this Inst index.  An audition queued via auditionNote(int)
+        // must wake the chain so processBlock can mAuditionNote.exchange(-1)
+        // and produce sound.  Without this, audition during idle-suspend is
+        // silently swallowed.
+        bool auditionPending = false;
+        if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
+            auditionPending = g-&gt;isAuditionPending();
+        if (! auditionPending)
+            if (auto* b = mProcessor-&gt;getBaySickBasses (mIndex))
+                auditionPending = b-&gt;isAuditionPending();
+
+        // QA-G3Smoke Task 12: SlideSampler voices (gesture + ring-out tails)
+        // don&#x27;t count in sfizz&#x27;s active-voice total -- without this term the
+        // chain suspends mid-slide and the tail freezes.
+        bool slideActive = false;
+        if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
+            slideActive = g-&gt;isSlideActive();
+        if (! slideActive)
+            if (auto* b = mProcessor-&gt;getBaySickBasses (mIndex))
+                slideActive = b-&gt;isSlideActive();
+
+        bool holdExpired = false;
+        if (midiEmpty &amp;&amp; noVoices &amp;&amp; ! auditionPending &amp;&amp; ! slideActive)
+        {
+            auto&amp; counter = mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex];
+            if (counter &gt;= BaySickDAWProcessor::kIdleSuspendBlocks)
+                holdExpired = true;
+            else
+                ++counter;
+        }
+        else
+        {
+            mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex] = 0;   // wake
+        }
+
+        suspendRamp = mSuspendFade.advance (holdExpired, n, mProcessor-&gt;mSampleRate);
+        if (suspendRamp.suspended)
+        {
+            mOutputBuffer-&gt;clear();   // faded out already - suspended this block
+            return;
+        }
+    }</code></pre></details>
 <pre class="formulas">- Suspend predicate (all four must hold to advance the idle counter): `midiEmpty &amp;&amp; noVoices &amp;&amp; !auditionPending &amp;&amp; !slideActive`. Any failure resets the counter to 0 (immediate wake). Applies to sfizz-source Inst tabs and the Rusty kit only; live-input Inst tabs are NEVER suspended (live audio + arm/listen can fire with no MIDI).
 - `isAuditionPending()` = `mAuditionNote.load(memory_order_acquire) != -1` — a peek on the same atomic the engine-audition pattern uses (`processBlock` opens with `mAuditionNote.exchange(-1)`), added QA-C DSP-10 on the 3 sfizz engines (Guitars / Basses / RustyDrums) so an audition queued during suspend wakes the chain instead of being silently swallowed.
 - `isSlideActive()` — SlideSampler voices (gesture + ring-out tails + release zones) don&#x27;t count in sfizz&#x27;s `getNumActiveVoices`; without this term the chain suspends mid-slide and the tail freezes (QA-G3Smoke Task 12).

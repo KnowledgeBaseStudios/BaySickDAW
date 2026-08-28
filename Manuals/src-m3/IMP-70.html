@@ -32,6 +32,66 @@ name exactly as you typed it.</p>
 // `library:` / `mysamples:` string, not copied - they are reachable from any
 // project on this install, so a copy would duplicate factory content per
 // project.  Only volatile sources (Downloads, Desktop, USB) land in Samples\.</code></pre></div>
+<div class="codeblock"><div class="codehead">Source\ProjectManager.cpp (isDirty line 96, markSaved 101, markDirty 106, clearDirty 118 + writeBackup head, line 205)</div><pre><code>// ProjectManager.cpp -- the dirty trio (verbatim, lines 96-126) + writeBackup head (lines 205-229)
+bool ProjectManager::isDirty() const
+{
+    return mProcessor.mTxTracker.isDirty();
+}
+
+void ProjectManager::markSaved()
+{
+    mProcessor.mTxTracker.onSave();
+}
+
+void ProjectManager::markDirty()
+{
+    if (mIgnoreDirty) return;
+    // TS7 §3.3: the stamp moves on EVERY edit -- version capture needs &quot;did
+    // anything change since the last pass&quot;.  QA-UndoCoverage Task 9: the bool
+    // half is GONE; dirty is the transaction-pointer mismatch, fed by the
+    // editor&#x27;s UndoManager ChangeListener.  The ~18 direct markDirty call
+    // sites stay AS the stamp feed (removing them would shrink version
+    // capture&#x27;s change-detection scope).
+    mChangeStamp.fetch_add (1, std::memory_order_relaxed);
+}
+
+void ProjectManager::clearDirty()
+{
+    // QA-UndoCoverage Task 9 -- load boundary: loads don&#x27;t transact.  History
+    // + snapshot store + pointers reset together so the first post-load edit
+    // is row 1 and the project opens clean.
+    mProcessor.mUndoManager.clearUndoHistory();
+    UndoSnapshotStore::sweepAll();
+    mProcessor.mTxTracker.onLoadReset();
+}
+
+...
+
+bool ProjectManager::writeBackup()
+{
+    // Two paths: project open -&gt; backup goes inside that project&#x27;s Backups/.
+    // No project open -&gt; backup goes under Documents\BaySickDAW\Backups\Unsaved\
+    // so the user can recover from an unsaved session after a crash.
+    juce::File backupsDir;
+    juce::String stem;
+
+    if (hasProject())
+    {
+        backupsDir = mCurrentFolder.getChildFile (&quot;Backups&quot;);
+        stem = mCurrentFolder.getFileName();
+
+        // Migrate legacy: any old `project.xml.bak` at the project root from
+        // pre-2026-04-23 builds is silently removed (it was never user-loadable).
+        auto legacy = mCurrentFolder.getChildFile (&quot;project.xml.bak&quot;);
+        if (legacy.existsAsFile()) legacy.deleteFile();
+    }
+    else
+    {
+        backupsDir = AppPaths::appRoot()
+                          .getChildFile (&quot;Backups&quot;)
+                          .getChildFile (&quot;Unsaved&quot;);
+        stem = &quot;Untitled&quot;;
+    }</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\ProjectManager.h (folder conventions, dirty model)</summary><pre><code>// ProjectManager.cpp -- ProjectManager::saveProject (full function, lines 329-340)
 bool ProjectManager::saveProject()
 {

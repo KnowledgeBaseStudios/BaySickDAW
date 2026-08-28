@@ -3,7 +3,7 @@ what size the room is; the tail says what it is made of. A bass multiplier lets
 low frequencies ring longer or shorter than the rest, which is the difference
 between a hall and a boomy cupboard.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/ReverbDSP.h</div><pre><code>// ReverbDSP::updateFeedback -- RT60 tail model + bass-multiplier coefficients
+<div class="codeblock"><div class="codehead">- Source/DSP/ReverbDSP.cpp</div><pre><code>// ReverbDSP::updateFeedback -- RT60 tail model + bass-multiplier coefficients
 void ReverbDSP::updateFeedback()
 {
     if (mSampleRate &lt;= 0.0) return;
@@ -25,7 +25,7 @@ void ReverbDSP::updateFeedback()
     mBassLPCoef  = std::exp (-pi2 * std::max (1.0f, mBassCrossHz) / (float) mSampleRate);
     mBassGainAdd = mBassMult - 1.0f;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ReverbDSP.h</summary><pre><code>// ReverbDSP::process -- FDN tail + ER + bass-shelf core (verbatim)
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ReverbDSP.cpp</summary><pre><code>// ReverbDSP::process -- FDN tail + ER + bass-shelf core (verbatim)
         // §8d: multi-tap early reflections (3 taps per line at prime-ratio
         // positions, natural decay envelope; ER taps stay as integer reads -
         // per spec, early reflections should keep crisp pre-echo character).

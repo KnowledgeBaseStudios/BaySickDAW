@@ -1,24 +1,47 @@
 <p>Reshapes an electric guitar toward an acoustic.</p>
 
-<div class="codeblock"><div class="codehead">Source\DSP\AcousticSimulatorStyleDSP.cpp</div><pre><code>// AcousticSimulatorStyleDSP::rebuildBodyEQ — the per-mode voicing curves
-    const float depth = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
+<div class="codeblock"><div class="codehead">Source\DSP\AcousticSimulatorStyleDSP.cpp (rebuildBodyEQ - the per-mode voicing curves)</div><pre><code>    const float depth = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
+
+    juce::dsp::IIR::Coefficients&lt;float&gt;::Ptr a, b;
+
     switch (mMode)
     {
-        case Mode::Standard:   // Balanced dreadnought: low-mid scoop + presence.
-            a = makePeakFilter (mSampleRate, 600.0f, 1.2f, dbToGain (-8.0f * depth));
-            b = makePeakFilter (mSampleRate, 4000.0f, 0.9f, dbToGain (4.0f * depth));
+        case Mode::Standard:
+            // Balanced dreadnought: low-mid scoop + presence.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 600.0f, 1.2f, juce::Decibels::decibelsToGain (-8.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 4000.0f, 0.9f, juce::Decibels::decibelsToGain (4.0f * depth));
             break;
-        case Mode::Jumbo:      // Massive low shelf + low-mid cut -- big-body bloom.
-            a = makeLowShelf   (mSampleRate, 110.0f, 0.7f, dbToGain (10.0f * depth));
-            b = makePeakFilter (mSampleRate, 550.0f, 1.0f, dbToGain (-5.0f * depth));
+        case Mode::Jumbo:
+            // Massive low shelf + low-mid cut -- big-body bloom.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makeLowShelf
+                    (mSampleRate, 110.0f, 0.7f, juce::Decibels::decibelsToGain (10.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 550.0f, 1.0f, juce::Decibels::decibelsToGain (-5.0f * depth));
             break;
-        case Mode::Enhanced:   // Hi-fi sheen: strong high shelf + supporting low shelf.
-            a = makeHighShelf  (mSampleRate, 6000.0f, 0.7f, dbToGain (9.0f * depth));
-            b = makeLowShelf   (mSampleRate, 180.0f, 0.7f, dbToGain (4.0f * depth));
+        case Mode::Enhanced:
+            // Hi-fi sheen: strong high shelf + supporting low shelf.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf
+                    (mSampleRate, 6000.0f, 0.7f, juce::Decibels::decibelsToGain (9.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makeLowShelf
+                    (mSampleRate, 180.0f, 0.7f, juce::Decibels::decibelsToGain (4.0f * depth));
             break;
-        case Mode::Piezo:      // Undersaddle quack @ ~2.5 kHz + tight low cut.
-            a = makePeakFilter (mSampleRate, 2500.0f, 1.5f, dbToGain (10.0f * depth));
-            b = makeHighPass   (mSampleRate, 100.0f, 0.7f);
+        case Mode::Piezo:
+            // Undersaddle quack @ ~2.5 kHz + tight low cut.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 2500.0f, 1.5f, juce::Decibels::decibelsToGain (10.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighPass
+                    (mSampleRate, 100.0f, 0.7f);
+            break;
+        case Mode::User:
+        default:
+            // User mode bypasses the body EQ bank (Convolution handles it).
+            // Set both stages to neutral 1.0 gain peak filters.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 1000.0f, 0.7f, 1.0f);
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 1000.0f, 0.7f, 1.0f);
             break;
     }</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticSimulatorStyleDSP.cpp</summary><pre><code>void AcousticSimulatorStyleDSP::rebuildPickupEQ()

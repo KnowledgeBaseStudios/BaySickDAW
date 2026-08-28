@@ -25,7 +25,7 @@ reserved and unused:</p>
 <p>A hosted effect can also take a sidechain: the host lends the plugin its
 strip's sidechain receive buffer for exactly one call, then takes it back.</p>
 
-<div class="codeblock"><div class="codehead">- Source\Hosting\PluginBridgeProtocol.h (the whole wire format, kProtocolVersion = 6)</div><pre><code>// Hosting::Bridge protocol version history + version constant (PluginBridgeProtocol.h)
+<div class="codeblock"><div class="codehead">Source\Hosting\PluginBridgeProtocol.h (kProtocolVersion = 6 + packed wire structs, lines 97-182)</div><pre><code>// Hosting::Bridge protocol version history + version constant (PluginBridgeProtocol.h)
 // 6 (2026-08-10): ScanFile / ScanResult -- plugin SCANNING moved out of
 // process.  It used to run in-process on a background thread, which broke
 // JUCE&#x27;s documented &quot;VST3 scan must be on the message thread&quot; contract AND let
@@ -37,7 +37,79 @@ inline constexpr std::uint32_t kProtocolVersion = 6;
 // The ChildProcess handshake id.  Both sides must agree, so it lives here with
 // the rest of the protocol rather than being redeclared in each .cpp (it was,
 // identically, in two).
-inline constexpr const char* kBridgeUid = &quot;BaySickPluginBridge&quot;;</code></pre></div>
+inline constexpr const char* kBridgeUid = &quot;BaySickPluginBridge&quot;;
+
+// PluginBridgeProtocol.h -- packed wire structs (verbatim, lines 97-158 + 178-182)
+#pragma pack (push, 1)
+
+// Every message opens with this.  `payloadBytes` counts what follows the
+// header, so a reader can skip a message type it does not know.
+struct Header
+{
+    std::uint32_t type;          // MessageType
+    std::uint32_t payloadBytes;
+    std::uint32_t sequence;      // echoed in replies, so a late reply is discardable
+    std::uint32_t reserved;      // keeps the header 16 bytes on both architectures
+};
+
+struct HandshakePayload
+{
+    std::uint32_t protocolVersion;
+    std::uint32_t hostArchBits;   // 32 or 64 -- logged, never used to branch layout
+};
+
+struct PreparePayload
+{
+    double        sampleRate;
+    std::uint32_t maxBlockSize;
+    std::uint32_t numChannels;
+};
+
+// Per-block MIDI cap.  A block never carries anywhere near this; the bound
+// exists so a runaway buffer cannot overrun the control header&#x27;s fixed area.
+inline constexpr std::uint32_t kMaxMidiBytesPerBlock = 4096;
+
+// v3: NOTHING per-block rides this protocol.  Audio, MIDI, transport and the
+// reply all live in the shared mapping&#x27;s control header (see
+// BridgeSharedMemory.h SharedBlockControl), and a pair of named auto-reset
+// events is the rendezvous -- the audio thread never touches the pipe.  MIDI
+// wire format inside the control area, written and read by hand rather than by
+// copying JUCE&#x27;s MidiBuffer storage (the helper may be x86): per event,
+// int32 samplePosition, int32 numBytes, then numBytes of raw MIDI.
+
+struct SetParameterPayload
+{
+    std::uint32_t paramIndex;
+    float         value01;
+};
+
+struct EditorPayload
+{
+    std::uint64_t parentWindowHandle;   // HWND as an integer -- never a pointer type
+    std::int32_t  width;
+    std::int32_t  height;
+};
+
+struct LoadReplyPayload
+{
+    std::uint32_t ok;                 // 0 = failed; message text follows on Error
+    std::uint32_t numParameters;
+    std::uint32_t latencySamples;
+    std::uint32_t sharedMemoryBytes;
+    // v3: what the loaded plugin actually IS.  A 32-bit plugin cannot be
+    // opened by the 64-bit scanner, so its scan-time description is a
+    // filename-only guess -- the first real load corrects it from here.
+    std::uint32_t isInstrument;       // 0/1
+    std::uint32_t acceptsMidi;        // 0/1
+};
+
+...
+
+#pragma pack (pop)
+
+// A padding difference between the x64 and x86 builds would silently shift
+// every field after it, so the layout is asserted rather than trusted.
+static_assert (sizeof (Header)              == 16, &quot;Bridge::Header must be 16 bytes on every target&quot;);</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; - Source\Hosting\PluginBridgeProtocol.h (the whole wire format, kProtocolVersion = 6)</summary><pre><code>enum class MessageType : std::uint32_t
 {
     // host -&gt; helper

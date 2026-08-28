@@ -38,33 +38,68 @@ namespace WindowChrome
     // and it minimises with the owner.  That is exactly the relationship wanted.
     void ownToMainWindow (juce::Component&amp; win, const juce::Component&amp; insideMain);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WindowChrome.h (shared chrome metrics)</summary><pre><code>// WorkspaceWindow.h -- the THREE-LIFETIME persistence model (verbatim, lines 130-156)
-    // QA-Layout T5: the THREE-LIFETIME model (Jeff&#x27;s 2026-07-28 ruling).
-    //
-    //   Lifetime 1 -- the in-memory map -- is the ONE live store.  EVERY
-    //   window (Disk or Session) writes it on move/resize/close and reads it
-    //   on open, so close/reopen returns to the same spot universally.
-    //   Lifetime 2 -- settings.xml -- written ONCE at app exit from a
-    //   FILTERED view of the map (writeSessionToSettings): sizes for every
-    //   Disk-marked window, placement only for keys registered
-    //   placement-persistent (the four default tabs).  Read only as a seed
-    //   when the map misses.  The old parse-and-rewrite-per-close is gone.
-    //   Lifetime 3 -- the project file -- StandaloneEditor serializes the
-    //   full map + per-window open state and REPLACES the map on load.
-    //
-    //   Disk    - eligible for the settings.xml exit write.  Jeff, 2026-08-04:
-    //             this is ONLY the four default tabs (Builder / Mixer /
-    //             Effects / Piano Roll), size AND position.  Nothing else goes
-    //             in that file.  It previously defaulted to Disk for every page
-    //             window and wrote every window&#x27;s SIZE globally, gating only
-    //             POSITION to the four -- the exact inverse of the ruling, and
-    //             what left 143 records in settings.xml feeding stale sizes to
-    //             players on every cold start.
-    //   Session - map only.  EVERY other window: players, effect windows,
-    //             satellites.  Their size and placement are session state
-    //             (lifetime 1) and project content (lifetime 3); a cold start
-    //             with no project opens them at their DEFAULT size.
-    enum class Persistence { Disk, Session };</code></pre></details>
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WindowChrome.cpp (paintFrame line 24, paintTitleBar line 31, applyToDesktopWindow line 47, ownToMainWindow line 53)</summary><pre><code>// WindowChrome.cpp -- the shared chrome painters + ownership helper (lines 24-84)
+    void paintFrame (juce::Graphics&amp; g, juce::Rectangle&lt;int&gt; full)
+    {
+        g.fillAll (kFrameBg);
+        g.setColour (kFrameEdge);
+        g.drawRect (full, 1);
+    }
+
+    void paintTitleBar (juce::Graphics&amp; g, juce::Rectangle&lt;int&gt; area,
+                        bool live, const juce::String&amp; title)
+    {
+        g.setColour (titleBg (live));
+        g.fillRect (area);
+
+        if (title.isEmpty()) return;
+
+        g.setColour (kTitleText);
+        g.setFont (juce::Font (13.0f));
+        // Left-aligned with the same 8px inset the PageMenuBar uses, so a
+        // desktop window's title sits where a contained window's does.
+        g.drawText (title, area.reduced (8, 0), juce::Justification::centredLeft,
+                    true);
+    }
+
+    void applyToDesktopWindow (juce::DocumentWindow&amp; win)
+    {
+        win.setUsingNativeTitleBar (false);
+        win.setTitleBarHeight (kTitleH);
+    }
+
+    void ownToMainWindow (juce::Component&amp; win, const juce::Component&amp; insideMain)
+    {
+        auto* mainTop = insideMain.getTopLevelComponent();
+        if (mainTop == nullptr || mainTop == &amp;win) return;
+
+        auto* mainPeer = mainTop-&gt;getPeer();
+        auto* ownPeer  = win.getPeer();
+        if (mainPeer == nullptr || ownPeer == nullptr) return;
+
+       #if JUCE_WINDOWS
+        // NOT addToDesktop (flags, nativeParent).  That was the first attempt and
+        // it is wrong: JUCE passes the handle to CreateWindowEx as the PARENT and
+        // ORs in WS_CHILD (juce_Windowing_windows.cpp, "if (parentToAddTo !=
+        // nullptr) result |= WS_CHILD"), which makes a CHILD window -- clipped to
+        // the app frame, undraggable outside it, and with getBounds() silently
+        // switching to parent-client space so any save/restore of bounds around
+        // the call re-plants the window somewhere else.
+        //
+        // OWNED is a different relationship and Win32 has no JUCE-level API for
+        // it: setting GWLP_HWNDPARENT on an ALREADY-CREATED top-level window sets
+        // the owner WITHOUT WS_CHILD.  That gives exactly what §9.4 asks for --
+        // the OS keeps it above its owner, above nothing else, and minimises it
+        // with the owner -- while it stays a real top-level window the user can
+        // drag anywhere on screen.
+        auto* hwnd  = static_cast&lt;HWND&gt; (ownPeer -&gt;getNativeHandle());
+        auto* owner = static_cast&lt;HWND&gt; (mainPeer-&gt;getNativeHandle());
+        if (hwnd != nullptr &amp;&amp; owner != nullptr)
+            SetWindowLongPtr (hwnd, GWLP_HWNDPARENT, (LONG_PTR) owner);
+       #else
+        juce::ignoreUnused (mainPeer, ownPeer);
+       #endif
+    }</code></pre></details>
 <pre class="formulas">- Chrome metrics: `WindowChrome::kTitleH = 26`, `WindowChrome::kBorderPx = 4`. `WorkspaceWindow::kTitleH` / `kBorderPx` are ALIASES of these (constexpr, ~40 call sites keep the old names). DocumentWindow&#x27;s own titleBarHeight also happens to be 26 — they match by coincidence unless routed through `applyToDesktopWindow`, which sets both the non-native title bar and the shared height.
 - Anti-degenerate floor: `kMinDegenerateW = 120`, `kMinDegenerateH = 80` (installed in ctor; only floor before a real default is known). Placeholder open size 480x320.
 - T8 sizing rule: minimum == default (&quot;smallest still readable&quot; measured numbers serve as both). `setDefaultWindowSize` sets default AND minimum; `setResizeFloor` lowers ONLY the floor (hosted plugin surfaces scale, ours don&#x27;t) and must be called AFTER `setDefaultWindowSize`.

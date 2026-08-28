@@ -284,3 +284,60 @@ clarinet", "stuffing a pillow in the drum"), compact factual parallels
 shortcut, range, and tradeoff. Manual regenerated after each group;
 89 topics still place, all spot-checked callout ids present. Three
 commits, one per group, per the plan.
+
+## 2026-08-28 - two Jeff-reported layout fixes (mid-Task-11)
+
+Jeff exploring the regenerated manual surfaced two rendering defects,
+both pre-existing: (1) In The Weeds code excerpts painted past the page
+edge with no way to reach the clipped text - the stylesheet had NO pre
+rule at all; pre now scrolls inside its own block (manual.css,
+0749529a). (2) At any window narrower than fullscreen, TEXT and TABLES
+ran under the right edge: the content column is deliberately pinned at
+fullscreen width (screenshots never rescale, scroll vertical-only,
+Jeff's earlier ruling) and the text was pinned with it. Paragraphs,
+tables, headings and code blocks now cap at the LIVE window width with
+a right gutter mirroring the left; the figure strip alone keeps the
+pinned width, and print is exempt so the PDFs stay full-width
+(generate-manual.py, e680d026). Both verified in the browser by DOM
+measurement with the pinned-wider-than-window case reproduced.
+
+## 2026-08-28 - Task 11 - In The Weeds audit (5C)
+
+The audit (one sweep agent, 3943 quoted lines substring-matched against
+the live tree, every path and line citation resolved): NO excerpt is
+gone; genuine code drift is three topics totaling five lines; the
+dominant defect was CITATION - nine topics quoted code that does not
+live in the file their codehead names, and six carried stale line
+numbers. All premises spot-verified here before acting.
+
+Fixed directly: the six .h->.cpp codeheads (Chorus/Flanger/Phaser/
+Delay/Reverb/DeReverb all quote the .cpp), IMP-50's citation (VUMeter
+lives header-inline at SharedUI.h:1319; the old head cited SharedUI.cpp
+lines past EOF), stale line ranges in IMP-63/66/69/73/76, mismatched
+block-1 heads in IMP-67/69/74 (each quoted a different file than
+named), the 31->32 band-field count in IMP-15, and the 148->154 line
+count in IMP-49. Drift rewrites from live source: IMP-16's linear-phase
+matrix block still showed the pre-QA-EqFlagship magnitude-only design -
+replaced with the live complex-response matrix (setResponseMatrix,
+std::complex domains; the formulas block was already current); IMP-36's
+darkenDb refactor; IMP-88's parameter spelling; IMP-30's paraphrased
+voicing table replaced with the verbatim function INCLUDING the
+Mode::User case it omitted. One SOURCE bug the audit caught fixed in
+code: MicPlacementDSP.cpp's distance-law comment claimed values
+(1cm=1.0, 30cm=~0.6) its own formula contradicts - now states the real
+1/sqrt(r)-at-30cm law (1cm clamps to 1.5, 30cm=1.0, 150cm=~0.45).
+
+Coverage per 5C ("code on everything... not just here and there"): two
+agents filled the sixteen thin topics with verbatim, line-cited
+excerpts - IMP-56 (the ONE code-free topic) gained the SpectrumFeed
+seqlock pair; banner-only or stub blocks in IMP-27/53/54/55/58/59/60/
+64/65/69/70/72/77/80/84 gained the real machinery (WS_CHILD attach,
+window chrome painters, the UND/PF counters, the full MP3 decode loop,
+the sidechain helper, the routing rebuild, the MIDI-learn handshake,
+the idle-suspend predicate gate, StructuralOpAction, the wire structs,
+the sqrt-N unison law, ArrangementBlock, dirty-flag + backup, preset
+XML IO). Every fill spot-verified against source here (eight distinct
+quotes re-checked line-for-line). The agents also caught two more
+drifted citations in passing (IMP-58 attachTo, IMP-60 rebuild ranges) -
+relabeled. 89/89 topics still place; the manual grew to 1.3 MB with
+the new excerpts.

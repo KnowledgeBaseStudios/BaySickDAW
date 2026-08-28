@@ -138,9 +138,9 @@ void MicPlacementDSP::updateCoefs()
     *mOffAxisShelf.state = *darkC;
 
     // ── Distance + polar gain attenuation.
-    //    Distance follows ~1/r law clamped to a sane near-field range
-    //    (1cm = 1.0, 30cm = ~0.6, 150cm = ~0.25).  Polar gain layers on
-    //    top.
+    //    Distance follows 1/sqrt(r) normalized at 30cm, clamped to a sane
+    //    near-field range (1cm clamps to 1.5, 30cm = 1.0, 150cm = ~0.45).
+    //    Polar gain layers on top.
     const float distGain = juce::jlimit (0.1f, 1.5f,
                                            1.0f / std::sqrt (mDistanceCm / 30.0f));
     const float polarGain = polarResponse (mPolar, mAngleDeg);

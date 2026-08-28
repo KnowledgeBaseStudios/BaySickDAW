@@ -2,7 +2,7 @@
 problem it was built for &mdash; a voice recorded in a room that was too live
 &mdash; and poorly as a general effect.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/DeReverbDSP.h</div><pre><code>// DeReverbDSP::processFrame -- tail estimation + reduction gain core
+<div class="codeblock"><div class="codehead">- Source/DSP/DeReverbDSP.cpp</div><pre><code>// DeReverbDSP::processFrame -- tail estimation + reduction gain core
 const float reduction = 2.0f * (reductionPct / 100.0f);       // 0..2x over-subtract
 const float mix       = mixPct / 100.0f;
 constexpr float kGainFloor = 0.2f;                            // -14 dB max cut
@@ -28,7 +28,7 @@ for (int k = 0; k &lt; kBins; ++k)
 
     hist[(size_t) k] = mag;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DeReverbDSP.h</summary><pre><code>// DeReverbDSP::updateDecay -- T60 semantics of the Tail knob
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DeReverbDSP.cpp</summary><pre><code>// DeReverbDSP::updateDecay -- T60 semantics of the Tail knob
 void DeReverbDSP::updateDecay()
 {
     const double sr    = juce::jmax (8000.0, mSampleRate);

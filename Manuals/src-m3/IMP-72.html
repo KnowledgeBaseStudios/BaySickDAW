@@ -36,6 +36,60 @@ mic placements should not also swap your vocal chain.</p>
 // name).  Loading uses setStateInformation so per-DSP state (Type
 // umbrella, A/B snapshots, etc.) round-trips faithfully.
 // ─────────────────────────────────────────────────────────────────────────────</code></pre></div>
+<div class="codeblock"><div class="codehead">Source\Standalone\EffectPresetIO.cpp (savePreset, line 213; loadPreset, line 250; &lt;EffectPreset&gt; wrapper tags, line 149)</div><pre><code>// EffectPresetIO.cpp -- wrapper tags (verbatim, lines 149-154) + savePreset (213-248) + loadPreset (250-256)
+    constexpr const char* kRootTag    = &quot;EffectPreset&quot;;
+    constexpr const char* kBlobAttr   = &quot;blob&quot;;
+    constexpr const char* kTypeAttr   = &quot;effectType&quot;;
+    constexpr const char* kNameAttr   = &quot;name&quot;;
+    constexpr const char* kVersionTag = &quot;version&quot;;
+    constexpr int         kPresetVersion = 1;
+
+...
+
+bool savePreset (DSPBase&amp; dsp, EffectType type,
+                  const juce::String&amp; presetName, juce::String&amp; outErr)
+{
+    if (type == EffectType::None)
+    {
+        outErr = &quot;Cannot save preset for empty effect slot.&quot;;
+        return false;
+    }
+    juce::MemoryBlock blob;
+    dsp.getStateInformation (blob);
+    if (blob.getSize() == 0)
+    {
+        outErr = &quot;DSP returned empty state.&quot;;
+        return false;
+    }
+    // resolveTarget rather than UserFileSave::writeXmlAsync: the write helpers
+    // raise the family&#x27;s warning box themselves, and this function reports
+    // through outErr for a caller that raises its own - the pair would stack
+    // two dialogs on one failure.  Naming and collision policy still come from
+    // the one place, so a second save of &quot;Big Hall&quot; suffixes instead of
+    // destroying the first.
+    const auto file = UserFileSave::resolveTarget (myPresetsDir (type), presetName);
+    if (file == juce::File())
+    {
+        outErr = presetName.trim().isEmpty()
+                     ? juce::String (&quot;Type a name for it first.&quot;)
+                     : UserFileSave::unusableNameMessage (presetName);
+        return false;
+    }
+
+    // The name attribute has to be the resolved one: the suffix means the file
+    // is not always &lt;typed name&gt;.xml, and metadata that disagrees with the
+    // filename is how a preset ends up displaying as its own overwritten twin.
+    return writePresetXml (file, type, file.getFileNameWithoutExtension(),
+                            blob, outErr);
+}
+
+bool loadPreset (DSPBase&amp; dsp, const juce::File&amp; presetFile, juce::String&amp; outErr)
+{
+    juce::MemoryBlock blob;
+    if (! readPresetXml (presetFile, blob, outErr)) return false;
+    dsp.setStateInformation (blob.getData(), (int) blob.getSize());
+    return true;
+}</code></pre></div>
 <details class="fullfn"><summary>Full function &mdash; Source\Standalone\EffectPresetIO.h (per-effect preset IO + factory seeding)</summary><pre><code>// EffectPresetIO.h -- API surface (verbatim, lines 38-113, comments trimmed to signatures)
 namespace EffectPresetIO
 {

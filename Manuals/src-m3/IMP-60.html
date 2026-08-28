@@ -54,7 +54,7 @@ namespace MixerChannelIds
     constexpr int kInstBase  = 700;  // R1: Inst insert 0..29 → 700..729
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
     constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.h (MixerChannelIds registry, RoutingGraph class, BaySickGraph topology banner)</summary><pre><code>// BaySickGraph.cpp -- BaySickGraph::rebuildRoutingFromApvts (full function, lines 3206-3244)
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.cpp (BaySickGraph::rebuildRoutingFromApvts, lines 3217-3255; RoutingGraph::rebuildFromApvts, lines 2682-2787)</summary><pre><code>// BaySickGraph.cpp -- BaySickGraph::rebuildRoutingFromApvts (full function, lines 3217-3255)
 void BaySickGraph::rebuildRoutingFromApvts()
 {
     if (mApvts == nullptr) return;
@@ -93,6 +93,114 @@ void BaySickGraph::rebuildRoutingFromApvts()
     // Same shape for the pre-fader send tap: re-flag its sources from the fresh
     // edge list, and clear each armed tap before any strip runs this block.
     armPreFaderTaps();
+}
+
+// BaySickGraph.cpp -- RoutingGraph::rebuildFromApvts (full function, lines 2682-2787)
+bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState&amp; apvts,
+                                     const std::vector&lt;std::pair&lt;int, juce::String&gt;&gt;&amp; activeChannels)
+{
+    mEdges.clear();
+    mEdges.reserve(activeChannels.size() * (kMaxMainOutsPerStrip + kMaxSendsPerStrip));
+    mScEdges.clear();
+    mScEdges.reserve(activeChannels.size() * kMaxScRecvsPerStrip);
+
+    auto loadInt = [&amp;](const juce::String&amp; id, int fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return (int) p-&gt;load();
+        return fallback;
+    };
+    auto loadFloat = [&amp;](const juce::String&amp; id, float fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return p-&gt;load();
+        return fallback;
+    };
+    auto loadBool = [&amp;](const juce::String&amp; id, bool fallback)
+    {
+        if (auto* p = apvts.getRawParameterValue(id)) return p-&gt;load() &gt; 0.5f;
+        return fallback;
+    };
+
+    for (const auto&amp; [chId, prefix] : activeChannels)
+    {
+        // Compose this channel's ids only when they are missing or its prefix
+        // changed; steady state is a map lookup plus a string compare.
+        auto&amp; pid = mChannelParamIds[chId];
+        if (pid.prefix != prefix)
+        {
+            pid.prefix     = prefix;
+            for (int m = 0; m &lt; kMaxMainOutsPerStrip; ++m)
+                pid.mainOutTo[(size_t) m] = MixerChannelIds::mainOutParamId (prefix, m);
+            for (int s = 0; s &lt; kMaxSendsPerStrip; ++s)
+            {
+                const juce::String sp = prefix + "_send" + juce::String(s);
+                pid.sendTo     [(size_t) s] = sp + "_to";
+                pid.sendAmount [(size_t) s] = sp + "_amount";
+                pid.sendPrePost[(size_t) s] = sp + "_prepost";
+            }
+            for (int s = 0; s &lt; kMaxScRecvsPerStrip; ++s)
+                pid.scFrom[(size_t) s] = prefix + "_sc_recv" + juce::String(s) + "_from";
+        }
+
+        // Main-out lines.  Line 0 falls back to the natural parent (a strip
+        // always has one main out); lines 1..3 fall back to -1 = inactive, which
+        // is also what a project saved before they existed resolves to.
+        // Duplicate destinations across two lines of the SAME strip are dropped
+        // here as well as refused by the UI: two edges src -&gt; dst would sum that
+        // strip into the destination twice, i.e. +6 dB, not a second route.
+        int mainDsts[kMaxMainOutsPerStrip] = {};
+        int numMainDsts = 0;
+        for (int m = 0; m &lt; kMaxMainOutsPerStrip; ++m)
+        {
+            const int fallback = (m == 0) ? MixerChannelIds::defaultSendTo(chId) : -1;
+            const int dst = loadInt(pid.mainOutTo[(size_t) m], fallback);
+            if (dst &lt; 0 || dst == chId) continue;
+
+            bool dup = false;
+            for (int k = 0; k &lt; numMainDsts; ++k)
+                if (mainDsts[k] == dst) { dup = true; break; }
+            if (dup) continue;
+            mainDsts[numMainDsts++] = dst;
+
+            Edge e; e.srcId = chId; e.dstId = dst;
+            e.amountDb = 0.f; e.prePost = false; e.isMainOut = true;
+            mEdges.push_back(e);
+        }
+        for (int s = 0; s &lt; kMaxSendsPerStrip; ++s)
+        {
+            const int dst = loadInt(pid.sendTo[(size_t) s], -1);
+            if (dst &lt; 0 || dst == chId) continue;
+            Edge e; e.srcId = chId; e.dstId = dst;
+            e.amountDb = loadFloat(pid.sendAmount [(size_t) s], 0.f);
+            e.prePost  = loadBool (pid.sendPrePost[(size_t) s], false);
+            e.isMainOut = false;
+            mEdges.push_back(e);
+        }
+
+        // C.4 Phase 1 (2026-04-30): SC receive lines.  Each strip reads up
+        // to 4 _sc_recv{N}_from params (channel id of the source, -1 = empty).
+        // Build SC edges as src -&gt; this strip on receive line N.
+        for (int s = 0; s &lt; kMaxScRecvsPerStrip; ++s)
+        {
+            const int src = loadInt(pid.scFrom[(size_t) s], -1);
+            if (src &lt; 0 || src == chId) continue;
+            ScEdge e; e.srcId = src; e.dstId = chId; e.dstSlot = s;
+            mScEdges.push_back(e);
+        }
+    }
+
+    mTopoIds.clear();
+    mTopoIds.reserve(activeChannels.size());
+    for (const auto&amp; [chId, _] : activeChannels) mTopoIds.push_back(chId);
+    const bool topoOk = computeTopo(mTopoIds);
+
+    // AFTER computeTopo: a cycle makes it erase edges from mEdges, and an edge
+    // that no longer exists must not keep a tap armed for a consumer that will
+    // never pull it.
+    mHasPreFaderSend = false;
+    for (const auto&amp; e : mEdges)
+        if (e.prePost &amp;&amp; ! e.isMainOut) { mHasPreFaderSend = true; break; }
+
+    return topoOk;
 }</code></pre></details>
 <pre class="formulas">- Channel-id ranges (MixerChannelIds): buses 0-18 (kOutput=0, kLayersBus=1, kBassBus=2, kDrumsBus=3, kMaster=4, kFxBus=5, kClipsBus=6, kVoxBus=7, kInstBus=8, kVoxBus2=9, kInstBus2=10, kInstBus3=11, kRustyDrumsBus=12, kPluginsBus=13, kLayersBus2=14, kBassBus2=15, kClipsBus2=16, kPluginsBus2=17, kDrumsBus2=18); Aux 100-117; Layer inserts 200+; Bass 300+; Audio 400-499 (ends flush at kDrumBase); Drum 500-531; Vox 600+; Inst 700+; Rusty 800-812; Plugin 900+.
 - Strip caps DERIVE from page caps in BaySickConstants.h (`kMaxLayerStrips = kMaxLayerPages` etc.) — one page of a kind owns exactly one insert strip; a one-sided raise silently leaves extra pages with no strip/EQ/routing. Non-page caps: `kMaxAuxStrips = 18`, `kMaxRustyStrips = 13`.

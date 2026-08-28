@@ -2,7 +2,7 @@
 rather than by pitch shifting is what makes it thicken without sounding out of
 tune.</p>
 
-<div class="codeblock"><div class="codehead">- Source/DSP/ChorusDSP.h</div><pre><code>// ChorusDSP::process (voice-sum core) + ChorusDSP::evalLFO
+<div class="codeblock"><div class="codehead">- Source/DSP/ChorusDSP.cpp</div><pre><code>// ChorusDSP::process (voice-sum core) + ChorusDSP::evalLFO
 // Voice model: 3 voices -&gt; 1 read per LFO; 6 voices -&gt; 2 reads per LFO (second read +pi)
 for (int v = 0; v &lt; numVoices; ++v)
 {
@@ -28,7 +28,7 @@ for (int v = 0; v &lt; numVoices; ++v)
     sumL += cubicInterp(mBufL, rposL, mBufSize);
     sumR += cubicInterp(mBufR, rposR, mBufSize);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ChorusDSP.h</summary><pre><code>// ChorusDSP::evalLFO -- the four selectable LFO shapes
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ChorusDSP.cpp</summary><pre><code>// ChorusDSP::evalLFO -- the four selectable LFO shapes
 float ChorusDSP::evalLFO (int wave, float phase)
 {
     switch (wave)

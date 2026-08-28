@@ -37,12 +37,46 @@ alternating signs.</p>
                 Rout += uniSaw * (0.5f * (1.0f + pan));
             }
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthVoice.cpp (in-voice detuned saw stack, section 10c of renderNextBlock; shared by BaySickBass)</summary><pre><code>    // Stagger unison phases so the stack sounds naturally detuned even at t=0.
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthVoice.cpp (startNote phase stagger, lines 242-247; renderNextBlock unison stack + 1/sqrt(N) law, lines 869-899; shared by BaySickBass &mdash; Harmless mirror: Source\Harmless\AdditiveVoice.cpp line 436, uniNorm)</summary><pre><code>// BaySickSynthVoice.cpp -- startNote phase stagger (verbatim, lines 242-247)
+    // Stagger unison phases so the stack sounds naturally detuned even at t=0.
     for (int u = 0; u &lt; 6; ++u)
     {
         mDriftRngState = mDriftRngState * 1664525u + 1013904223u;
         mUniPhase[u] = (double)((int) mDriftRngState) * (1.0 / 2147483648.0) * 0.5 + 0.5;
-    }</code></pre></details>
+    }
+
+// BaySickSynthVoice.cpp -- renderNextBlock section 10c (verbatim, lines 869-899)
+        // ── 10c. Unison (P3.11) - detuned saw stack, stereo-spread ────────────
+        //   Adds (mUnisonVoices - 1) saw copies at slightly detuned frequencies,
+        //   panned symmetrically across stereo by spread. Main voice stays centred.
+        //   Applied post-amp-env + velocity so overall level tracks the note.
+        float Lout = sample;
+        float Rout = sample;
+        if (mUnisonVoices &gt; 1 &amp;&amp; playFreq &gt; 1.0f)
+        {
+            const int   N   = mUnisonVoices;
+            const float maxCents = mUnisonDetune * 50.0f;   // ±50 cents at max
+            const float envGain  = ampVal * velScale;
+            const float levelN   = 1.0f / std::sqrt ((float) N);
+
+            for (int u = 1; u &lt; N; ++u)
+            {
+                // Symmetric position in [-1, +1] across the N-1 extra voices
+                const float pos       = ((float)(u - 1) / (float)(N - 1)) * 2.0f - 1.0f;
+                const float detuneHz  = playFreq * (std::pow (2.0f, pos * maxCents / 1200.0f) - 1.0f);
+                const float uniFreq   = playFreq + detuneHz;
+
+                mUniPhase[u - 1] += (double) uniFreq / (double) sr;
+                if (mUniPhase[u - 1] &gt;= 1.0) mUniPhase[u - 1] -= 1.0;
+
+                float uniSaw = (1.0f - 2.0f * (float) mUniPhase[u - 1]) * envGain * levelN;
+
+                // Pan: pos * spread (-1 = left, +1 = right)
+                const float pan = pos * mUnisonSpread;
+                Lout += uniSaw * (0.5f * (1.0f - pan));
+                Rout += uniSaw * (0.5f * (1.0f + pan));
+            }
+        }</code></pre></details>
 <pre class="formulas">- sqrt(N) gain compensation (QA-Soundness gain-staging pass, both synth engines): stack level `levelN = 1 / sqrt(N)`. Rationale: detuned copies are incoherent, powers add, so `1/sqrt(N)` holds perceived level constant as voices are added (`1/N` made it quieter per voice).
   - BaySickSynth/Bass: `const float levelN = 1.0f / std::sqrt ((float) N);` (each extra saw scaled by it; main voice stays at unity, centered).
   - Harmless: `const float uniNorm = 1.0f / std::sqrt (float (mNumUnison));` applied to the summed slot output.

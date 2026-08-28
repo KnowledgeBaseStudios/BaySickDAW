@@ -10,7 +10,7 @@ thirty-block drag undo in a single press.</p>
 
 <p>Depth is a user setting: 100, 250, 500 or 1000 transactions.</p>
 
-<div class="codeblock"><div class="codehead">Source\Standalone\UndoActions.h (UndoContext, typed actions, StructuralOpAction)</div><pre><code>// StandaloneEditor.cpp -- history depth setup (verbatim, lines 751-757)
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (history depth setup) + Source\Standalone\UndoActions.h (UndoContext, typed actions)</div><pre><code>// StandaloneEditor.cpp -- history depth setup (verbatim, lines 766+)
     // History depth (Jeff ruling 2026-08-06, &quot;this one is required&quot;): the menu
     // numbers are TRANSACTION counts now.  JUCE&#x27;s cap is unit-based and every
     // action of ours exceeds the old (n, 30) unit budgets, so all four menu
@@ -18,7 +18,7 @@ thirty-block drag undo in a single press.</p>
     // unit test permanently over, making minimumTransactionsToKeep the exact
     // retained count.
     mUndoManager.setMaxNumberOfStoredUnits (1, 100);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\UndoActions.h (UndoContext, typed actions, StructuralOpAction)</summary><pre><code>// UndoActions.h -- struct UndoContext (full struct, lines 17-46)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\UndoActions.h (UndoContext, lines 17-46; StructuralOpAction, lines 325-370)</summary><pre><code>// UndoActions.h -- struct UndoContext (full struct, lines 17-46)
 struct UndoContext
 {
     juce::UndoManager* manager { nullptr };
@@ -48,6 +48,54 @@ struct UndoContext
     std::function&lt;juce::Component*()&gt; resolveOwnerPage;
 
     bool isValid() const { return manager != nullptr &amp;&amp; (bool)perform; }
+};
+
+// UndoActions.h -- class StructuralOpAction (full class, lines 325-370)
+// ── StructuralOpAction (QA-UndoCoverage Task 7) ───────────────────────────────
+// One structural user gesture (tab add / delete / duplicate, engine pick or
+// swap, kit load) as one undoable transaction.  The op has ALREADY happened
+// when this action is performed (skip-first convention); undoFn reverses it
+// and redoFn re-applies it.  Snapshot temp files referenced by the lambdas
+// are owned here -- deleted when the action dies (depth-cap drop, history
+// clear, manager teardown), which is what keeps the UndoSnapshots store
+// bounded by the history depth.
+// ─────────────────────────────────────────────────────────────────────────────
+class StructuralOpAction : public juce::UndoableAction
+{
+public:
+    StructuralOpAction (std::function&lt;void()&gt; undoFn,
+                        std::function&lt;void()&gt; redoFn,
+                        juce::Array&lt;juce::File&gt; ownedSnapshots = {})
+        : mUndo (std::move (undoFn))
+        , mRedo (std::move (redoFn))
+        , mSnapshots (std::move (ownedSnapshots))
+    {}
+
+    ~StructuralOpAction() override
+    {
+        for (const auto&amp; f : mSnapshots)
+            f.deleteFile();
+    }
+
+    bool perform() override
+    {
+        if (mFirstPerform) { mFirstPerform = false; return true; }
+        if (mRedo) mRedo();
+        return true;
+    }
+    bool undo() override
+    {
+        if (mUndo) mUndo();
+        return true;
+    }
+    int getSizeInUnits() override { return (int) sizeof (*this); }
+
+private:
+    std::function&lt;void()&gt;  mUndo, mRedo;
+    juce::Array&lt;juce::File&gt; mSnapshots;
+    bool                   mFirstPerform { true };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StructuralOpAction)
 };</code></pre></details>
 <pre class="formulas">- ONE app-wide `juce::UndoManager`, owned by the processor, threaded by EngineRig into every engine APVTS ctor (each stamped with an undoOwnerTag so a parameter transaction re-resolves to its target after the engine is destroyed and re-created). Pages hold only an `UndoContext` by value.
 - Depth trick: `setMaxNumberOfStoredUnits(1, N)` — maxUnits = 1 keeps JUCE&#x27;s unit test PERMANENTLY over, so `minimumTransactionsToKeep` (the second argument) IS the retained transaction count. Menu depths: 100 (default) / 250 / 500 / 1000 (menu ids 510-513). The old (n, 30) shape silently collapsed every setting to ~30 transactions.

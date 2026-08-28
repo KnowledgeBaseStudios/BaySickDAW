@@ -32,18 +32,21 @@ for (int i = 0; i &lt; taps; ++i)
 <div class="codeblock"><div class="codehead">- Source/DSP/Kbs/ParametricEq.h (ParametricEq::rebuildLinearCurve - the per-domain 2x2 matrix)</div><pre><code>// With only stereo bands one shared FIR is exact and cheap; the moment
 // any active band routes mid / side / left / right, the response is a
 // 2x2 matrix in the L/R domain and the engine designs all four entries.
-auto entry = [this] (float msSign, const std::vector&lt;float&gt;&amp; side)
+// The domain buffers are COMPLEX (mixed phase / per-band excess phase ride
+// the same matrix) - mono cancellation of a side band stays EXACT with
+// phase in play (pinned by test, not assumed).
+auto entry = [this] (float msSign, const std::vector&lt;std::complex&lt;float&gt;&gt;&amp; side)
 {
-    return [this, msSign, &amp;side] (int bin, int) -&gt; float
+    return [this, msSign, &amp;side] (int bin, int) -&gt; std::complex&lt;float&gt;
     {
         const auto k = (size_t) bin;
         return 0.5f * (domM[k] + msSign * domS[k]) * domSt[k] * side[k];
     };
 };
-linear.setMagnitudeMatrix (entry (+1.0f, domL),    // LL
-                           entry (-1.0f, domR),    // LR
-                           entry (-1.0f, domL),    // RL
-                           entry (+1.0f, domR));   // RR</code></pre></div>
+linear.setResponseMatrix (entry (+1.0f, domL),    // LL
+                          entry (-1.0f, domR),    // LR
+                          entry (-1.0f, domL),    // RL
+                          entry (+1.0f, domR));   // RR</code></pre></div>
 <pre class="formulas">- Streaming is overlap-save: frames of `hop` fresh samples, transform the last N, multiply by the FIR&#x27;s spectrum, keep only the wrap-free last `hop` - no analysis window, no synthesis window, nothing to &quot;sum flat&quot;.  The engine this replaced windowed twice at 50% overlap (a structural 6 dB tremolo), multiplied a raw sampled magnitude (circular wrap and pre-echo), and reported HALF its true delay into the delay compensation.
 - Latency = `hop + (taps - 1) / 2` with `taps = N/2 + 1`, `hop = N/2` - and a test injects an impulse and requires the measured peak position to equal the report with tolerance ZERO.
 - Five precisions: FFT 1024 (Low) to 16384 (Maximum).  At Low the 513-tap design window smooths a Q=1 bell by most of a decibel - the precision dial&#x27;s honest tradeoff; High is exact to 0.3 dB.  The menu&#x27;s latency figures are computed from these constants at the session rate.

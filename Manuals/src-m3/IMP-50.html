@@ -2,7 +2,7 @@
 about how loud something feels rather than what its peaks are. The calibration
 setting decides what level the needle calls zero, and it is app-wide.</p>
 
-<div class="codeblock"><div class="codehead">- Source\Standalone\SharedUI.cpp - VUMeter implementation, lines 5752-5897 (ballistics/calibration; paint code follows to ~6280)</div><pre><code>// VUMeter::onVBlank() -- vertical hardware-VU ballistics
+<div class="codeblock"><div class="codehead">- Source\Standalone\SharedUI.h - VUMeter (class at line 1319; ballistics and paint are header-inline, calibration statics in SharedUI.cpp)</div><pre><code>// VUMeter::onVBlank() -- vertical hardware-VU ballistics
         // 2026-05-02: ditched the ANSI C16.5-1942 spring-damper.  Rationale:
         // a 300 ms rise time literally cannot register a 10 ms snare hit at
         // 60+ Hz vblank cadence, so transient signals showed -16 VU when a
@@ -31,7 +31,7 @@ setting decides what level the needle calls zero, and it is app-wide.</p>
         // Snap-up + decay on the displayed value (in VU dB space).
         if (vuDb &gt; mDisplayLevel) mDisplayLevel = vuDb;
         else                       mDisplayLevel = juce::jmax (kVuMin, mDisplayLevel - decayDb);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\Standalone\SharedUI.cpp - VUMeter implementation, lines 5752-5897 (ballistics/calibration; paint code follows to ~6280)</summary><pre><code>// VUMeter::onVBlank() -- horizontal path + MAX peak tracking (completing the excerpt)
+<details class="fullfn"><summary>Full function &mdash; - Source\Standalone\SharedUI.h - VUMeter (class at line 1319; ballistics and paint are header-inline, calibration statics in SharedUI.cpp)</summary><pre><code>// VUMeter::onVBlank() -- horizontal path + MAX peak tracking (completing the excerpt)
 void VUMeter::onVBlank()
 {
     if (mStyle == Horizontal)
@@ -102,7 +102,7 @@ void VUMeter::setLevel(float rms01)
     }
 }
 
-// Calibration statics (SharedUI.cpp 5753-5766 + SharedUI.h 1717-1724)
+// Calibration statics (SharedUI.cpp 2537-2538 + SharedUI.h 1384-1402)
 float VUMeter::sCalibrationDb = -18.f;
 std::function&lt;void()&gt; VUMeter::sOnCalibrationChanged;
 

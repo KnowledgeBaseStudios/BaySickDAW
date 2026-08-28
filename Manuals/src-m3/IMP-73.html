@@ -2,7 +2,7 @@
 already in place.</p>
 
 <p class="behind"><b>Behind:</b> <a href="manual-2.html#FMENU-2">New from Template submenu</a>, <a href="manual-2.html#FMENU-8">Save as Template</a>, <a href="manual-2.html#OMENU-1">General submenu</a>.</p>
-<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8766-8781, applyTemplate lines 8783-8937, saveTemplateAs lines 8939+)</div><pre><code>// StandaloneEditor.h -- template dirs + the SaveShape split (verbatim)
+<div class="codeblock"><div class="codehead">Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8718+, applyTemplate lines 8735+, saveTemplateAs lines 8891+)</div><pre><code>// StandaloneEditor.h -- template dirs + the SaveShape split (verbatim)
     // Which of the two save shapes the tab walk is feeding.  Freeze is the one
     // thing the structural walk emits that is PROJECT data and not skeleton
     // data: the renders live in &lt;project&gt;\Freeze\ and the stamps are the
@@ -25,7 +25,7 @@ already in place.</p>
     // The actual teardown + rebuild, past the save prompt.  Never call directly:
     // loadTemplate owns the unsaved-changes gate for every entry point.
     void applyTemplate (const juce::File&amp; templateXml);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8766-8781, applyTemplate lines 8783-8937, saveTemplateAs lines 8939+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::loadTemplate (full function, lines 8766-8781)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8718+, applyTemplate lines 8735+, saveTemplateAs lines 8891+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::loadTemplate (full function, lines 8766-8781)
 void StandaloneEditor::loadTemplate (const juce::File&amp; templateXml)
 {
     if (! templateXml.existsAsFile())
