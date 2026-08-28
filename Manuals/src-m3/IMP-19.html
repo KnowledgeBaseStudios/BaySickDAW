@@ -18,7 +18,8 @@
             const float r = std::abs (d[i]) * drive - 0.5f;
             d[i] = std::clamp (r, -1.0f, 1.0f);
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\FuzzStyleDSP.cpp</summary><pre><code>void FuzzStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\FuzzStyleDSP.cpp</summary><pre><code>// Source/DSP/FuzzStyleDSP.cpp  -  FuzzStyleDSP::process (complete)
+void FuzzStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;
@@ -42,8 +43,8 @@
         case Mode::M:
         {
             // Bias-starved gated clip.  Positive half clamps tight at +0.5
-            // (the &quot;starve&quot;) while negative half passes through tanh with
-            // a wider knee (the &quot;gated&quot; wasp character).
+            // (the "starve") while negative half passes through tanh with
+            // a wider knee (the "gated" wasp character).
             for (int ch = 0; ch &lt; upChs; ++ch)
             {
                 float* d = upBlock.getChannelPointer ((size_t) ch);
@@ -72,7 +73,7 @@
             // Octavia: full-wave rectify then hard clip.  |x| produces a
             // doubled fundamental (the upper-octave artefact).  Shift back
             // toward zero-mean by subtracting 0.5 so the rectified stream
-            // doesn&#x27;t sit on a positive DC pedestal.
+            // doesn't sit on a positive DC pedestal.
             for (int ch = 0; ch &lt; upChs; ++ch)
             {
                 float* d = upBlock.getChannelPointer ((size_t) ch);

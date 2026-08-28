@@ -812,7 +812,8 @@ void shootEffectsCluster (World& w)
     {
         rack->loadEffect (0, EffectType::DeEsser);
         rack->loadEffect (1, EffectType::Reverb);
-        rack->setSlotBasicMode (1, false);      // the master shows Advanced
+        // Basic is the panel's default and what the figure documents;
+        // the per-effect Advanced views are their own figures.
     }
 
     if (wantPanel)
@@ -849,6 +850,60 @@ void shootEffectsCluster (World& w)
 }
 
 // ── Task 2: mixer + strip crop ────────────────────────────────────────────
+// ── every rack effect, Basic and Advanced (Jeff, 2026-08-28) ──────────────
+// In View documents the panel frame once; In Depth documents EVERY effect in
+// both views with its own generated control table.  Basic is each panel's
+// default; Advanced is the same panel with hasAdvancedControls() honoured.
+// Effects with no advanced set render identically - the duplicate is dropped
+// after the run and the chapter shows one view.
+void shootEffectPanels (World& w)
+{
+    struct Fx { const char* name; EffectType type; };
+    static const Fx kFx[] = {
+        { "Compressor",       EffectType::Compressor },
+        { "De-esser",         EffectType::DeEsser },
+        { "Gate",             EffectType::Gate },
+        { "Limiter",          EffectType::Limiter },
+        { "Transient Shaper", EffectType::TransientShaper },
+        { "Overdrive",        EffectType::Overdrive },
+        { "Saturation",       EffectType::Saturation },
+        { "Chorus",           EffectType::Chorus },
+        { "Flanger",          EffectType::Flanger },
+        { "Phaser",           EffectType::Phaser },
+        { "De-reverb",        EffectType::DeReverb },
+        { "Delay",            EffectType::Delay },
+        { "Reverb",           EffectType::Reverb },
+    };
+
+    auto nameMaster = [] (int) { return juce::String ("Master"); };
+    auto* rack = EffectsPage::rackForChannelId (w.proc->mVibeGraph, 4);
+    if (rack == nullptr)
+    { ++gFailed; std::cout << "  FAILED effect panels (no rack)" << std::endl; return; }
+
+    for (const auto& fx : kFx)
+    {
+        const juce::String base = juce::String ("FX Panel ") + fx.name;
+        for (int adv = 0; adv < 2; ++adv)
+        {
+            const juce::String fig = base + (adv ? " Advanced" : " Basic");
+            if (! want (fig)) continue;
+
+            rack->loadEffect (3, fx.type);
+            rack->setSlotBasicMode (3, adv == 0);
+
+            EffectSlotWindow content (*w.proc, 4, rack->getSlotUuid (3), nameMaster,
+                                      UndoContext {});
+            WorkspaceWindow win (juce::String ("shot:fxp") + juce::String (adv),
+                                 content.windowTitle());
+            win.setContentNonOwned (&content);
+            content.configureTitleStrip (*win.getPageMenu());
+            win.setSize (686, 263);
+            save (win, fig, 1.25f);
+        }
+    }
+    rack->loadEffect (3, EffectType::None);
+}
+
 void shootMixerCluster (World& w)
 {
     const bool wantMix = want ("Mixer");
@@ -1829,6 +1884,7 @@ const Figure kFigures[] = {
     // mixer reuses Task 1's Bass engine; Builder seeds the pattern content
     // Piano Roll and the Event Editor read.
     { "effects",       &shootEffectsCluster },
+    { "fx panels",     &shootEffectPanels },
     { "mixer",         &shootMixerCluster },
     { "vu meter",      &shootVuMeter },
     { "builder",       &shootBuilder },

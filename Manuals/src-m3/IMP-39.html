@@ -2,7 +2,7 @@
 note boundaries in a way a realtime corrector cannot &mdash; a realtime one has
 to decide before it has heard the end of the word.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\BaySickPitchDSP.cpp - key excerpts (full file 1193 lines)</div><pre><code>// BaySickPitchDSP::computeEnvelopes() - per-sample edit -&gt; envelope resolver (bake input)
+<div class="codeblock"><div class="codehead">- Source\DSP\BaySickPitchDSP.cpp (1193 lines)</div><pre><code>// BaySickPitchDSP::computeEnvelopes() - per-sample edit -&gt; envelope resolver (bake input)
         const float smoothCoef = 1.0f - std::exp (-1.0f / (float) (speedMs * 0.001 * sr));
         const float gainCoef   = 1.0f - std::exp (-1.0f / (float) (0.005 * sr));
 ...
@@ -35,7 +35,161 @@ to decide before it has heard the end of the word.</p>
         outRatio  [i] = std::pow (2.0f, (st.smoothedSemis + fastSemis) / 12.0f);
         outFormant[i] = st.smoothedFormant;
         outGain   [i] = st.smoothedGain;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickPitchDSP.cpp - key excerpts (full file 1193 lines)</summary><pre><code>// BaySickPitchDSP::analyzeComposite() -- Stage 1 voiced runs + Stage 2 glide-merge
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickPitchDSP.cpp (1193 lines)</summary><pre><code>// Source/DSP/BaySickPitchDSP.cpp  -  BaySickPitchDSP::computeEnvelopes (complete)
+// ─── Per-sample edit -&gt; envelope resolver (bake input) ────────────────────────
+void BaySickPitchDSP::computeEnvelopes (int numSamples, juce::int64 timelineStartSample,
+                                        double sr, const Snapshot&amp; snap,
+                                        float focus01, float modAmt, float speedMs, bool chainOn,
+                                        bool snapScale, int rootPc, int scaleIdx,
+                                        ApplicatorState&amp; st,
+                                        float* outRatio, float* outFormant, float* outGain,
+                                        double srcX0, double srcRatePerSample,
+                                        bool srcValid) const noexcept
+{
+    const auto&amp; regions = snap.regions;
+    if (regions.empty()) return;
+
+    const float smoothCoef = 1.0f - std::exp (-1.0f / (float) (speedMs * 0.001 * sr));
+    const float gainCoef   = 1.0f - std::exp (-1.0f / (float) (0.005 * sr));
+
+    // startSample is composite-relative (0) for the bake; the origin subtraction
+    // keeps tSec in composite-relative seconds (rate-invariant).
+    const double snapStartSec = (double) snap.startSample / snap.sampleRate;
+
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        // QA-Fd source-domain stamps: resolve the pill at the SOURCE position the
+        // audible audio came from when the decode layer warped this channel.
+        const double tSec = srcValid
+            ? (srcX0 + (double) i * srcRatePerSample) / sr - snapStartSec
+            : (double) (timelineStartSample + i) / sr - snapStartSec;
+
+        // Monotonic cursor with seek rewind (transport jumps).
+        while (st.cursor &lt; (int) regions.size()
+               &amp;&amp; regions[(size_t) st.cursor].endSec &lt;= tSec)
+            ++st.cursor;
+        while (st.cursor &gt; 0
+               &amp;&amp; regions[(size_t) st.cursor - 1].endSec &gt; tSec)
+            --st.cursor;
+
+        const bool inRegion = st.cursor &lt; (int) regions.size()
+                           &amp;&amp; tSec &gt;= regions[(size_t) st.cursor].startSec
+                           &amp;&amp; tSec &lt;  regions[(size_t) st.cursor].endSec;
+
+        float targetSemis   = 0.0f;
+        // Per-sample modulation rides POST-smoother: the Speed glide low-passes a
+        // 5-6 Hz vibrato wiggle / Variation deviation / drawn pitch curve to
+        // near-nothing if routed through it.  Only the note CENTER glides.
+        float fastSemis     = 0.0f;
+        float targetFormant = 0.0f;
+        float gain          = 1.0f;
+
+        // Chain OFF resolves neutral targets so the smoothing glides everything
+        // home; playback gates on chainOn (the bake always bakes the edited state).
+        if (inRegion &amp;&amp; chainOn)
+        {
+            const auto&amp; r = regions[(size_t) st.cursor];
+            // Slice pieces carry no pitch identity: volume shape applies,
+            // pitch/focus/vibrato stay neutral.
+            if (r.isSlice)
+            {
+                const double len = r.endSec - r.startSec;
+                if (len &gt; 1.0e-6)
+                    gain = r.volGainAt ((float) ((tSec - r.startSec) / len));
+            }
+            else
+            {
+                if (st.cursor != st.lastRegion)
+                {
+                    st.lastRegion = st.cursor;
+                    st.vibPhase   = 0.0;
+                }
+
+                // Center knob (Newtone model): a micro-tonal pull of the EDITED
+                // center toward the nearest semitone CENTER -- always, scale-
+                // independent, whether or not Snap is on (Snap only governs the
+                // editor drag-wall + the Ctrl+A force, never this per-sample pull).
+                const float base   = r.midi + r.shiftSemis;
+                const float target = std::round (base);
+                targetSemis = r.shiftSemis + (target - base) * focus01;
+
+                const double len01 = r.endSec - r.startSec;
+                const float  t01   = (len01 &gt; 1.0e-6)
+                    ? (float) ((tSec - r.startSec) / len01) : 0.0f;
+
+                // QA-Fd sub-edit system: additive per-pill pitch curve.
+                if (! r.pitchShape.empty())
+                    fastSemis += juce::jlimit (-24.0f, 24.0f, r.pitchSemisAt (t01));
+
+                // QA-Fd 15a Variation: scale the note's own contour wiggle around
+                // its center (deviation from the analysis F0 track).
+                if (std::abs (r.variation - 1.0f) &gt; 0.01f &amp;&amp; ! snap.f0Track.empty())
+                {
+                    const double hopSec = (double) kF0Hop / snap.sampleRate;
+                    const int fr = juce::jlimit (0, (int) snap.f0Track.size() - 1,
+                                                 (int) (tSec / hopSec));
+                    const float hz = snap.f0Track[(size_t) fr];
+                    if (hz &gt; 0.0f)
+                    {
+                        const float devSemis = hzToMidiF (hz) - r.midi;
+                        if (std::abs (devSemis) &lt; 6.0f)   // ignore track glitches
+                            fastSemis += (r.variation - 1.0f) * devSemis;
+                    }
+                }
+
+                // Vib knob is ADDITIVE on top of the natural vibrato (mult 1 =
+                // nothing added); flattening the REAL wiggle is Variation's job.
+                const float addMult = (r.vibDepthMult * modAmt) - 1.0f;
+                if (std::abs (addMult) &gt; 0.01f)
+                {
+                    const float baseDepth = (r.vibDepthCents &gt; 0.0f) ? r.vibDepthCents : 25.0f;
+                    const float rate      = r.vibRateHz * r.vibRateMult;
+                    st.vibPhase += juce::MathConstants&lt;double&gt;::twoPi * rate / sr;
+                    if (st.vibPhase &gt; juce::MathConstants&lt;double&gt;::twoPi)
+                        st.vibPhase -= juce::MathConstants&lt;double&gt;::twoPi;
+                    fastSemis += (float) std::sin (st.vibPhase)
+                               * juce::jlimit (-300.0f, 300.0f, baseDepth * addMult) / 100.0f;
+                }
+
+                targetFormant = r.formantSemis;
+                gain = r.volGainAt (t01);
+            }
+        }
+
+        st.smoothedSemis   += (targetSemis   - st.smoothedSemis)   * smoothCoef;
+        st.smoothedFormant += (targetFormant - st.smoothedFormant) * smoothCoef;
+        st.smoothedGain    += (gain          - st.smoothedGain)    * gainCoef;
+
+        outRatio  [i] = std::pow (2.0f, (st.smoothedSemis + fastSemis) / 12.0f);
+        outFormant[i] = st.smoothedFormant;
+        outGain   [i] = st.smoothedGain;
+    }
+}
+
+// Source/DSP/BaySickPitchDSP.cpp  -  BaySickPitchDSP::analyzeComposite (complete)
+// ─── Analysis ─────────────────────────────────────────────────────────────────
+void BaySickPitchDSP::analyzeComposite (const float* mono, int numSamples,
+                                        double sampleRate,
+                                        double startBeat, juce::int64 startSample)
+{
+    const auto oldRegions = mRegions;
+
+    mRegions.clear();
+    mF0Track.clear();
+    mAnalyzed     = false;
+    mCompositeSec = 0.0;
+
+    if (mono == nullptr || numSamples &lt;= 0 || sampleRate &lt;= 0.0)
+    {
+        publishEdits();
+        return;
+    }
+
+    mStartBeat    = startBeat;
+    mStartSample  = startSample;
+    mAnalysisSr   = sampleRate;
+    mCompositeSec = numSamples / sampleRate;
+
     BaySickAlignDSP::estimateF0Track (mono, numSamples, sampleRate, kF0Hop, mF0Track);
     const double hopSec = kF0Hop / sampleRate;
     const int    numFrames = (int) mF0Track.size();
@@ -45,6 +199,9 @@ to decide before it has heard the end of the word.</p>
     {
         int f0 { 0 }, f1 { 0 };           // frame span [f0, f1)
         std::vector&lt;float&gt; midi;          // per-frame MIDI
+        // Frames belonging to the run's own stable tail: glide merges
+        // prepend frames but the median/vibrato stats stay anchored here so
+        // an onset ramp can't skew the note's center.
         int anchorCount { 0 };
     };
     std::vector&lt;Run&gt; runs;
@@ -115,7 +272,10 @@ to decide before it has heard the end of the word.</p>
     flushRun (numFrames);
 
     // ── Stage 2: glide-merge (right-to-left so chains collapse into the
-    //    stable note they lead into). ...
+    //    stable note they lead into).  Merge when (near-)contiguous AND the
+    //    run is either a sub-minimum fragment or a short ramp trending into
+    //    the next run's pitch.  A stable short note fails the ramp test and
+    //    survives as its own (tiny) note.
     for (int i = (int) runs.size() - 2; i &gt;= 0; --i)
     {
         auto&amp; cur  = runs[(size_t) i];
@@ -140,7 +300,178 @@ to decide before it has heard the end of the word.</p>
         next.f0 = cur.f0;
         next.midi.insert (next.midi.begin(), cur.midi.begin(), cur.midi.end());
         runs.erase (runs.begin() + i);
-    }</code></pre></details>
+    }
+
+    // ── Stage 3: materialize every voiced run as a NOTE (NewTone model -- no
+    //    slice pills).  Stats come from the anchor tail; short runs still become
+    //    (tiny) notes so pitched material never silently drops (locked 6).  The
+    //    frame span + region index is recorded so Stage 4 can fold the adjacent
+    //    unvoiced material (consonants/breaths) into the note it belongs to.
+    struct NoteFrame { int f0, f1, idx; };
+    std::vector&lt;NoteFrame&gt; noteFrames;
+    for (const auto&amp; run : runs)
+    {
+        const double t0 = run.f0 * hopSec;
+        const double t1 = juce::jmin (run.f1 * hopSec, mCompositeSec);
+        if (t1 - t0 &lt;= 1.0e-6 || run.midi.empty()) continue;
+
+        PitchNoteRegion r;
+        r.startSec = t0;
+        r.endSec   = t1;
+
+        std::vector&lt;float&gt; anchor (run.midi.end()
+                                       - juce::jmin ((int) run.midi.size(),
+                                                     run.anchorCount),
+                                   run.midi.end());
+        r.midi = medianOf (anchor);
+        r.f0Hz = 440.0f * std::pow (2.0f, (r.midi - 69.0f) / 12.0f);
+
+        // Vibrato: deviation from the median over the anchor tail.
+        // Depth = sqrt(2)*RMS in cents (sine assumption); rate from
+        // deviation zero crossings.  Under 15 cents = no vibrato.
+        double rms = 0.0;
+        int zc = 0;
+        for (size_t k = 0; k &lt; anchor.size(); ++k)
+        {
+            const float dev = anchor[k] - r.midi;
+            rms += (double) dev * dev;
+            if (k &gt; 0 &amp;&amp; ((anchor[k - 1] - r.midi) &lt; 0.0f) != (dev &lt; 0.0f))
+                ++zc;
+        }
+        rms = std::sqrt (rms / (double) juce::jmax ((size_t) 1, anchor.size()));
+        const float depthCents = juce::jlimit (0.0f, 300.0f,
+            (float) (rms * std::sqrt (2.0) * 100.0));
+        const double anchorSec = anchor.size() * hopSec;
+        if (depthCents &gt;= 15.0f)
+        {
+            r.vibDepthCents = depthCents;
+            r.vibRateHz     = juce::jlimit (3.0f, 9.0f,
+                (float) (zc / (2.0 * juce::jmax (0.05, anchorSec))));
+        }
+
+        noteFrames.push_back ({ run.f0, run.f1, (int) mRegions.size() });
+        mRegions.push_back (r);
+    }
+
+    // ── Stage 4: fold energetic unvoiced spans into the adjacent note (NewTone
+    //    model).  Frame RMS over the hop grid; a contiguous above-gate span that
+    //    no note covers is consonant/breath material -- fold it into the
+    //    FOLLOWING note (a leading consonant/breath) or, failing that, the
+    //    PRECEDING note (a trailing consonant), so one pill owns consonant+vowel.
+    //    A span with no note within kAttachGapFrames (a plosive closure / an
+    //    isolated breath) becomes its own inline SLICE block at the nearest note's
+    //    lane; only quiet frames (true silence) stay uncovered.
+    if (! noteFrames.empty())
+    {
+        std::vector&lt;float&gt; frameRms ((size_t) numFrames, 0.0f);
+        float peakRms = 0.0f;
+        for (int f = 0; f &lt; numFrames; ++f)
+        {
+            const int a = f * kF0Hop;
+            const int z = juce::jmin (numSamples, a + kF0Hop);
+            double acc = 0.0;
+            for (int s = a; s &lt; z; ++s) acc += (double) mono[s] * mono[s];
+            const float v = (float) std::sqrt (acc / juce::jmax (1, z - a));
+            frameRms[(size_t) f] = v;
+            peakRms = juce::jmax (peakRms, v);
+        }
+        const float gate = juce::jmax (kSliceAbsGate, kSliceRelGate * peakRms);
+
+        std::vector&lt;bool&gt; covered ((size_t) numFrames, false);
+        for (const auto&amp; nf : noteFrames)
+            for (int f = juce::jlimit (0, numFrames, nf.f0);
+                 f &lt; juce::jlimit (0, numFrames, nf.f1); ++f)
+                covered[(size_t) f] = true;
+
+        // Extend the chosen note over [a, z); leading -&gt; following note's start,
+        // trailing -&gt; preceding note's end.  noteFrames is kept in sync so a
+        // later span sees the grown boundary.
+        auto foldSpan = [&amp;] (int a, int z)
+        {
+            if (z - a &lt;= 0) return;
+            int prevI = -1, nextI = -1;
+            for (int k = 0; k &lt; (int) noteFrames.size(); ++k)
+            {
+                if (noteFrames[(size_t) k].f1 &lt;= a) prevI = k;
+                if (nextI &lt; 0 &amp;&amp; noteFrames[(size_t) k].f0 &gt;= z) nextI = k;
+            }
+            if (nextI &gt;= 0 &amp;&amp; (noteFrames[(size_t) nextI].f0 - z) &lt;= kAttachGapFrames)
+            {
+                mRegions[(size_t) noteFrames[(size_t) nextI].idx].startSec = (double) a * hopSec;
+                noteFrames[(size_t) nextI].f0 = a;
+            }
+            else if (prevI &gt;= 0 &amp;&amp; (a - noteFrames[(size_t) prevI].f1) &lt;= kAttachGapFrames)
+            {
+                mRegions[(size_t) noteFrames[(size_t) prevI].idx].endSec
+                    = juce::jmin ((double) z * hopSec, mCompositeSec);
+                noteFrames[(size_t) prevI].f1 = z;
+            }
+            else
+            {
+                // Isolated span (a plosive closure / breath bounded by silence):
+                // NewTone shows these as inline unpitched blocks, not a bottom
+                // lane.  Materialize a slice at the NEAREST note's pitch lane
+                // (midi is placement only -- the applicator skips pitch for slices).
+                PitchNoteRegion sl;
+                sl.isSlice  = true;
+                sl.startSec = (double) a * hopSec;
+                sl.endSec   = juce::jmin ((double) z * hopSec, mCompositeSec);
+                int lane = -1;
+                if (nextI &gt;= 0 &amp;&amp; prevI &gt;= 0)
+                    lane = ((noteFrames[(size_t) nextI].f0 - z)
+                                &lt;= (a - noteFrames[(size_t) prevI].f1)) ? nextI : prevI;
+                else if (nextI &gt;= 0) lane = nextI;
+                else if (prevI &gt;= 0) lane = prevI;
+                if (lane &gt;= 0)
+                    sl.midi = mRegions[(size_t) noteFrames[(size_t) lane].idx].midi;
+                if (sl.endSec - sl.startSec &gt; 1.0e-6)
+                    mRegions.push_back (sl);
+            }
+        };
+
+        int spanStart = -1;
+        for (int f = 0; f &lt; numFrames; ++f)
+        {
+            const bool energetic = ! covered[(size_t) f]
+                                &amp;&amp; mF0Track[(size_t) f] &lt;= 0.0f
+                                &amp;&amp; frameRms[(size_t) f] &gt; gate;
+            if (energetic) { if (spanStart &lt; 0) spanStart = f; }
+            else if (spanStart &gt;= 0) { foldSpan (spanStart, f); spanStart = -1; }
+        }
+        if (spanStart &gt;= 0) foldSpan (spanStart, numFrames);
+    }
+
+    std::sort (mRegions.begin(), mRegions.end(),
+               [] (const PitchNoteRegion&amp; a, const PitchNoteRegion&amp; b)
+               { return a.startSec &lt; b.startSec; });
+
+    // Carry user edits across re-analysis for regions that still line up
+    // (same kind only -- re-analysis regenerates all-note segmentation, so a
+    // manually sliced-off piece does not survive a re-analyze).  The
+    // QA-Fd edit set carries too: popup curves, Variation, and the time edits
+    // (FA-9's carry contract -- a grid nudge must not silently delete moves).
+    for (auto&amp; r : mRegions)
+        for (const auto&amp; old : oldRegions)
+            if (old.isSlice == r.isSlice
+                &amp;&amp; std::abs (old.startSec - r.startSec) &lt; kEditCarryTolSec)
+            {
+                r.shiftSemis   = old.shiftSemis;
+                r.formantSemis = old.formantSemis;
+                r.vibDepthMult = old.vibDepthMult;
+                r.vibRateMult  = old.vibRateMult;
+                r.variation    = old.variation;
+                r.volShape     = old.volShape;
+                r.pitchShape   = old.pitchShape;
+                r.dstStartSec  = old.dstStartSec;
+                r.dstEndSec    = old.dstEndSec;
+                r.detached     = old.detached;
+                break;
+            }
+
+    mComposite = std::make_shared&lt;const std::vector&lt;float&gt;&gt; (mono, mono + numSamples);
+    mAnalyzed = true;
+    publishEdits();
+}</code></pre></details>
 <pre class="formulas">- F0 analysis: `kF0Hop = 512` samples (hop; YIN window stays 2048 = 75% overlap) via shared `BaySickAlignDSP::estimateF0Track`.
 - Segmentation constants (BaySickPitchDSP.cpp lines 23-45): `kGapFrames = 8` (~93 ms at 44.1k/512-hop, note ends), `kSplitSemis = 0.6f` (pitch-jump threshold vs running median), `kSplitHoldFrames = 8` (jump must hold), `kMinNoteSec = 0.06`, `kEditCarryTolSec = 0.05` (edit carry across re-analysis, +/-50 ms), `kGlideMergeMaxSec = 0.12`, `kGlideMinRangeSemis = 0.8f`, `kSliceRelGate = 0.02f` (2% of peak frame RMS), `kSliceAbsGate = 1.0e-4f`, `kAttachGapFrames = 2` (~23 ms fold window).
 - Ramp test for glide merge: `|cur.back - nextMed| + 0.3 &lt; |cur.front - nextMed|` AND range `&gt; 0.8` semis.

@@ -28,98 +28,31 @@ void DelayDSP::recalcTargetDelay()
     mTargDelayL = juce::jlimit(1.0f, maxDelay, samples - spreadHalf - panOffset);
     mTargDelayR = juce::jlimit(1.0f, maxDelay, samples + spreadHalf + panOffset);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DelayDSP.cpp</summary><pre><code>// DelayDSP::process -- VocalDoubler branch (verbatim)
-    // H-8: VocalDoubler Type runs an entirely different algorithm (dual
-    // detuned taps, no feedback, no diffusion / lo-fi / mod LFO chain).
-    if (mType == Type::VocalDoubler)
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DelayDSP.cpp</summary><pre><code>// Source/DSP/DelayDSP.cpp  -  DelayDSP::recalcTargetDelay (complete)
+// ─────────────────────────────────────────────────────────────────────────────
+void DelayDSP::recalcTargetDelay()
+{
+    float ms = delayMs;
+
+    if (syncBPM &amp;&amp; mHostBPM &gt; 0.0)
     {
-        // Inline VocalDoubler loop -- short delay taps with per-side LFO
-        // drift gives the classic stacked-vocals doubler effect.  No
-        // feedback path so the existing Echo machinery is fully bypassed.
-        const int numSamples  = buffer.getNumSamples();
-        const int numChannels = buffer.getNumChannels();
-        if (numSamples == 0 || numChannels &lt; 1 || mLineL.empty()) return;
+        const double beatSec  = 60.0 / mHostBPM;
+        const double noteFrac = static_cast&lt;double&gt;(syncNumerator) /
+                                static_cast&lt;double&gt;(std::max(1, syncDenominator));
+        ms = static_cast&lt;float&gt;(noteFrac * beatSec * 1000.0);
+    }
 
-        float* L = buffer.getWritePointer (0);
-        float* R = (numChannels &gt; 1) ? buffer.getWritePointer (1) : nullptr;
+    const float maxDelay = static_cast&lt;float&gt;(mLineL.empty() ? 1 : (int)mLineL.size() - 1);
+    float samples = juce::jlimit(1.0f, maxDelay, ms * 0.001f * static_cast&lt;float&gt;(mSampleRate));
 
-        const int lineSize = (int) mLineL.size();
-        const float sr = (float) mSampleRate;
+    // L/R spread: ±half of (stereoSpread * 10% of delay)
+    const float spreadHalf = mStereoSpread * samples * 0.05f;
+    // Pan offset: -1..1 maps to ±5% of delay
+    const float panOffset  = mOffsetPan * samples * 0.05f;
 
-        // Drift LFO -- per-side phase increment
-        const float lfoInc = (float) (juce::MathConstants&lt;double&gt;::twoPi
-                                          * (double) mDoubleRate / mSampleRate);
-        const float driftDepthMs = (mDoubleDetune * 0.01f) * 3.0f;   // 0..3 ms
-
-        // Per-sample base delay times (in samples)
-        const float baseL = (mDoubleTimeLMs * 0.001f) * sr;
-        const float baseR = (mDoubleTimeRMs * 0.001f) * sr;
-
-        // Width 0..1 -- 0 = both taps centered, 1 = full L/R split
-        const float w        = juce::jlimit (0.0f, 1.0f, mDoubleWidth * 0.01f);
-        const float lTapL    = 0.5f + 0.5f * w;   // L tap pan-left amount
-        const float lTapR    = 0.5f - 0.5f * w;   // L tap pan-right amount
-        const float rTapL    = 0.5f - 0.5f * w;
-        const float rTapR    = 0.5f + 0.5f * w;
-
-        // [ducking setup elided -- identical envelope follower to Echo path]
-
-        for (int i = 0; i &lt; numSamples; ++i)
-        {
-            const float inL = L[i];
-            const float inR = R ? R[i] : inL;
-
-            // Write dry mono-summed input into both lines
-            const float monoIn = 0.5f * (inL + inR);
-            mLineL[mWritePos] = monoIn * mWetIn;
-            mLineR[mWritePos] = monoIn * mWetIn;
-
-            // Per-side drift phasors (decorrelated by initial phase offset)
-            const float driftL = std::sin (mDoubleLfoPhaseL) * driftDepthMs * 0.001f * sr;
-            const float driftR = std::sin (mDoubleLfoPhaseR) * driftDepthMs * 0.001f * sr;
-            mDoubleLfoPhaseL += lfoInc;
-            mDoubleLfoPhaseR += lfoInc * 1.13f;   // slight rate offset for natural drift
-            while (mDoubleLfoPhaseL &gt;= juce::MathConstants&lt;float&gt;::twoPi)
-                mDoubleLfoPhaseL -= juce::MathConstants&lt;float&gt;::twoPi;
-            while (mDoubleLfoPhaseR &gt;= juce::MathConstants&lt;float&gt;::twoPi)
-                mDoubleLfoPhaseR -= juce::MathConstants&lt;float&gt;::twoPi;
-
-            // Read positions for L + R taps with drift
-            const float posL = (float) mWritePos - juce::jmax (1.0f, baseL + driftL);
-            const float posR = (float) mWritePos - juce::jmax (1.0f, baseR + driftR);
-            const float wrappedL = posL &lt; 0.0f ? posL + (float) lineSize : posL;
-            const float wrappedR = posR &lt; 0.0f ? posR + (float) lineSize : posR;
-            const float tapL = linInterp (mLineL, wrappedL, lineSize);
-            const float tapR = linInterp (mLineR, wrappedR, lineSize);
-
-            // Stereo recombine using width pans
-            float wetL = tapL * lTapL + tapR * rTapL;
-            float wetR = tapL * lTapR + tapR * rTapR;
-
-            // Ducking on the wet only -- envelope follows external SC if a
-            // source is picked, otherwise self-sidechains on the dry input.
-            const float trigL = (scL &amp;&amp; i &lt; scN) ? scL[i] : inL;
-            const float trigR = (scR &amp;&amp; i &lt; scN) ? scR[i] : inR;
-            const float inEnvSrc = std::max (std::abs (trigL), std::abs (trigR));
-            const float coef = (inEnvSrc &gt; mDuckEnv) ? duckAtk : duckRel;
-            mDuckEnv = inEnvSrc + (mDuckEnv - inEnvSrc) * coef;
-            const float overshoot = std::max (0.0f, mDuckEnv - duckThreshLin);
-            const float duckScalar = (duckAmt01 &gt; 0.0f &amp;&amp; overshoot &gt; 0.0f)
-                                        ? juce::jmax (0.0f, 1.0f - duckAmt01
-                                              * juce::jmin (1.0f, overshoot / duckThreshLin))
-                                        : 1.0f;
-            wetL *= duckScalar;
-            wetR *= duckScalar;
-
-            // Final mix (no feedback writeback -- VocalDoubler has no FB path)
-            L[i] = inL * mDryOut + wetL * mWetOut;
-            if (R) R[i] = inR * mDryOut + wetR * mWetOut;
-
-            mWritePos = (mWritePos + 1) % lineSize;
-        }
-
-        return;   // skip the Echo path entirely
-    }</code></pre></details>
+    mTargDelayL = juce::jlimit(1.0f, maxDelay, samples - spreadHalf - panOffset);
+    mTargDelayR = juce::jlimit(1.0f, maxDelay, samples + spreadHalf + panOffset);
+}</code></pre></details>
 <pre class="formulas">- Type umbrella: `Type::Echo = 0` (full delay: Stereo/Mono/PingPong/Off models, feedback chain, diffusion, lo-fi, mod LFO, tone) and `Type::VocalDoubler = 1` (Eventide-H910-style: two short detuned taps, NO feedback).
 - Sync divisions: `delayMs = (num/den) * (60/BPM) * 1000` — num/den of one beat at the host BPM. The panel&#x27;s 8 selector entries (num, den): (1,1) (1,2) (1,4) (1,8) (3,16)=1/8D (1,6)=1/4T (1,16) (1,12)=1/8T. Defaults: numerator 1, denominator 4.
 - Spread / Pan tap offsets: `spreadHalf = stereoSpread * samples * 0.05` (Spread 0..1 gives up to +/-5% each side = 10% total L/R difference); `panOffset = offsetPan * samples * 0.05` (Pan -1..+1 = +/-5%). `targetL = samples - spreadHalf - panOffset`, `targetR = samples + spreadHalf + panOffset`, each clamped 1..lineSize-1. Delay range 1..2000 ms (default 250); line length `kMaxDelaySeconds = 3.0 s`.

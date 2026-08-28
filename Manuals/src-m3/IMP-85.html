@@ -32,7 +32,8 @@ than a fade layered on afterward.</p>
                         v-&gt;cutFast();
             }
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthDSP.cpp (Poly/Mono/Legato branch + Cut Self dispatch; shared by BaySickBass)</summary><pre><code>void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer&lt;float&gt;&amp; buf,
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickSynth\BaySickSynthDSP.cpp (Poly/Mono/Legato branch + Cut Self dispatch; shared by BaySickBass)</summary><pre><code>// Source/BaySickSynth/BaySickSynthDSP.cpp  -  BaySickSynthDSP::renderNextBlock (complete)
+void BaySickSynthDSP::renderNextBlock (juce::AudioBuffer&lt;float&gt;&amp; buf,
                                         juce::MidiBuffer&amp; midi)
 {
     // The per-pitch note-off counter (poly branch below) is poly-only; keep it
@@ -93,12 +94,72 @@ than a fade layered on afterward.</p>
         mLegatoVoice     = nullptr;
         mLegatoSynthNote = -1;
 
-        // [Poly per-pitch note-off strip: mNoteOnCount[128] counters hold an
-        //  earlier same-pitch note-off until the LAST overlapping note of that
-        //  pitch ends; counters zero when the synth is fully silent and on
-        //  CC-123 All-Notes-Off / CC-120 All-Sound-Off. ~40 lines elided.]
+        // Per-pitch note-off strip (QA-CutSelfReview): overlapping same-pitch notes
+        // must not let the earlier note's note-off cascade onto the retriggered
+        // voice (juce::Synthesiser matches note-offs by pitch).  Hold an earlier
+        // note-off until the LAST overlapping note of that pitch ends.  Self-heals:
+        // the counter zeroes whenever the synth is fully silent (no lost-note-off
+        // drift can persist past a moment of silence).
+        bool anyActive = false;
+        for (int vi = 0; vi &lt; kNumVoices; ++vi)
+            if (mVoices[vi] != nullptr &amp;&amp; mVoices[vi]-&gt;isVoiceActive()) { anyActive = true; break; }
+        if (! anyActive)
+            std::fill_n (mNoteOnCount, 128, 0);
 
-        // [Cut Self dispatch -- see excerpt above.]
+        juce::MidiBuffer filtered;
+        for (const auto meta : midi)
+        {
+            const auto msg = meta.getMessage();
+            if (msg.isNoteOn())
+            {
+                const int p = msg.getNoteNumber();
+                if (p &gt;= 0 &amp;&amp; p &lt; 128) ++mNoteOnCount[p];
+                filtered.addEvent (msg, meta.samplePosition);
+            }
+            else if (msg.isNoteOff())
+            {
+                const int  p       = msg.getNoteNumber();
+                bool       deliver = true;
+                if (p &gt;= 0 &amp;&amp; p &lt; 128)
+                {
+                    if (mNoteOnCount[p] &gt; 0) --mNoteOnCount[p];
+                    if (mNoteOnCount[p] &gt; 0) deliver = false;   // a later same-pitch note still holds it
+                }
+                if (deliver) filtered.addEvent (msg, meta.samplePosition);
+            }
+            else
+            {
+                // CC-123 All-Notes-Off / CC-120 All-Sound-Off flush every voice
+                // without per-note offs (transport stop / play-from-top / loop
+                // wrap, PluginProcessor.cpp).  Zero the counter so those untracked
+                // releases can't leave it drifted and strip a later note-off.
+                if (msg.isAllNotesOff() || msg.isAllSoundOff())
+                    std::fill_n (mNoteOnCount, 128, 0);
+                filtered.addEvent (msg, meta.samplePosition);
+            }
+        }
+
+        // Cut Self (Poly): on each note-on, hard-cut the matching voice (Same Pitch)
+        // or every active voice (Cut All) BEFORE rendering, so the retrigger starts
+        // clean.  cutFast() is an instant ~1 ms click-free fade-out - NOT a MIDI
+        // note-off (which JUCE turns into an ADSR tail-off = the old bleed).  Runs
+        // only on note-on events; mVoices[] is cached (no dynamic_cast).
+        if (mCutSelf)
+        {
+            for (const auto meta : filtered)
+            {
+                const auto msg = meta.getMessage();
+                if (! msg.isNoteOn())
+                    continue;
+
+                const int n = msg.getNoteNumber();
+                for (int vi = 0; vi &lt; kNumVoices; ++vi)
+                    if (auto* v = mVoices[vi];
+                        v != nullptr &amp;&amp; v-&gt;isVoiceActive()
+                        &amp;&amp; (mCutAll || v-&gt;getCurrentlyPlayingNote() == n))
+                        v-&gt;cutFast();
+            }
+        }
 
         mSynth.renderNextBlock (buf, filtered, 0, buf.getNumSamples());
     }

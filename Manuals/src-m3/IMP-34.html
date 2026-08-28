@@ -12,48 +12,14 @@ static constexpr float kFreqs[kNumBands] = {
     auto coefs = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
                     (mSampleRate, kFreqs[idx], 1.4f, gain);
     *mBands[idx].state = *coefs;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassGraphicEQStyleDSP.cpp</summary><pre><code>void BassGraphicEQStyleDSP::rebuildBand (int idx)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassGraphicEQStyleDSP.cpp</summary><pre><code>// Source/DSP/BassGraphicEQStyleDSP.cpp  -  BassGraphicEQStyleDSP::rebuildBand (complete)
+void BassGraphicEQStyleDSP::rebuildBand (int idx)
 {
     if (idx &lt; 0 || idx &gt;= kNumBands) return;
     const float gain = juce::Decibels::decibelsToGain (mGainsDb[idx]);
     auto coefs = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
                     (mSampleRate, kFreqs[idx], 1.4f, gain);
     *mBands[idx].state = *coefs;
-}
-
-void BassGraphicEQStyleDSP::setBandDb (int idx, float db)
-{
-    if (idx &lt; 0 || idx &gt;= kNumBands) return;
-    // jlimit passes NaN (every comparison is false), and a NaN gain bakes into
-    // the biquad coefficients and the saved project.  Debug-asserts so the
-    // WRITER is on the stack, not a later paint.
-    if (! std::isfinite (db)) { jassertfalse; return; }
-    db = juce::jlimit (-15.0f, 15.0f, db);
-    if (! juce::approximatelyEqual (mGainsDb[idx], db))
-    {
-        mGainsDb[idx] = db;
-        rebuildBand (idx);
-    }
-}
-
-void BassGraphicEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
-{
-    if (bypassed) return;
-    juce::ScopedNoDenormals noDenormals;
-
-    const int numCh = buffer.getNumChannels();
-    const int n     = buffer.getNumSamples();
-    if (numCh == 0 || n == 0) return;
-
-    juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
-    auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
-    juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
-
-    for (auto&amp; b : mBands) b.process (ctx);
-
-    // Master level (+/-15 dB, matching the GEB-7 Level slider; no -inf kill).
-    if (! juce::approximatelyEqual (mLevelDb, 0.0f))
-        buffer.applyGain (juce::Decibels::decibelsToGain (mLevelDb));
 }</code></pre></details>
 <pre class="formulas">- 7 bands at GEB-7 (bass) centers: 50 / 120 / 400 / 500 / 800 / 4500 / 10000 Hz — NOT octave-spaced like the guitar GE-7; clustered where bass lives.
 - Every band is a peak (bell) biquad at Q = 1.4, +/-15 dB per band — unlike the guitar Graphic EQ, the top band is NOT a shelf.

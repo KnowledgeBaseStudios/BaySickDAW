@@ -31,10 +31,151 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File&amp; sfzPath)
         return false;
 
     mCurrentKitPath = sfzPath;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickGuitars\BaySickGuitarsProcessor.cpp (loadKit program-load path, processBlock MIDI/keyswitch dispatch; BaySickBasses mirrors it, BaySickRustyDrums is the singleton variant)</summary><pre><code>    // QA-Sfizz-Followup (2026-06-01): reset every CC to 0 (off) before applying
-    // the kit&#x27;s set_cc overrides [...] The reset
-    // reaches sfizz via setValueNotifyingHost -&gt; parameterChanged&#x27;s dirty
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickGuitars\BaySickGuitarsProcessor.cpp (loadKit program-load path, processBlock MIDI/keyswitch dispatch; BaySickBasses mirrors it, BaySickRustyDrums is the singleton variant)</summary><pre><code>// Source/BaySickGuitars/BaySickGuitarsProcessor.cpp  -  BaySickGuitarsProcessor::loadKit (complete)
+bool BaySickGuitarsProcessor::loadKit (const juce::File&amp; sfzPath)
+{
+    if (! sfzPath.existsAsFile() || ! mSfizz)
+        return false;
+
+    // SECURITY (QA-Cleanup 2026-08-10): pre-flight BEFORE handing the kit to
+    // sfizz.  After loadSfz* it is too late - the macro and include hangs never
+    // return, and the Ogg overflow has already happened.  See SafeSfzKit.h.
+    if (const auto why = SafeSfzKit::rejectReason (sfzPath); why.isNotEmpty())
+    {
+        MissingFileReport::add ("Instrument kit refused - " + why,
+                                sfzPath.getFullPathName());
+        return false;
+    }
+
+    if (! mSfizz-&gt;loadSfzFile (sfzPath.getFullPathName().toStdString()))
+        return false;
+
+    mCurrentKitPath = sfzPath;
+
+    // Seed CC defaults from the kit's `set_cc&lt;N&gt;=&lt;int&gt;` directives so the
+    // ARIA panel + sfizz both start at the kit author's intended positions.
+    // Walks #include chains depth-first up to depth 4 (covers
+    // `program → default/&lt;file&gt; → mappings/&lt;file&gt;` nesting) and collects every
+    // `set_cc&lt;N&gt;=&lt;int&gt;` it encounters.  Each is stamped into mCcKitDefault
+    // (read-only snapshot for double-click reset) AND written through APVTS
+    // (so the parameter listener pushes the value to sfizz and the panel knobs
+    // paint at the right initial position).  Direct port of Rusty's scan.
+    std::map&lt;int, int&gt;          kitDefaults;
+    std::map&lt;int, juce::String&gt; kitLabels;
+    std::map&lt;juce::String, int&gt; defines;   // SFZ `#define $name value` macros
+    {
+        // SECURITY (QA-Cleanup 2026-08-10): a depth cap alone is not a bound --
+        // nothing stopped a file including itself and nothing capped BREADTH,
+        // so a crafted or merely broken pack could fan out to millions of reads
+        // and hang the app on load.  Same fix as SlideRegionMap::expandIncludes.
+        juce::StringArray visitedIncludes;
+        int includeBudget = 256;
+        // Every #include resolves against the TOP-LEVEL file's directory, which
+        // is what sfizz does (Parser.cpp:70-74, `_originalDirectory` assigned
+        // once).  Resolving against the including file's parent - as this did -
+        // silently found nothing below depth 2, so set_cc defaults declared in
+        // nested mapping files were never picked up.
+        const auto sfzRoot = sfzPath.getParentDirectory();
+
+        std::function&lt;void (const juce::File&amp;, int)&gt; scan;
+        scan = [&amp;] (const juce::File&amp; f, int depth)
+        {
+            if (depth &gt; 4 || includeBudget &lt;= 0 || ! f.existsAsFile()) return;
+            const auto visitKey = f.getFullPathName();
+            if (visitedIncludes.contains (visitKey)) return;
+            visitedIncludes.add (visitKey);
+            --includeBudget;
+            const auto txt = f.loadFileAsString();
+            juce::StringArray ls;
+            ls.addLines (txt);
+            for (const auto&amp; raw : ls)
+            {
+                const auto t = raw.trim();
+                if (t.startsWithIgnoreCase ("#define"))
+                {
+                    // SFZ macro `#define $name value`.  Captured so set_cc lines
+                    // that reference $name resolve to the kit author's value
+                    // (e.g. Big Rusty Drums' set_cc4=$ht_lo_hi_init).  Commented
+                    // `//#define` lines are skipped - they do not start with '#'.
+                    const auto rest = t.substring (7).trim();
+                    const int  sp   = rest.indexOfChar (' ');
+                    if (sp &gt; 0)
+                    {
+                        const auto name = rest.substring (0, sp).trim();
+                        if (name.startsWith ("$"))
+                            defines[name] = rest.substring (sp + 1).trim().getIntValue();
+                    }
+                }
+                else if (t.startsWithIgnoreCase ("set_cc"))
+                {
+                    const int eq = t.indexOfChar ('=');
+                    if (eq &gt; 6)
+                    {
+                        const int cc  = t.substring (6, eq).getIntValue();
+                        const auto rhs = t.substring (eq + 1).trim();
+                        // Resolve an SFZ `#define $macro` reference; a literal int
+                        // passes straight through.  Unknown macro -&gt; 0.
+                        int resolved;
+                        if (rhs.startsWith ("$"))
+                        {
+                            const auto it = defines.find (rhs);
+                            resolved = (it != defines.end()) ? it-&gt;second : 0;
+                        }
+                        else
+                            resolved = rhs.getIntValue();
+                        const int val = juce::jlimit (0, 127, resolved);
+                        if (cc &gt;= 0 &amp;&amp; cc &lt; kCcCount) kitDefaults[cc] = val;
+                    }
+                }
+                else if (t.startsWithIgnoreCase ("label_cc"))
+                {
+                    // Format: `label_cc&lt;N&gt;=&lt;text&gt;` - text runs to end-of-line,
+                    // unquoted.  Used by ARIA hosts as the parameter's display
+                    // name; we mirror that in tooltip + automation menu labels.
+                    const int eq = t.indexOfChar ('=');
+                    if (eq &gt; 8)
+                    {
+                        const int cc = t.substring (8, eq).getIntValue();
+                        auto label   = t.substring (eq + 1).trim();
+                        if (cc &gt;= 0 &amp;&amp; cc &lt; kCcCount &amp;&amp; label.isNotEmpty())
+                            kitLabels[cc] = label;
+                    }
+                }
+                else if (t.startsWithIgnoreCase ("#include"))
+                {
+                    const int q1 = t.indexOfChar ('"');
+                    const int q2 = (q1 &gt;= 0) ? t.indexOfChar (q1 + 1, '"') : -1;
+                    if (q1 &gt;= 0 &amp;&amp; q2 &gt; q1)
+                    {
+                        const auto rel = t.substring (q1 + 1, q2);
+                        scan (sfzRoot.getChildFile (rel), depth + 1);
+                    }
+                }
+            }
+        };
+        scan (sfzPath, 0);
+    }
+    {
+        const juce::SpinLock::ScopedLockType lk (mCcKitDefaultLock);
+        mCcKitDefault = kitDefaults;
+    }
+    {
+        const juce::SpinLock::ScopedLockType lk (mCcLabelLock);
+        mCcLabel = kitLabels;
+    }
+    // QA-Sfizz-Followup (2026-06-01): reset every CC to 0 (off) before applying
+    // the kit's set_cc overrides - reverts Sub-E's reset-to-64.  Baseline 0 +
+    // kit set_cc overrides = the kit author's intended state: unset CCs OFF
+    // (sfizz's natural default), set_cc CCs at their declared value.  Sub-E's
+    // blanket 64 turned "amount" controls (feedback / muting / unison / vibrato)
+    // half-on by default and sounded wrong.  Reset is still required (vs leaving
+    // prior values) because switching programs leaks values from the previous
+    // kit - e.g. user adjusts CC100 on Green to 90, switches to Black (which
+    // never set_cc100); without the reset CC100 would stay at 90.  The reset
+    // reaches sfizz via setValueNotifyingHost -&gt; parameterChanged's dirty
     // mark, drained by processBlock once the processing gate reopens.
+    // QA-UndoCoverage Task 6: kit-default pushes are programmatic (the kit
+    // load itself becomes ONE structural transaction in Task 7).
     juce::AudioProcessorValueTreeState::ScopedProgrammaticParamWrites spw;
     for (int cc = 0; cc &lt; kCcCount; ++cc)
     {
@@ -55,6 +196,8 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File&amp; sfzPath)
 
     // QA-SlideSampler Task 1: build the blended-slide note-&gt;sample table for the
     // center-voice default-keyswitch sustain articulation of the loaded program.
+    // Independent of the sfizz load above; consumed by the SlideSampler (Task 2)
+    // and a no-op for normal playback.
     mSlideRegions = extractSlideRegions (sfzPath);
     mSlideSampler.setProgram (mSlideRegions);   // rebuild zone tables (processing gate off here)
 

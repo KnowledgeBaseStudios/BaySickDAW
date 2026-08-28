@@ -31,8 +31,18 @@ position in ticks. The two are deliberately not shared.</p>
                             if (auto* param = ap-&gt;getParameter (paramId))
                                 param-&gt;setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v01));
                     });   // model-scoped: re-resolves through the rig at apply time</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15528+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::registerModelEngineAutomation
-// (full function, lines 15425-15537)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (registerModelEngineAutomation, lines 15528+)</summary><pre><code>// Source/Standalone/StandaloneEditor.cpp  -  StandaloneEditor::registerModelEngineAutomation (complete)
+// QA-ModelShell TS1: engine-parameter lane registration keyed to MODEL events
+// (EngineRig::onEngineCreated), never to view builds.  Lane-id vocabulary
+// matches what the engine editors stamp today:
+//   Layers/Bass/Drums/Clips -- the engine APVTS param ids verbatim;
+//   Vox  -- "vox&lt;N&gt;_" + id, covering the vocal APVTS and its embedded NAM/IR;
+//   Inst -- "inst&lt;N&gt;_" + id for the NAM/IR stage.  Pedal lanes are uuid-keyed
+//   rack lanes (EffectParamMap pedal tables land in TS3); the chain wrapper
+//   has no parameters.
+// Applicators are null-owner and re-resolve tab -&gt; engine THROUGH the rig at
+// apply time, so an engine swap can never leave a closure aimed at a freed
+// processor.
 void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
 {
     const TabKind kind = tab.kind;
@@ -72,7 +82,7 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
             // strip is recording, a write to the realtime-board set is vetoed
             // for the same reason the UI greys those controls out.  The lane is
             // not consumed -- the next tick after the veto clears applies
-            // normally.  Moved here from BaySickVocalEditor&#x27;s registration when
+            // normally.  Moved here from BaySickVocalEditor's registration when
             // TS3 retired the widget wrappers; the veto had to travel with it or
             // an automated take would start clicking again.
             const bool gated = (which == Target::MainEngine)
@@ -120,7 +130,7 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
 
         case TabKind::Vox:
         {
-            const juce::String pre = &quot;vox&quot; + juce::String (idx) + &quot;_&quot;;
+            const juce::String pre = "vox" + juce::String (idx) + "_";
             registerParamsOf (Target::MainEngine, tab.engine.get(), pre);
             if (auto* v = dynamic_cast&lt;BaySickVocalProcessor*&gt; (tab.engine.get()))
                 registerParamsOf (Target::VocalNam, &amp;v-&gt;getNamIrProcessor(), pre);
@@ -129,8 +139,8 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
 
         case TabKind::Inst:
             registerParamsOf (Target::InstNam, tab.namIr,
-                              &quot;inst&quot; + juce::String (idx) + &quot;_&quot;);
-            // The board&#x27;s own lanes, plus the subscription that re-keys them
+                              "inst" + juce::String (idx) + "_");
+            // The board's own lanes, plus the subscription that re-keys them
             // when the user swaps a pedal.  Wired here rather than in InstPage
             // because the board outlives every view of it.
             registerPedalAutomation (idx);

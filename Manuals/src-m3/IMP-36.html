@@ -46,7 +46,8 @@ cap to edge. The side view looks like it should do that. It does not.</p>
                                            1.0f / std::sqrt (mDistanceCm / 30.0f));
     const float polarGain = polarResponse (mPolar, mAngleDeg);
     mGainLin = distGain * polarGain;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\MicPlacementDSP.cpp</summary><pre><code>void MicPlacementDSP::updateCoefs()
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\MicPlacementDSP.cpp</summary><pre><code>// Source/DSP/MicPlacementDSP.cpp  -  MicPlacementDSP::updateCoefs (complete)
+void MicPlacementDSP::updateCoefs()
 {
     // ── Air-absorption LP cutoff: 20 kHz at 1 cm, ~6 kHz at 150 cm
     //    (linear interpolation in log-frequency).
@@ -83,9 +84,9 @@ cap to edge. The side view looks like it should do that. It does not.</p>
     *mOffAxisShelf.state = *darkC;
 
     // ── Distance + polar gain attenuation.
-    //    Distance follows ~1/r law clamped to a sane near-field range
-    //    (1cm = 1.0, 30cm = ~0.6, 150cm = ~0.25).  Polar gain layers on
-    //    top.
+    //    Distance follows 1/sqrt(r) normalized at 30cm, clamped to a sane
+    //    near-field range (1cm clamps to 1.5, 30cm = 1.0, 150cm = ~0.45).
+    //    Polar gain layers on top.
     const float distGain = juce::jlimit (0.1f, 1.5f,
                                            1.0f / std::sqrt (mDistanceCm / 30.0f));
     const float polarGain = polarResponse (mPolar, mAngleDeg);

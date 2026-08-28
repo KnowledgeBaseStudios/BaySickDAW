@@ -38,7 +38,30 @@ namespace WindowChrome
     // and it minimises with the owner.  That is exactly the relationship wanted.
     void ownToMainWindow (juce::Component&amp; win, const juce::Component&amp; insideMain);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WindowChrome.cpp (paintFrame line 24, paintTitleBar line 31, applyToDesktopWindow line 47, ownToMainWindow line 53)</summary><pre><code>// WindowChrome.cpp -- the shared chrome painters + ownership helper (lines 24-84)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WindowChrome.cpp (paintFrame line 24, paintTitleBar line 31, applyToDesktopWindow line 47, ownToMainWindow line 53)</summary><pre><code>// Source/Standalone/WindowChrome.cpp
+#include "WindowChrome.h"
+
+#if JUCE_WINDOWS
+ #include &lt;windows.h&gt;   // GWLP_HWNDPARENT -- see ownToMainWindow
+#endif
+
+namespace WindowChrome
+{
+    namespace
+    {
+        // Moved here from WorkspaceWindow.cpp's anonymous namespace -- that was
+        // the original and only definition, so this is a relocation, not a
+        // second palette.
+        const juce::Colour kFrameBg     { 0xFF1B1B1F };
+        const juce::Colour kTitleBg     { 0xFF2A2A31 };
+        const juce::Colour kTitleBgLive { 0xFF34343D };
+        const juce::Colour kTitleText   { 0xFFE8E8EE };
+        const juce::Colour kFrameEdge   { 0xFF000000 };
+    }
+
+    juce::Colour titleText() noexcept { return kTitleText; }
+    juce::Colour titleBg (bool live) noexcept { return live ? kTitleBgLive : kTitleBg; }
+
     void paintFrame (juce::Graphics&amp; g, juce::Rectangle&lt;int&gt; full)
     {
         g.fillAll (kFrameBg);
@@ -99,7 +122,8 @@ namespace WindowChrome
        #else
         juce::ignoreUnused (mainPeer, ownPeer);
        #endif
-    }</code></pre></details>
+    }
+}</code></pre></details>
 <pre class="formulas">- Chrome metrics: `WindowChrome::kTitleH = 26`, `WindowChrome::kBorderPx = 4`. `WorkspaceWindow::kTitleH` / `kBorderPx` are ALIASES of these (constexpr, ~40 call sites keep the old names). DocumentWindow&#x27;s own titleBarHeight also happens to be 26 — they match by coincidence unless routed through `applyToDesktopWindow`, which sets both the non-native title bar and the shared height.
 - Anti-degenerate floor: `kMinDegenerateW = 120`, `kMinDegenerateH = 80` (installed in ctor; only floor before a real default is known). Placeholder open size 480x320.
 - T8 sizing rule: minimum == default (&quot;smallest still readable&quot; measured numbers serve as both). `setDefaultWindowSize` sets default AND minimum; `setResizeFloor` lowers ONLY the floor (hosted plugin surfaces scale, ours don&#x27;t) and must be called AFTER `setDefaultWindowSize`.

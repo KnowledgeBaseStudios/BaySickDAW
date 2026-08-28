@@ -30,101 +30,34 @@ bool AudioClipStreamer::ensureRangeBlockingForOffline (int64 needStart)
     mReady.store (true, std::memory_order_release);
     return mRingWriteHead.load (std::memory_order_acquire) &gt; needStart;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\AudioClipStreamer.cpp (readAndMix miss branch, lines 402-444; noteMiss, lines 59-84; fillIntoRing fill clock, lines 165-185)</summary><pre><code>// AudioClipStreamer.cpp -- readAndMix ring-window miss branch (lines 402-444)
-    else
-    {
-        int64 wh = mRingWriteHead.load (std::memory_order_acquire);
-
-        // The ring physically covers [wh - capacity, wh).
-        // Use coveredStart (not rh) as the lower bound - the stateless filePos
-        // (outPosInClip * readRatio) lands 1-2 samples behind rh every block due
-        // to the interpolation lookahead in numFileSamples.  Using rh caused a
-        // phantom seek on every single block even though the data was present.
-        int64 coveredStart = wh - (int64) mCapacity;
-        // G1 smoke round 5: lower bound extended by 1 - the Catmull-Rom
-        // kernel below reads one frame BEHIND the integer position.
-        if (startFloor - 1 &lt; coveredStart || startFloor + numFileSamples &gt; wh)
-        {
-            // CL-282: one synchronous refill attempt before conceding.  Live
-            // playback keeps the strict window test EXACTLY as before (the
-            // refill helper no-ops when not offline).
-            bool stillMissing = true;
-            if (ensureRangeBlockingForOffline (startFloor - 1))
-            {
-                wh           = mRingWriteHead.load (std::memory_order_acquire);
-                coveredStart = wh - (int64) mCapacity;
-                // Post-refill (offline only): covered-to-EOF counts as
-                // covered -- the refill spans [startFloor-1, EOF-or-prefill)
-                // by construction (4 s ring vs one block's need), and the
-                // per-sample EOF breaks below handle a clip tail shorter
-                // than the interpolation lookahead.
-                stillMissing = (startFloor - 1 &lt; coveredStart)
-                            || (startFloor + numFileSamples &gt; wh &amp;&amp; wh &lt; mTotalLength);
-            }
-            if (stillMissing)
-            {
-                if (startFloor &gt;= 0 &amp;&amp; startFloor &lt; mTotalLength)
-                    noteMiss (startFloor);
-                // Genuine position jump (backward scrub, loop, or first-block miss) -
-                // signal the background thread to seek.
-                mSeekTarget .store (startFloor, std::memory_order_release);
-                mSeekPending.store (true,       std::memory_order_release);
-                mReady      .store (false,      std::memory_order_release);
-                return 0.0f;
-            }
-        }
-    }
-
-// AudioClipStreamer.cpp -- noteMiss: the UND counter (full function, lines 59-84)
-void AudioClipStreamer::noteMiss (int64 filePos) noexcept
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\AudioClipStreamer.cpp (readAndMix miss branch, lines 402-444; noteMiss, lines 59-84; fillIntoRing fill clock, lines 165-185)</summary><pre><code>// Source/DSP/AudioClipStreamer.cpp  -  AudioClipStreamer::ensureRangeBlockingForOffline (complete)
+bool AudioClipStreamer::ensureRangeBlockingForOffline (int64 needStart)
 {
-    // CALIBRATION (Rule 6 cat. 5): one max-ish block of slack.  Consecutive
-    // reads continue exactly where the last ended (readRaw) or within a
-    // fraction of a sample of it (readAndMix's ratio math), so anything
-    // inside this window is continuous playback and anything outside it is a
-    // seek the user asked for.
-    constexpr int64 kContiguitySlack = 4096;
+    if (! sOfflineRender.load (std::memory_order_relaxed) || mRamMode)
+        return false;
 
-    const bool contiguous = mLastServedEnd &gt; 0
-                         &amp;&amp; std::llabs ((long long) (filePos - mLastServedEnd))
-                              &lt;= (long long) kContiguitySlack;
+    needStart = juce::jmax ((int64) 0, needStart);
+    if (needStart &gt;= mTotalLength)
+        return false;   // past EOF: normal silence, not an underrun
 
-    if (contiguous || sOfflineRender.load (std::memory_order_relaxed))
-    {
-        sUnderrunCount.fetch_add (1, std::memory_order_relaxed);
-        // The Debug-build tripwire the entry asks for: during CONTINUOUS
-        // playback the ring should never be short, so this firing is a real
-        // finding rather than noise.
-        jassertfalse;
-    }
+    // The seek() shape executed inline on the render thread: restart the
+    // ring at the needed position and synchronously prefill.  Blocking here
+    // is the point -- no live audio callback runs while the flag is set.
+    juce::CriticalSection::ScopedLockType lk (mReaderLock);
 
-    // Either way the next read starts a fresh run -- a seek's first block must
-    // not be judged against a position from before the jump.
-    mLastServedEnd = 0;
-}
+    mSeekPending  .store (false,     std::memory_order_release);
+    mRingReadHead .store (needStart, std::memory_order_release);
+    mRingWriteHead.store (needStart, std::memory_order_release);
 
-// AudioClipStreamer.cpp -- fillIntoRing's fill clock: the PF number (lines 165-185)
-void AudioClipStreamer::fillIntoRing (int64 fromFilePos, int numSamples)
-{
-    // CL-282: the fill IS the disk read, so its wall-clock is the number that
-    // predicts an underrun -- a fill slower than the ring's remaining headroom
-    // starves the next audio-thread read.  Session peak via CAS-max; runs on
-    // whichever thread is filling (message seek / background prefetch /
-    // offline blocking), never the audio thread.
-    const double fillT0 = juce::Time::getMillisecondCounterHiRes();
-    struct ScopedFillClock
-    {
-        double t0;
-        ~ScopedFillClock()
-        {
-            const float ms = (float) (juce::Time::getMillisecondCounterHiRes() - t0);
-            float cur = sPeakPrefillMs.load (std::memory_order_relaxed);
-            while (ms &gt; cur
-                   &amp;&amp; ! sPeakPrefillMs.compare_exchange_weak (cur, ms,
-                                                              std::memory_order_relaxed))
-            {}
-        }
-    } fillClock { fillT0 };</code></pre></details>
+    const int prefill = (int) juce::jmin (
+        (int64) (mFileSampleRate * kPrefillSeconds),
+        mTotalLength - needStart);
+    if (prefill &gt; 0)
+        fillIntoRing (needStart, prefill);
+
+    mReady.store (true, std::memory_order_release);
+    return mRingWriteHead.load (std::memory_order_acquire) &gt; needStart;
+}</code></pre></details>
 <pre class="formulas">- `kBufSeconds = 4.0` — ring covers 4 s at the file&#x27;s native sample rate; `mCapacity = (int)(mFileSampleRate * kBufSeconds)`.
 - `kPrefillSeconds = 3.5` — synchronous pre-fill on seek (~88% of the ring); bumped from 2.0 in G-7 polish alongside bg-thread priority low → normal to kill the first-bar MP3 skip.
 - `kChunkSize = 8192` samples per background read.

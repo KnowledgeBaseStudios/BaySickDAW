@@ -28,7 +28,28 @@ the project folder as well as the referenced files.</p>
         }
         return false;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\ProjectBundler.h (the walker + writer API)</summary><pre><code>// ProjectBundler.h -- the whole API surface (verbatim, lines 22-135, banner trimmed)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\ProjectBundler.h (the walker + writer API)</summary><pre><code>// Source/Standalone/ProjectBundler.h
+#pragma once
+
+#include &lt;JuceHeader.h&gt;
+#include &lt;vector&gt;
+
+class PatternManager;
+class BaySickDAWProcessor;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProjectBundler - QA-Export Task 4.
+//
+// Walks every external audio file a project depends on, then writes the project
+// plus those files out as a single .zip or a plain folder.
+//
+// Deliberately a free-standing utility rather than dialog code: QA-ProjectSave's
+// "Pack Project" reuses the same walker and writer, and a second copy of this
+// logic would drift from this one.
+//
+// Message thread or a background thread - it does file IO and allocates, so
+// never call it from an audio callback.
+// ─────────────────────────────────────────────────────────────────────────────
 namespace ProjectBundler
 {
     // Where a referenced file actually lives.  This drives both what the user is
@@ -47,7 +68,7 @@ namespace ProjectBundler
         juce::String storedPath;   // exactly as persisted in the project
         juce::File   resolved;     // absolute location, or File() when Missing
         RefKind      kind { RefKind::Missing };
-        juce::String origin;       // human-readable &quot;where this came from&quot;
+        juce::String origin;       // human-readable "where this came from"
     };
 
     enum class Mode  { Zip, Folder };
@@ -91,8 +112,10 @@ namespace ProjectBundler
     };
 
     // Enumerates the audio references reachable from the pattern data: the
-    // project&#x27;s audio library plus every arrangement block&#x27;s audioFilePath (the
+    // project's audio library plus every arrangement block's audioFilePath (the
     // arrangement is project-global, not per-pattern).
+    //
+    // Every file reference the project depends on.
     //
     // `tabsXml`, when supplied, is the &lt;Tabs&gt; element StandaloneEditor produces
     // for project/template save.  It is how engine-held references get walked:
@@ -102,8 +125,8 @@ namespace ProjectBundler
     // the result to PatternManager references (the pre-2026-07-26 behaviour).
     //
     // `rackStatesXml`, when supplied, is a BaySickGraph::saveRackStates snapshot.
-    // Effects that hold user files (the Acoustic units&#x27; user IRs) can sit in
-    // any bus or insert rack, and those live under project.xml&#x27;s &lt;Processor&gt;
+    // Effects that hold user files (the Acoustic units' user IRs) can sit in
+    // any bus or insert rack, and those live under project.xml's &lt;Processor&gt;
     // rather than &lt;Tabs&gt; -- without this the walk never sees them.
     //
     // Non-const PatternManager only because getBlock() has no const overload;
@@ -127,9 +150,9 @@ namespace ProjectBundler
     // Writes the bundle.  `projectFolder` is the source project directory.
     // Missing files are REPORTED, never silently dropped.
     //
-    // Copied files are RE-REFERENCED: the bundle&#x27;s own project.xml is rewritten
+    // Copied files are RE-REFERENCED: the bundle's own project.xml is rewritten
     // so every file this call relocated into Samples/ is referenced at its new
-    // location (including a &quot; (N)&quot; rename forced by a basename collision).
+    // location (including a " (N)" rename forced by a basename collision).
     // Without that the copies sit in the bundle referenced by nothing and the
     // destination machine reports them missing -- so a rewrite that could not
     // be completed lands in `copyFailed` rather than passing as a clean export.

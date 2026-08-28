@@ -2,7 +2,7 @@
 above the audible range instead of folding back into it as harshness. Costs CPU
 in direct proportion.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PolyphaseOversampler.h - key excerpts (full file 98 lines, header-only)</div><pre><code>// PolyphaseOversampler4x::prepare() -- the locked construction args
+<div class="codeblock"><div class="codehead">- Source\DSP\PolyphaseOversampler.h (98 lines, header-only)</div><pre><code>// PolyphaseOversampler4x::prepare() -- the locked construction args
     void prepare (int numChannels, int maxBlockSize)
     {
         using OS = juce::dsp::Oversampling&lt;float&gt;;
@@ -17,7 +17,50 @@ in direct proportion.</p>
         mOS-&gt;initProcessing ((size_t) maxBlockSize);
         mNumChannels = numChannels;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyphaseOversampler.h - key excerpts (full file 98 lines, header-only)</summary><pre><code>    void prepare (int numChannels, int maxBlockSize)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyphaseOversampler.h (98 lines, header-only)</summary><pre><code>// Source/DSP/PolyphaseOversampler.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+#include &lt;memory&gt;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PolyphaseOversampler4x - Phase I-2 (2026-05-02)
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared 4x oversampling helper for non-linear DSP modules (BaySickPedals
+// drive / distortion / fuzz / fuzz-octave / multi-band drive).  Centralises
+// the construction-arg drift across modules: every consumer gets the same
+// filter type, same numStages (=2 halving stages), and same isMaxQuality
+// flag that BaySickNAM/IR's oversampling chain uses.
+//
+// Usage pattern (mono):
+//   PolyphaseOversampler4x os;
+//   os.prepare (1, maxBlockSize);
+//   ...
+//   void processBlock (juce::AudioBuffer&lt;float&gt;&amp; buf) {
+//     juce::dsp::AudioBlock&lt;float&gt; block (buf);
+//     auto upBlock = os.upsample (block);   // 4*N samples, same channels
+//     // ... your non-linear DSP at 4x sample rate on upBlock ...
+//     os.downsample (block);                // 1x output back into buf
+//   }
+//
+// PDC: caller queries `getLatencySamples()` and forwards into DSPBase's
+// `getLatencySamples()` so EffectRack can sum per-slot latency for the
+// PluginProcessor's setLatencySamples.
+//
+// Header-only -- the implementation is a thin wrapper around
+// juce::dsp::Oversampling&lt;float&gt; with our locked constructor args.
+// ─────────────────────────────────────────────────────────────────────────────
+
+class PolyphaseOversampler4x
+{
+public:
+    PolyphaseOversampler4x() = default;
+    ~PolyphaseOversampler4x() = default;
+
+    // numChannels: 1 (mono pre-sum) or 2 (stereo).  Most pedals oversample
+    // post-mono-sum (numChannels=1) since their non-linear stages are mono.
+    // maxBlockSize: largest host block size we'll see; passed verbatim to
+    // initProcessing so internal buffers are sized correctly.
+    void prepare (int numChannels, int maxBlockSize)
     {
         using OS = juce::dsp::Oversampling&lt;float&gt;;
         // numStages=2 = two halving filter stages = 4x oversampling factor.
@@ -43,7 +86,7 @@ in direct proportion.</p>
 
     // Round-trip latency (in 1x samples) introduced by the polyphase IIR
     // chain.  Forward this from your DSPBase::getLatencySamples() so the
-    // host&#x27;s PDC sum is correct.
+    // host's PDC sum is correct.
     int getLatencySamples() const noexcept
     {
         if (! mOS) return 0;
@@ -65,7 +108,14 @@ in direct proportion.</p>
     {
         jassert (mOS != nullptr);
         mOS-&gt;processSamplesDown (out);
-    }</code></pre></details>
+    }
+
+private:
+    std::unique_ptr&lt;juce::dsp::Oversampling&lt;float&gt;&gt; mOS;
+    int mNumChannels { 0 };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PolyphaseOversampler4x)
+};</code></pre></details>
 <pre class="formulas">- Factor: 4x = `numStages = 2` halving stages (each stage doubles the rate).
 - Filter type: `juce::dsp::Oversampling&lt;float&gt;::filterHalfBandPolyphaseIIR` (half-band polyphase IIR), `isMaxQuality = true`.
 - Channels: 1 (mono, the common pedal case - non-linear stages run post-mono-sum) or 2 (stereo).

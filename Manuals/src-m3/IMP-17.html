@@ -16,7 +16,8 @@
             d[i] = s1 + mix * (cub - s1);
         }
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\BluesDriveStyleDSP.cpp</summary><pre><code>void BluesDriveStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BluesDriveStyleDSP.cpp</summary><pre><code>// Source/DSP/BluesDriveStyleDSP.cpp  -  BluesDriveStyleDSP::process (complete)
+void BluesDriveStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;

@@ -25,94 +25,28 @@ void ReverbDSP::updateFeedback()
     mBassLPCoef  = std::exp (-pi2 * std::max (1.0f, mBassCrossHz) / (float) mSampleRate);
     mBassGainAdd = mBassMult - 1.0f;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ReverbDSP.cpp</summary><pre><code>// ReverbDSP::process -- FDN tail + ER + bass-shelf core (verbatim)
-        // §8d: multi-tap early reflections (3 taps per line at prime-ratio
-        // positions, natural decay envelope; ER taps stay as integer reads -
-        // per spec, early reflections should keep crisp pre-echo character).
-        float erL = 0.0f, erR = 0.0f;
-        if (erActive)
-        {
-            for (int i = 0; i &lt; kN; ++i)
-            {
-                const int lineLen = mFDNLen[(size_t) i];
-                if (lineLen &lt;= 0) continue;
-                for (int t = 0; t &lt; kERTaps; ++t)
-                {
-                    const int tapSamples = std::max (1, (int) ((float) lineLen * kERTapFrac[t]));
-                    int erRp = mFDNWr[(size_t) i] - tapSamples;
-                    if (erRp &lt; 0) erRp += lineLen;
-                    erL += mFDNL[(size_t) i][(size_t) erRp] * kERTapGain[t];
-                    erR += mFDNR[(size_t) i][(size_t) erRp] * kERTapGain[t];
-                }
-            }
-            erL *= erNorm;
-            erR *= erNorm;
-        }
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/ReverbDSP.cpp</summary><pre><code>// Source/DSP/ReverbDSP.cpp  -  ReverbDSP::updateFeedback (complete)
+void ReverbDSP::updateFeedback()
+{
+    if (mSampleRate &lt;= 0.0) return;
+    // Hall topology only.  Other algorithms own their own decay/feedback in
+    // their dedicated process functions.
+    const float decayClamped = std::max (0.01f, mDecay);
+    const float maxG = 0.9999f / std::max (1.001f, mBassMult);
 
-        // ── Hadamard mix (feedback path only - output uses raw zL/zR) ───────
-        std::array&lt;float, kN&gt; fL = zL, fR = zR;
-        applyH8 (fL);
-        applyH8 (fR);
+    for (int i = 0; i &lt; kN; ++i)
+    {
+        if (mFDNLen[(size_t) i] == 0) { mFeedGain[(size_t) i] = 0.0f; continue; }
+        const float delayLen_s = (float) mFDNLen[(size_t) i] / (float) mSampleRate;
+        const float g = std::exp (-6.91f * delayLen_s / decayClamped);
+        mFeedGain[(size_t) i] = std::min (g, maxG);
+    }
 
-        // §8c: when freeze is engaged, neutralize HF damp + bass shelf so the
-        // held tail doesn&#x27;t drift spectrally or pump bass.
-        const float effLPAlpha    = mLPAlpha    * inputScale;   // dampen → 0 as freeze → 1
-        const float effBassAddGain = mBassGainAdd * inputScale;
-
-        // ── Per-line feedback processing + write back ────────────────────────
-        for (int i = 0; i &lt; kN; ++i)
-        {
-            // Feedback gain (lerped toward 1.0 under freeze - §8c)
-            const float effGain = mFeedGain[(size_t) i] + (1.0f - mFeedGain[(size_t) i]) * frz;
-
-            // §8e HF damping + HF ratio - split into LP (lows) + residual (highs).
-            //  - Under freeze: HF ratio lerps to 1.0 so the held tail preserves
-            //    its full spectrum (otherwise residual·hfRatio would darken the
-            //    frozen content over time).
-            //  - Runaway safety: residual&#x27;s loop gain (effGain × effHFRatio)
-            //    must stay ≤ 0.9995 or feedback explodes when user dials
-            //    hfRatio &gt; 1/effGain. Clamp per-line.
-            if (!mHighDampBypass)
-            {
-                const float hfRatioFrz = hfRatio + (1.0f - hfRatio) * frz;
-                const float maxHFRatio = (frz &gt;= 0.999f) ? 1.0f
-                                                          : (0.9995f / std::max (0.001f, effGain));
-                const float effHFRatio = std::min (hfRatioFrz, maxHFRatio);
-
-                mLPStL[(size_t) i] += effLPAlpha * (fL[(size_t) i] - mLPStL[(size_t) i]);
-                const float residualL = fL[(size_t) i] - mLPStL[(size_t) i];
-                fL[(size_t) i] = mLPStL[(size_t) i] + residualL * effHFRatio;
-
-                mLPStR[(size_t) i] += effLPAlpha * (fR[(size_t) i] - mLPStR[(size_t) i]);
-                const float residualR = fR[(size_t) i] - mLPStR[(size_t) i];
-                fR[(size_t) i] = mLPStR[(size_t) i] + residualR * effHFRatio;
-            }
-
-            // Bass shelf: 1-pole LP blend amplifies lows (gain scaled by freeze)
-            mBassStL[(size_t) i] = mBassStL[(size_t) i] * mBassLPCoef + fL[(size_t) i] * (1.0f - mBassLPCoef);
-            fL[(size_t) i]       = fL[(size_t) i] + effBassAddGain * mBassStL[(size_t) i];
-
-            mBassStR[(size_t) i] = mBassStR[(size_t) i] * mBassLPCoef + fR[(size_t) i] * (1.0f - mBassLPCoef);
-            fR[(size_t) i]       = fR[(size_t) i] + effBassAddGain * mBassStR[(size_t) i];
-
-            // Apply feedback gain (computed above)
-            fL[(size_t) i] *= effGain;
-            fR[(size_t) i] *= effGain;
-
-            // Write back with scaled input injection (scaledIn*=frz already zeros when frozen)
-            mFDNL[(size_t) i][(size_t) mFDNWr[(size_t) i]] = fL[(size_t) i] + scaledInL;
-            mFDNR[(size_t) i][(size_t) mFDNWr[(size_t) i]] = fR[(size_t) i] + scaledInR;
-
-            // Advance write pointer (respects mFDNLen[i], not buffer capacity - §8b)
-            if (++mFDNWr[(size_t) i] &gt;= mFDNLen[(size_t) i])
-                mFDNWr[(size_t) i] = 0;
-        }
-
-        // ── FDN output: sum raw delay taps + early reflections ───────────────
-        float wetL = 0.0f, wetR = 0.0f;
-        for (int i = 0; i &lt; kN; ++i) { wetL += zL[(size_t) i]; wetR += zR[(size_t) i]; }
-        wetL = wetL * outputScale + erL;
-        wetR = wetR * outputScale + erR;</code></pre></details>
+    // Bass shelf coefficients
+    const float pi2 = juce::MathConstants&lt;float&gt;::twoPi;
+    mBassLPCoef  = std::exp (-pi2 * std::max (1.0f, mBassCrossHz) / (float) mSampleRate);
+    mBassGainAdd = mBassMult - 1.0f;
+}</code></pre></details>
 <pre class="formulas">- Algorithm umbrella (H-9): Plate / Hall (default) / Chamber / Room / VocalBooth. The tail model below is the default Hall 8-line FDN; the other four run their own topologies (Plate = 8 series allpass + 4 feedback combs; Chamber = 4 nested allpass; Room = 15-tap ER cloud + 4 Schroeder combs; VocalBooth = tiny 4-line FDN, seeds {309, 397, 487, 661} samples @ 44.1k, no tail mod).
 - Tail model (Hall): 8 delay lines with prime lengths at 44.1 kHz `kPrimes = { 149, 211, 263, 293, 353, 389, 421, 443 }`, scaled by `(roomSize/0.6) * (sr/44100)` (room size 0..2, default 0.6). Feedback mixed by a normalized Hadamard H8 matrix (fast WHT * 1/sqrt(8)).
 - RT60 feedback gain per line: `g = exp(-6.91 * lineLen_seconds / Decay)` — -6.91 = ln(10^-3), i.e. -60 dB after `Decay` seconds. Capped at `maxG = 0.9999 / max(1.001, bassMult)` so line gain plus the bass boost can never reach unity loop gain.

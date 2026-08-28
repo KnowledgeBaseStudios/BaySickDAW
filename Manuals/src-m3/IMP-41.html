@@ -2,7 +2,7 @@
 in time, resynthesises. Stretch far enough and it smears &mdash; that is the
 method showing, not a fault.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PhaseVocoder.cpp - key excerpts (full file 407 lines)</div><pre><code>// PhaseVocoder::prepare() -- the OLA output-ring capacity law
+<div class="codeblock"><div class="codehead">- Source\DSP\PhaseVocoder.cpp (407 lines)</div><pre><code>// PhaseVocoder::prepare() -- the OLA output-ring capacity law
     // Capacity law for the OLA queue.  processFrame&#x27;s add spans
     // [outWriteAbs, outWriteAbs + mFFTSize) and the consumer only drains
     // between pushes, so the deepest the unread region ever gets is
@@ -24,7 +24,7 @@ method showing, not a fault.</p>
         c.phaseAccum.assign ((size_t) (mFFTSize / 2 + 1),     0.0f);
         c.outBuf    .assign (sz,                              0.0f);
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PhaseVocoder.cpp - key excerpts (full file 407 lines)</summary><pre><code>// PhaseVocoder::prepare()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PhaseVocoder.cpp (407 lines)</summary><pre><code>// Source/DSP/PhaseVocoder.cpp  -  PhaseVocoder::prepare (complete)
 void PhaseVocoder::prepare (int maxOutputSamplesPerBlock, double fileSampleRate)
 {
     const int order = fftOrderForFileRate (fileSampleRate);
@@ -50,6 +50,16 @@ void PhaseVocoder::prepare (int maxOutputSamplesPerBlock, double fileSampleRate)
     mAnalysisHop = mFFTSize / 4;
     updateSynthesisHop();   // Hs is a multiple of the analysis hop, which just moved
 
+    // Capacity law for the OLA queue.  processFrame's add spans
+    // [outWriteAbs, outWriteAbs + mFFTSize) and the consumer only drains
+    // between pushes, so the deepest the unread region ever gets is
+    //   one block's production            = maxOutputSamplesPerBlock
+    // + the settling residue it may not take yet   (&lt; mFFTSize)
+    // + one whole frame produced past that boundary (&lt; mFFTSize)
+    // + the tail of the frame being written        (= mFFTSize)
+    // Anything shallower wraps the OLA add onto samples the consumer has not
+    // read - the export-only garble, since the offline loop runs a different
+    // block size from the device.
     const int floorSz = mFFTSize * 8;
     const int need    = juce::jmax (0, maxOutputSamplesPerBlock) + mFFTSize * 3;
     const auto sz     = (size_t) juce::jmax (need, floorSz);
@@ -67,17 +77,25 @@ void PhaseVocoder::prepare (int maxOutputSamplesPerBlock, double fileSampleRate)
     reset();
 }
 
-// PhaseVocoder::fftOrderForFileRate()
+// Source/DSP/PhaseVocoder.cpp  -  PhaseVocoder::fftOrderForFileRate (complete)
 int PhaseVocoder::fftOrderForFileRate (double fileSampleRate) noexcept
 {
     if (! (fileSampleRate &gt; 0.0))
         return kFFTOrder;
+
+    // The invariant is the window's DURATION (kFFTSize at kReferenceRate, about
+    // 46 ms), so the sample count scales with the file rate and then snaps to
+    // the nearest power of two.  48 kHz lands back on kFFTOrder, which is what
+    // keeps the overwhelming majority of material identical to the pre-fix
+    // build.  The floor at kFFTOrder is not cosmetic: a shorter window would
+    // drive the analysis hop below kHopSize, and the external effective-stretch
+    // grid (see the header) only stays exact for whole-number multiples of it.
     const double ideal = (double) kFFTSize * fileSampleRate / kReferenceRate;
     const int    order = (int) std::lround (std::log2 (ideal));
     return juce::jlimit (kFFTOrder, kMaxFFTOrder, order);
 }
 
-// PhaseVocoder::updateSynthesisHop()
+// Source/DSP/PhaseVocoder.cpp  -  PhaseVocoder::updateSynthesisHop (complete)
 void PhaseVocoder::updateSynthesisHop()
 {
     // Hs/Ha is an EXTERNAL contract, not a private detail: three call sites in
@@ -97,7 +115,7 @@ void PhaseVocoder::updateSynthesisHop()
     // ~= (3/8)*N / Hs per sample -&gt; scale = (8/3)*Hs/N (= 2/3 at Hs = N/4).
     // juce::dsp::FFT already normalizes the inverse by 1/N internally, so
     // there is NO extra N to cancel -- the old (2/3)/N assumed unnormalized
-    // IFFT and made stretched output ~1/N (~-66 dB, &quot;clips don&#x27;t play&quot;).
+    // IFFT and made stretched output ~1/N (~-66 dB, "clips don't play").
     mWindowScale = (8.0f / 3.0f) * (float) mSynthHop / (float) mFFTSize;
 }</code></pre></details>
 <pre class="formulas">- Reference geometry (PhaseVocoder.h lines 61-71): `kFFTOrder = 11` (2048), `kHopSize = kFFTSize/4 = 512` (75% overlap), `kNumBins = kFFTSize/2 + 1 = 1025`, `kReferenceRate = 44100.0`, `kMaxFFTOrder = 13` (8192).

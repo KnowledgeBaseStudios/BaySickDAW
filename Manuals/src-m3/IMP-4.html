@@ -30,16 +30,46 @@ harsh <em>s</em> is softened without the whole word ducking.</p>
             const float wideL  = audioL * grLin;
             const float splitL = lowL + highL * grLin;
             wetL = wideL + (splitL - wideL) * blend;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source/DSP/DeEsserDSP.cpp (time-domain engine + spectral wrapper), Source/DSP/SibilanceSpectralProcessor.cpp (Engine::Spectral STFT core)</summary><pre><code>// DeEsserDSP::process -- time-domain per-sample core (Stereo M/S mode shown;
-// the MidOnly/SideOnly recompose branch, Listen monitor output, lookahead
-// ring bookkeeping and GR-meter publish are elided).
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/DeEsserDSP.cpp (time-domain engine + spectral wrapper), Source/DSP/SibilanceSpectralProcessor.cpp (Engine::Spectral STFT core)</summary><pre><code>// Source/DSP/DeEsserDSP.cpp  -  DeEsserDSP::process (complete)
+// ─────────────────────────────────────────────────────────────────────────────
+// process()
+// ─────────────────────────────────────────────────────────────────────────────
+void DeEsserDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numSamples  = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    if (numSamples == 0 || numChannels == 0) return;
+
+    if (mEngine == Engine::Spectral)
+    {
+        processSpectral (buffer);
+        return;
+    }
+    mSpectralPrimed = false;   // spectral state re-primes fresh on next activation
+
+    float* outL = buffer.getWritePointer (0);
+    float* outR = (numChannels &gt; 1) ? buffer.getWritePointer (1) : nullptr;
+
+    const bool isStereo = (numChannels &gt; 1);
+    const float att = mAttackCoef;
+    const float rel = mReleaseCoef;
+    const bool useLA = (mLASamples &gt; 0);
+    const int laSize = (int) mLookaheadL.size();
+    const int laSamples = mLASamples;
+
+    float blockMaxGrDb = 0.0f;   // most-negative GR seen this block
+
     for (int i = 0; i &lt; numSamples; ++i)
     {
         const float thrDb   = mThresholdSmoothed.getNextValue();
         const float rangeDb = mRangeSmoothed    .getNextValue();
         const float curMix  = mMixSmoothed      .getNextValue();
 
-        // -- Pull source samples -----------------------------------------
+        // ── Pull source samples ─────────────────────────────────────────────
         const float drySrcL = outL[i];
         const float drySrcR = isStereo ? outR[i] : drySrcL;
 
@@ -58,11 +88,11 @@ harsh <em>s</em> is softened without the whole word ducking.</p>
             dL = dR = side;
         }
 
-        // -- Sidechain HPF on detection signal ---------------------------
+        // ── Sidechain HPF on detection signal ───────────────────────────────
         const float scL = mScHpfL.processSample (0, dL);
         const float scR = isStereo ? mScHpfR.processSample (0, dR) : scL;
 
-        // -- Envelope follower (peak detector, atk/rel one-pole) ---------
+        // ── Envelope follower (peak detector, atk/rel one-pole) ─────────────
         const float magL = std::abs (scL);
         const float magR = std::abs (scR);
         const float cL = (magL &gt; mEnvL) ? att : rel;
@@ -74,7 +104,7 @@ harsh <em>s</em> is softened without the whole word ducking.</p>
         const float envLink = std::max (mEnvL, mEnvR);
         const float envDb   = 20.0f * std::log10 (std::max (envLink, 1e-9f));
 
-        // -- Threshold gate + GR computation -----------------------------
+        // ── Threshold gate + GR computation ─────────────────────────────────
         // overshoot = how far above threshold the detector is.  Map 0..N dB
         // overshoot to 0..rangeDb (negative) reduction with a soft proportional
         // curve.  rangeDb is the FLOOR (max reduction).
@@ -91,10 +121,26 @@ harsh <em>s</em> is softened without the whole word ducking.</p>
 
         const float grLin = juce::Decibels::decibelsToGain (grDb);
 
-        // -- Apply GR: continuous Wide&lt;-&gt;Split blend on the DELAYED audio --
+        // ── Lookahead-delayed audio fetch + write ───────────────────────────
+        float audioL = drySrcL;
+        float audioR = drySrcR;
+        if (useLA)
+        {
+            const int readPos = (mLAWritePos + laSize - laSamples) % laSize;
+            audioL = mLookaheadL[(size_t) readPos];
+            audioR = mLookaheadR[(size_t) readPos];
+            mLookaheadL[(size_t) mLAWritePos] = drySrcL;
+            mLookaheadR[(size_t) mLAWritePos] = drySrcR;
+            mLAWritePos = (mLAWritePos + 1) % laSize;
+        }
+
+        // ── Apply GR: continuous Wide&lt;-&gt;Split blend on the DELAYED audio ────
         // Wide = full-band duck; Split = only the fixed-4 kHz high band ducks.
+        // M/S extracts the axis from the delayed signal and recomposes with the
+        // untouched component (detector above already ran on the chosen axis).
         const float blend = mModeSmoothed.getNextValue();   // 0=Wide .. 1=Split
         float wetL, wetR;
+        float monL = 0.0f, monR = 0.0f;   // Listen: the removed component
 
         if (mMsMode == MsMode::Stereo)
         {
@@ -104,86 +150,68 @@ harsh <em>s</em> is softened without the whole word ducking.</p>
             const float splitL = lowL + highL * grLin;
             wetL = wideL + (splitL - wideL) * blend;
             monL = (1.0f - grLin) * (audioL + (highL - audioL) * blend);
-            // ... (right channel identical; M/S branch elided) ...
+
+            if (isStereo)
+            {
+                const float lowR   = mAudLpfR.processSample (0, audioR);
+                const float highR  = mAudHpfR.processSample (0, audioR);
+                const float wideR  = audioR * grLin;
+                const float splitR = lowR + highR * grLin;
+                wetR = wideR + (splitR - wideR) * blend;
+                monR = (1.0f - grLin) * (audioR + (highR - audioR) * blend);
+            }
+            else { wetR = wetL; monR = monL; }
+        }
+        else
+        {
+            const float procIn = (mMsMode == MsMode::MidOnly)
+                               ? (audioL + audioR) * 0.5f
+                               : (audioL - audioR) * 0.5f;
+            const float other  = (mMsMode == MsMode::MidOnly)
+                               ? (audioL - audioR) * 0.5f
+                               : (audioL + audioR) * 0.5f;
+
+            const float lowP   = mAudLpfL.processSample (0, procIn);
+            const float highP  = mAudHpfL.processSample (0, procIn);
+            const float wideP  = procIn * grLin;
+            const float splitP = lowP + highP * grLin;
+            // Keep the R filter pair fed so its state stays valid across a
+            // later switch back to Stereo (output unused).
+            mAudLpfR.processSample (0, procIn);
+            mAudHpfR.processSample (0, procIn);
+
+            const float wetP = wideP + (splitP - wideP) * blend;
+            // Removed component of the processed axis only -- the untouched
+            // axis contributes nothing to the monitor.
+            const float monP = (1.0f - grLin) * (procIn + (highP - procIn) * blend);
+
+            if (mMsMode == MsMode::MidOnly) { wetL = wetP + other;  wetR = wetP - other;  monL = monP;  monR = monP;  }
+            else                            { wetL = other + wetP;  wetR = other - wetP;  monL = monP;  monR = -monP; }
         }
 
-        // -- Wet/dry mix --------------------------------------------------
+        // ── Listen (reference Monitor): solo the removed component ─────────
+        // Computed from the gain reduction directly ((1-gr) x the ducked
+        // band), NOT dry-minus-wet: the split filters rotate phase, so plain
+        // subtraction leaks the whole program even at zero GR.  Silent when
+        // nothing is detected.
+        if (mListen)
+        {
+            outL[i] = monL;
+            if (outR) outR[i] = monR;
+            continue;
+        }
+
+        // ── Wet/dry mix ─────────────────────────────────────────────────────
         outL[i] = audioL + curMix * (wetL - audioL);
         if (outR) outR[i] = audioR + curMix * (wetR - audioR);
     }
 
-// SibilanceSpectralProcessor::processFrame -- spectral detection + per-bin mask
-// (Engine::Spectral).  Analysis, event gate and mask update shown; the
-// conjugate-symmetric resynthesis / overlap-add write-back is elided.
-    // -- Pass 1: analyze both channels, band level per channel --------------
-    float bandDb[2] = { -120.0f, -120.0f };
-    for (int ch = 0; ch &lt; numCh; ++ch)
-    {
-        auto&amp; c = mCh[ch];
-        for (int i = 0; i &lt; N; ++i)
-        {
-            const int srcIdx = (c.inRead + i) % ringSize;
-            mFftA[(size_t) i] = { c.inRing[(size_t) srcIdx] * window[i], 0.0f };
-        }
-        fft.perform (mFftA.data(), mSpec[ch].data(), false);
-
-        // Peak in-band bin, not mean RMS: the mean over ~400 bins reads
-        // 15-25 dB below the time-domain path&#x27;s peak envelope of the same
-        // material, which would desensitize the SHARED Thresh knob when
-        // switching engines.  Peak-bin tracks the (spectrally concentrated)
-        // ess and keeps knob parity.
-        float peak = 0.0f;
-        for (int k = loBin; k &lt;= hiBin; ++k)
-            peak = juce::jmax (peak, std::abs (mSpec[ch][(size_t) k]) * magNorm);
-        bandDb[ch] = 20.0f * std::log10 (juce::jmax (peak, 1.0e-9f));
-    }
-
-    // Stereo-linked event gate (louder channel drives both) -- same saturating
-    // overshoot-&gt;reduction curve as the time-domain detector.
-    const float envDb     = (numCh &gt; 1) ? juce::jmax (bandDb[0], bandDb[1]) : bandDb[0];
-    const float overshoot = envDb - p.thresholdDb;
-    const float eventT    = (overshoot &gt; 0.0f) ? (1.0f - std::exp (-overshoot / 6.0f)) : 0.0f;
-    const float eventDb   = p.rangeDb * eventT;   // &lt;= 0
-
-    float frameMinGainDb = 0.0f;
-
-    // -- Pass 2: per-channel mask + apply + resynthesize --------------------
-    for (int ch = 0; ch &lt; numCh; ++ch)
-    {
-        auto&amp; c = mCh[ch];
-
-        for (int k = 0; k &lt; numBins; ++k)
-        {
-            const bool inBand = (k &gt;= loBin &amp;&amp; k &lt;= hiBin);
-
-            float sel = 0.0f;
-            if (inBand)
-            {
-                const float magDb = 20.0f * std::log10 (
-                    juce::jmax (std::abs (mSpec[ch][(size_t) k]) * magNorm, 1.0e-9f));
-                float&amp; fl = c.floorDb[(size_t) k];
-                const float fc = (magDb &gt; fl) ? floorUpCoef : floorDnCoef;
-                fl = fc * fl + (1.0f - fc) * magDb;
-                sel = juce::jlimit (0.0f, 1.0f, (magDb - fl - kSelLoDb) / (kSelHiDb - kSelLoDb));
-            }
-
-            // Wide = uniform event duck; Split = selectivity-shaped, in-band only.
-            const float tgtDb = eventDb * ((1.0f - blend) + blend * (inBand ? sel : 0.0f));
-            const float tgt   = juce::Decibels::decibelsToGain (tgtDb);
-
-            float&amp; g = c.gain[(size_t) k];
-            const float gc = (tgt &lt; g) ? atkCoef : relCoef;
-            g = gc * g + (1.0f - gc) * tgt;
-        }
-
-        // 3-bin frequency smoothing of the gain mask (prevents isolated bins
-        // gating on/off frame-to-frame -&gt; &quot;birdies&quot;).
-        mGainScratch[0] = c.gain[0];
-        for (int k = 1; k &lt; numBins - 1; ++k)
-            mGainScratch[(size_t) k] = (c.gain[(size_t) (k - 1)]
-                                      + c.gain[(size_t) k]
-                                      + c.gain[(size_t) (k + 1)]) * (1.0f / 3.0f);
-        mGainScratch[(size_t) (numBins - 1)] = c.gain[(size_t) (numBins - 1)];</code></pre></details>
+    // ── GR meter publish (peak hold + decay 30 dB/sec) ─────────────────────
+    const float lastGr = mGainReductionDb.load (std::memory_order_relaxed);
+    float newGr = std::min (lastGr, blockMaxGrDb);
+    newGr = std::min (0.0f, newGr + mGrDecayDbPerBlock);
+    mGainReductionDb.store (newGr, std::memory_order_relaxed);
+}</code></pre></details>
 <pre class="formulas">Time-domain engine (Engine 0):
 - Detector: peak follower with one-pole atk/rel: `env = c*env + (1-c)*|x|`, `c = exp(-1/(ms*0.001*sr))`; attackMs 0.1..30 (default 1), releaseMs 10..500 (default 80). Stereo-linked: `envDb = 20*log10(max(envL, envR))`.
 - Detector sidechain HPF: cutoff = Freq knob (4000..12000 Hz, default 6500), resonance = Q knob (0.5..4, default 1.4) - a resonant HPF, so the Freq/Q pair tunes the detector to the ess.

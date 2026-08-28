@@ -19,7 +19,7 @@ down "closed" is, so it can duck rather than mute.</p>
         const float target = mOpen ? 1.0f : floorLin;
         const float coef   = (target &gt; mGain) ? mAttCoef : mRelCoef;
         mGain = target + coef * (mGain - target);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source/DSP/GateDSP.cpp, Source/DSP/GateDSP.h (kHystDb constant, defaults)</summary><pre><code>// GateDSP::process -- complete
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/GateDSP.cpp, Source/DSP/GateDSP.h (kHystDb constant, defaults)</summary><pre><code>// Source/DSP/GateDSP.cpp  -  GateDSP::process (complete)
 void GateDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
@@ -62,18 +62,6 @@ void GateDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 
     mGrDb.store (juce::Decibels::gainToDecibels (juce::jmax (1.0e-4f, minGain)),
                  std::memory_order_relaxed);
-}
-
-// GateDSP::calcCoefs -- complete
-void GateDSP::calcCoefs()
-{
-    const double sr = juce::jmax (8000.0, mSampleRate);
-    auto onePole = [sr] (float ms)
-        { return (float) std::exp (-1.0 / (juce::jmax (0.01, (double) ms) * 0.001 * sr)); };
-    mAttCoef     = onePole (attackMs);
-    mRelCoef     = onePole (releaseMs);
-    mDetCoef     = onePole (5.0f);
-    mHoldSamples = (int) (holdMs * 0.001 * sr);
 }</code></pre></details>
 <pre class="formulas">- Detector: stereo-linked peak (`max |x|` across channels), instantaneous attack (`peak &gt; env` snaps env = peak), one-pole release with FIXED 5 ms time constant: `env = peak + detCoef*(env - peak)`, `detCoef = exp(-1/(0.005*sr))`.
 - Schmitt hysteresis: open threshold = thresholdDb (linear `10^(thr/20)`); close threshold = thresholdDb - kHystDb, with kHystDb = 3.0 dB. Gate opens the instant env &gt;= open level; it only begins closing once env drops below thr-3 dB.

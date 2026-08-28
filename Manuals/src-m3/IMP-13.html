@@ -28,16 +28,7 @@ for (int k = 0; k &lt; kBins; ++k)
 
     hist[(size_t) k] = mag;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DeReverbDSP.cpp</summary><pre><code>// DeReverbDSP::updateDecay -- T60 semantics of the Tail knob
-void DeReverbDSP::updateDecay()
-{
-    const double sr    = juce::jmax (8000.0, mSampleRate);
-    const double hopMs = 1000.0 * (double) kHop / sr;
-    // T60 semantics: the modeled tail loses 60 dB over tailMs.
-    mDecayPerHop = (float) std::pow (10.0, -3.0 * hopMs / juce::jmax (50.0, (double) tailMs));
-}
-
-// DeReverbDSP::processFrame -- full STFT frame: analysis, estimate, gain, synthesis
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/DeReverbDSP.cpp</summary><pre><code>// Source/DSP/DeReverbDSP.cpp  -  DeReverbDSP::processFrame (complete)
 void DeReverbDSP::processFrame (int numCh)
 {
     // Analysis: windowed FFT per channel from each input ring.

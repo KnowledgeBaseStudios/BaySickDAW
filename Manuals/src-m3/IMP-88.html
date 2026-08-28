@@ -23,13 +23,23 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
     const double pitchRatio = std::pow (2.0, pitchSemitones / 12.0);
     const double resampRatio = (region-&gt;fileSampleRate / mSampleRate) * pitchRatio
                                * (double) juce::jlimit (0.5f, 2.0f, mStretch);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickPlayerVoice::startNote / renderNextBlock)</summary><pre><code>void BaySickPlayerVoice::startNote (int midiNote, float velocity,
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickPlayer\BaySickPlayerDSP.cpp (BaySickPlayerVoice::startNote / renderNextBlock)</summary><pre><code>// Source/BaySickPlayer/BaySickPlayerDSP.cpp  -  BaySickPlayerVoice::startNote (complete)
+//==============================================================================
+void BaySickPlayerVoice::startNote (int midiNote, float velocity,
                             juce::SynthesiserSound*,
                             int /*pitchWheelPos*/)
 {
     releaseResources();
 
-    // [QA-VoicePool: restore user&#x27;s ADSR params after a steal override -- elided]
+    // QA-VoicePool Task 3: restore user's ADSR params if the previous note was
+    // stolen with a quick-release override.  mPreStealAdsrParams holds either the
+    // params at steal time OR any user-driven setAdsr updates that arrived during
+    // the override (see BaySickPlayerVoice::setAdsr).
+    if (mAdsrOverridden)
+    {
+        mAdsr.setParameters (mPreStealAdsrParams);
+        mAdsrOverridden = false;
+    }
 
     const int velInt = juce::roundToInt (velocity * 127.f);
     const BaySickPlayerRegion* region = mManager.findRegion (midiNote, velInt, mArticGroup);
@@ -37,9 +47,10 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
 
     mSampleBuffer = region-&gt;audioData;
 
-    // QA-VoicePool Task 2: re-point the chosen fat source at the new region&#x27;s
+    // QA-VoicePool Task 2: re-point the chosen fat source at the new region's
     // buffer + select the matching permanent resampler.  No heap allocation on
-    // the audio thread.
+    // the audio thread.  Reverse playback uses ReversedMemoryAudioSource which
+    // reads the same buffer backward; forward uses BaySickForwardMemoryAudioSource.
     if (mReverse)
     {
         mReverseSrc.setBuffer (*mSampleBuffer);
@@ -54,6 +65,7 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
     }
 
     // Sample-start skip-into (S1 2026-04-21) applied to the source before resampling.
+    // Positions are expressed in forward-time: the reverse source maps them internally.
     if (mSampleStart &gt; 0.0f &amp;&amp; mSampleBuffer-&gt;getNumSamples() &gt; 0)
     {
         const juce::int64 startPos = (juce::int64)
@@ -61,11 +73,60 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
         mActiveSrc-&gt;setNextReadPosition (startPos);
     }
 
-    // [pitch ratio + resampRatio -- see excerpt above]
+    // ResamplingAudioSource handles pitch shifting; per-note ratio drives transposition.
+    // S1 2026-04-21: global tune (semitones) + per-voice unison cents (set by BaySickPlayerSynth fan-out).
+    //  mNextUnisonCents already encodes (mDetune via mode) + (unisonSpread) per voice; consumed on startNote.
+    const double pitchSemitones = (double) (midiNote - region-&gt;rootNote)
+                                + (double) region-&gt;tuneOffset
+                                + (double) mTune
+                                + (double) mNextUnisonCents / 100.0;
+    mNextUnisonCents = 0.0f;  // consume the tag
+    const double pitchRatio = std::pow (2.0, pitchSemitones / 12.0);
+    const double resampRatio = (region-&gt;fileSampleRate / mSampleRate) * pitchRatio
+                               * (double) juce::jlimit (0.5f, 2.0f, mStretch);
 
-    // [QA-H per-note glide arm (CC84 slide/porta): mGlideSemisCur ramps to zero
-    //  over tSec = ((CC5&lt;&lt;7)|CC37) ms or 60 ms fallback -- elided]
+    // QA-H per-note glide (CC84-armed slide/porta): ramp the resampling ratio
+    // in semitone space from the source pitch to this note's pitch.  Slide
+    // carries its own time (CC5/37); porta falls back to 60 ms (no glide param
+    // on the player).
+    mGlideSamplesLeft = 0;
+    mGlideSemisCur    = 0.0f;
+    mPanRampLeft      = 0;   // #11: a fresh note is not mid-pan-ramp (RT arm below may re-set)
+    mNoteStartedAt    = midiNote;
+    mCurTargetNote    = (float) midiNote;
+    mBaseRatioTarget  = resampRatio;
+    mGlideBaseRatio   = resampRatio;
+    if (mGlideFromNote &gt;= 0 &amp;&amp; mGlideFromNote != midiNote)
+    {
+        const float tSec = mGlideTimePending
+            ? (float) ((mGlideTimeMsbMs &lt;&lt; 7) | mGlideTimeLsbMs) * 0.001f
+            : 0.06f;
+        mGlideSamplesLeft = juce::jmax (1, (int) (tSec * mSampleRate));
+        mGlideSemisCur    = (float) (mGlideFromNote - midiNote);
+        mGlideSemisStep   = -mGlideSemisCur / (float) mGlideSamplesLeft;
+        mGlideBaseRatio   = resampRatio;
+        // #11 (G-4): an RT glide noteOn carries pan as a CC89 ramp target --
+        // mNotePan (the channel snapshot this voice already tracks) glides to
+        // it over the same span as the pitch (no CC10 was emitted, so the
+        // ramp starts from the glide SOURCE note's pan).
+        if (mPanRampPend &gt; -2.0f)
+        {
+            mPanRampTarget = mPanRampPend;
+            mPanRampLeft   = mGlideSamplesLeft;
+            mPanRampStep   = (mPanRampTarget - mNotePan) / (float) mPanRampLeft;
+        }
+    }
+    mGlideFromNote    = -1;      // one-shot: never leaks into the next note
+    mGlideTimePending = false;
+    mPanRampPend      = -999.0f; // #11: consumed above (or irrelevant for a plain note)
 
+    // Consume the per-note expression stashes (QA-H).
+    mActiveResOffset = mPendResOffset;
+    mActiveRelScale  = mPendRelScale;
+
+    // QA-VoicePool Task 2: flushBuffers() clears the resampler's per-channel
+    // filter histories + readahead buffer; setResamplingRatio() updates the
+    // pitch ratio.  prepareToPlay was hoisted to BaySickPlayerVoice::prepareForPlayback.
     mActiveResamp-&gt;flushBuffers ();
     mActiveResamp-&gt;setResamplingRatio (mGlideSamplesLeft &gt; 0
         ? mGlideBaseRatio * std::pow (2.0, (double) mGlideSemisCur / 12.0)
@@ -77,8 +138,12 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
 
     // Per-note velocity + region volume offset (kept separate from mVolume).
     // S1 2026-04-21: VEL-&gt;VOLUME amount crossfades between flat (1.0) and full velocity scaling.
+    //   mVelToVolume = 1 =&gt; adjustedVelocity (v1 behaviour)
+    //   mVelToVolume = 0 =&gt; 1.0 (velocity has no effect on volume)
     const float volVelMix = (1.0f - mVelToVolume) + mVelToVolume * adjustedVelocity;
     mVelocityScale = juce::Decibels::decibelsToGain (region-&gt;volumeOffset) * volVelMix;
+    mNoteVel       = velocity;   // S-6(C): base velocity for the slide loudness ramp
+    mVelRampLeft   = 0;          //          a fresh note is not mid-slide-ramp
 
     // Muffle: reduce filter cutoff. MUFFLE is a static control; VEL→MUFFLE routes
     // velocity so that louder hits bypass some of the muffle (brighter on loud hits).
@@ -94,7 +159,8 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
     }
 
     mFilter.reset();
-    // QA-H: per-note CC72 release scale on top of the user&#x27;s base ADSR
+    // QA-H: per-note CC72 release scale on top of the user's base ADSR (the
+    // engine's setAdsr only fires on user change, so re-apply per note).
     {
         auto p = mAdsrBase;
         p.release = juce::jmax (0.001f, p.release * mActiveRelScale);
@@ -105,7 +171,14 @@ and the ADSR complete the voice; each is covered by its shared topic.</p>
     mReductStep = 0;
     mIsPlaying  = true;
 
-    // [mIsActive flag + monotonic note counter for oldest-first stealing -- elided]
+    // QA-VoicePool Task 3: flip supplemental active flag (Sub-A=(a)) for
+    // findStealCandidate's atomic scan; clear release predicate (fresh note).
+    mIsActive.store (true, std::memory_order_release);
+    mInRelease = false;
+
+    // S1 Incr3: monotonic age stamp for voiceCap-based oldest-first stealing.
+    static juce::uint32 sGlobalNoteCounter = 0;
+    mNoteStartCounter = ++sGlobalNoteCounter;
 }</code></pre></details>
 <pre class="formulas">- Root-note pitch ratio: `pitchSemitones = (midiNote - rootNote) + region.tuneOffset + globalTune + unisonCents/100`; `pitchRatio = 2^(pitchSemitones/12)`.
 - Resampling ratio: `resampRatio = (fileSampleRate / deviceSampleRate) * pitchRatio * clamp(stretch, 0.5, 2.0)` -- the Stretch knob is varispeed (pitch + speed together, tape-style).

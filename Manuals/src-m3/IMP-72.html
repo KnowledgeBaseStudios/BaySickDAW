@@ -90,7 +90,44 @@ bool loadPreset (DSPBase&amp; dsp, const juce::File&amp; presetFile, juce::Strin
     dsp.setStateInformation (blob.getData(), (int) blob.getSize());
     return true;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\EffectPresetIO.h (per-effect preset IO + factory seeding)</summary><pre><code>// EffectPresetIO.h -- API surface (verbatim, lines 38-113, comments trimmed to signatures)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\EffectPresetIO.h (per-effect preset IO + factory seeding)</summary><pre><code>// Source/Standalone/EffectPresetIO.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+#include &lt;functional&gt;
+
+#include "../EffectRack.h"
+
+class DSPBase;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EffectPresetIO - H-9 prep (2026-05-02)
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic factory + user preset save/load for every effect-rack DSP.  Adds
+// a Preset menu next to each SlotComponent's bypass LED so users can:
+//   - Save Current Preset    → writes XML to My Presets folder
+//   - Load Preset             → walks Factory + My Presets folders
+//   - Restore Default         → resets DSP to construction defaults
+//   - Save as Default         → user-defined "Init" preset for this effect
+//   - Manage Presets          → opens the folder in Explorer
+//
+// Folder layout:
+//   Documents/BaySickDAW/Presets/Effects/{TypeName}/Factory/{name}.xml
+//   Documents/BaySickDAW/Presets/Effects/{TypeName}/My Presets/{name}.xml
+//   Documents/BaySickDAW/Presets/Effects/{TypeName}/Default.xml   (optional)
+//
+// Factory presets are SEEDED on first launch via seedFactoryPresets():
+// each factory preset is defined as a configure-lambda that takes a fresh
+// DSPBase + sets its parameters; the framework runs the lambda on a temp
+// DSP, calls getStateInformation, writes the XML to disk.  After seeding
+// the Factory folder is read-only by convention -- if the user deletes a
+// factory preset, the next app launch re-seeds it.
+//
+// Preset XML format: just the DSP's getStateInformation blob, base64-encoded
+// inside a wrapper &lt;EffectPreset&gt; element with metadata (version, effectType,
+// name).  Loading uses setStateInformation so per-DSP state (Type
+// umbrella, A/B snapshots, etc.) round-trips faithfully.
+// ─────────────────────────────────────────────────────────────────────────────
+
 namespace EffectPresetIO
 {
     // Folder names per effect type (used for both filesystem layout and
@@ -98,47 +135,72 @@ namespace EffectPresetIO
     // all existing user presets.
     juce::String typeFolderName (EffectType type);
 
+    // Filesystem helpers ----------------------------------------------------
     juce::File   presetsRoot();                         // .../Presets/Effects
     juce::File   typeRoot     (EffectType type);        // .../Presets/Effects/{Type}
     juce::File   factoryDir   (EffectType type);        // .../{Type}/Factory
     juce::File   myPresetsDir (EffectType type);        // .../{Type}/My Presets
     juce::File   defaultFile  (EffectType type);        // .../{Type}/Default.xml
 
-    // Shared asset folders that are NOT per-EffectType.
+    // Shared asset folders that are NOT per-EffectType.  Centralized here so
+    // every chooser opens the same place -- both paths were spelled out as
+    // literals at multiple call sites before QA-NativeDialogs.
     juce::File   userNamPedalsDir();   // .../Pedals/User NAM Pedals  (.nam captures)
     juce::File   irDir();              // .../IR                     (user impulse responses)
 
     void ensureFolderTree (EffectType type);   // mkdir-p the three folders above
 
-    // Seeding: run once at app startup -- writes any missing factory preset XMLs
+    // Seeding ---------------------------------------------------------------
+    // Run once at app startup -- writes any missing factory preset XMLs
     // to disk based on the static factory-preset table in EffectPresetIO.cpp.
     // Idempotent per seed version: a factory file is written when it is missing
     // OR when factory_seed_version.txt is behind kFactorySeedVersion.  Bump that
-    // constant whenever factoryTable() values or an effect&#x27;s preset
+    // constant whenever factoryTable() values or an effect's preset
     // serialization changes, or existing installs keep their stale files.
     // My Presets/ is never touched.
     void seedFactoryPresets();
 
-    // H-10 cutover: one-time migration of legacy Tape preset folder into
-    // Saturation/.  Idempotent; call BEFORE seedFactoryPresets.
+    // H-10 cutover (2026-05-02): one-time migration of legacy Tape preset
+    // folder.  Moves any user-saved XMLs in Tape/My Presets/ into
+    // Saturation/My Presets/ (skipping name collisions) so the user's
+    // custom Tape presets remain accessible after the fold.  Also wipes
+    // the stale Tape/Factory/ directory since those presets now live
+    // under Saturation/Factory/ (named "Tape Vintage" etc).  Idempotent:
+    // safe to call every launch -- after the first run there's nothing
+    // to migrate or clean.  Call BEFORE seedFactoryPresets so the new
+    // Saturation tape presets get seeded with the right names on disk.
     void migrateTapeFolderToSaturation();
 
-    // Save a DSP&#x27;s current state to the named user preset.  presetName is the
-    // raw typed string: naming and collision go through UserFileSave::resolveTarget,
+    // Save / load -----------------------------------------------------------
+    // Save a DSP's current state to the named user preset.  Returns true
+    // on success; on failure outErr describes why.  presetName is the raw
+    // typed string: naming and collision go through UserFileSave::resolveTarget,
     // so an existing preset of the same name is suffixed rather than replaced
-    // and the file on disk is not always &quot;&lt;presetName&gt;.xml&quot;.
-    bool savePreset (DSPBase&amp; dsp, EffectType type,
-                     const juce::String&amp; presetName, juce::String&amp; outErr);
+    // and the file on disk is not always "&lt;presetName&gt;.xml".
+    bool savePreset (DSPBase&amp; dsp,
+                       EffectType type,
+                       const juce::String&amp; presetName,
+                       juce::String&amp; outErr);
 
-    // Load a preset XML into the DSP (factory or user; path fully qualified).
-    bool loadPreset (DSPBase&amp; dsp, const juce::File&amp; presetFile, juce::String&amp; outErr);
+    // Load a preset XML into the DSP.  Works for both factory and user
+    // presets (path is fully qualified).
+    bool loadPreset (DSPBase&amp; dsp,
+                       const juce::File&amp; presetFile,
+                       juce::String&amp; outErr);
 
-    // Restore DSP to construction defaults (fresh-DSP approach).
+    // Restore DSP to its construction-default state (no preset file
+    // involved -- just calls DSP's setStateInformation with empty data
+    // OR re-instantiates a temp DSP and copies its state).  Implementation
+    // uses the "fresh DSP" approach for cleanliness.
     void restoreDefaults (DSPBase&amp; dsp, EffectType type);
 
-    // Save current state as the user&#x27;s &quot;default&quot; preset (Default.xml in type root).
+    // Save the DSP's current state as the user's "default" preset for
+    // this effect type.  Stored at Default.xml in the type root.  When
+    // the user adds a new instance of this effect, the Slot factory could
+    // read this and apply it (deferred -- not all callers handle this yet).
     bool saveAsDefault (DSPBase&amp; dsp, EffectType type, juce::String&amp; outErr);
 
+    // Enumeration -----------------------------------------------------------
     juce::Array&lt;juce::File&gt; enumerateFactory   (EffectType type);
     juce::Array&lt;juce::File&gt; enumerateMyPresets (EffectType type);
 }</code></pre></details>

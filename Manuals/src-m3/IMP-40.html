@@ -2,7 +2,7 @@
 the leader's. Works in real time rather than bars, because a singer's timing is
 not a grid.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\BaySickAlignDSP.cpp - key excerpts (full file 975 lines)</div><pre><code>// BaySickAlignDSP.cpp anonymous-ns pairOnsets() -- the alignment cost/path DP
+<div class="codeblock"><div class="codehead">- Source\DSP\BaySickAlignDSP.cpp (975 lines)</div><pre><code>// BaySickAlignDSP.cpp anonymous-ns pairOnsets() -- the alignment cost/path DP
         struct Cell { int count; double cost; unsigned char from; };
         // from: 0 = pair (diag), 1 = skip dub, 2 = skip guide.
         std::vector&lt;Cell&gt; dp ((m + 1) * (n + 1));
@@ -41,95 +41,427 @@ not a grid.</p>
                 }
                 at (i, j) = best;
             }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickAlignDSP.cpp - key excerpts (full file 975 lines)</summary><pre><code>// pairOnsets() -- full
-    std::vector&lt;Pair&gt; pairOnsets (const std::vector&lt;double&gt;&amp; dubOnsets,
-                                   const std::vector&lt;double&gt;&amp; guideOnsets,
-                                   double tolerance)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BaySickAlignDSP.cpp (975 lines)</summary><pre><code>// Source/DSP/BaySickAlignDSP.cpp  -  BaySickAlignDSP::analyzeOffline (complete)
+// ─── analyzeOffline ────────────────────────────────────────────────────────────
+WarpMap BaySickAlignDSP::analyzeOffline (const float* guideMono, int numGuideSamples,
+                                          const float* dubMono,   int numDubSamples,
+                                          double sampleRate,
+                                          const AlignBuildParams&amp; params,
+                                          const std::vector&lt;AlignSyncPoint&gt;&amp;     syncPoints,
+                                          const std::vector&lt;AlignProtectedArea&gt;&amp; protectedAreas,
+                                          AlignAnalyzeDiag* diagOut)
+{
+    if (diagOut != nullptr)
+        *diagOut = { 0, 0, 0, kMatchWindowSec };
+
+    WarpMap map;
+    map.analysisSampleRate = sampleRate;
+    map.guideDurationSec   = (sampleRate &gt; 0.0) ? numGuideSamples / sampleRate : 0.0;
+    map.dubDurationSec     = (sampleRate &gt; 0.0) ? numDubSamples   / sampleRate : 0.0;
+
+    if (guideMono == nullptr || dubMono == nullptr
+        || numGuideSamples &lt; kFFTSize || numDubSamples &lt; kFFTSize)
+        return map;
+
+    const auto guideOnsets  = detectOnsetsSec (guideMono, numGuideSamples, sampleRate);
+    const auto dubOnsetsRaw = detectOnsetsSec (dubMono,   numDubSamples,   sampleRate);
+    if (diagOut != nullptr)
     {
-        std::vector&lt;Pair&gt; pairs;
-        const size_t m = dubOnsets.size(), n = guideOnsets.size();
-        if (m == 0 || n == 0) return pairs;
+        diagOut-&gt;guideOnsets = (int) guideOnsets.size();
+        diagOut-&gt;dubOnsets   = (int) dubOnsetsRaw.size();
+    }
 
-        // DP table cap ~4M cells (~100 MB-safe transient, message thread).
-        // Beyond it (pathological hour-long composites) fall back to the
-        // greedy monotone walk.
-        if ((m + 1) * (n + 1) &gt; (size_t) 4 * 1024 * 1024)
+    // QA-Fd (locked 5/13a): pairing runs in the EDITED performance domain --
+    // the pitch tab's time edits redefine where the follower's words sound,
+    // and that is the timing align must match.  Onsets keep their RAW twin
+    // so anchor pitch deltas can still sample the raw audio.
+    const bool haveEdit = (bool) params.dubEditTransform;
+    auto editedOf = [&amp;] (double t) -&gt; double
+    { return haveEdit ? params.dubEditTransform (t) : t; };
+
+    struct DubOnset { double edited, raw; };
+    std::vector&lt;DubOnset&gt; dubOnsets;
+    dubOnsets.reserve (dubOnsetsRaw.size());
+    for (double t : dubOnsetsRaw)
+        dubOnsets.push_back ({ editedOf (t), t });
+    // Detached pills can reorder material in edited time.
+    std::sort (dubOnsets.begin(), dubOnsets.end(),
+               [] (const DubOnset&amp; l, const DubOnset&amp; r)
+               { return l.edited &lt; r.edited; });
+
+    const double dubDurEdited = editedOf (map.dubDurationSec);
+
+    // Sync points sorted by follower time = hard segmentation boundaries
+    // (section 13c): auto-pairing runs independently inside each region so a
+    // user-placed pair can never be crossed by an automatic pairing.  The
+    // user places them on the RAW lanes; segmentation runs in edited time.
+    auto sp = syncPoints;
+    std::sort (sp.begin(), sp.end(),
+               [] (const AlignSyncPoint&amp; l, const AlignSyncPoint&amp; r)
+               { return l.followerSec &lt; r.followerSec; });
+
+    struct RawPair { double dubEdited, dubRaw, guide; };
+    std::vector&lt;RawPair&gt; pairs;
+    {
+        double dubLo = 0.0, guideLo = 0.0;
+        for (size_t seg = 0; seg &lt;= sp.size(); ++seg)
         {
-            double lastGuide = -1.0e18;
-            size_t guideHint = 0;
-            for (double dt : dubOnsets)
-            {
-                while (guideHint &lt; n &amp;&amp; guideOnsets[guideHint] &lt; dt - tolerance)
-                    ++guideHint;
-                double bestDist = tolerance + 1.0;
-                size_t bestIdx  = n;
-                for (size_t g = guideHint; g &lt; n; ++g)
-                {
-                    if (guideOnsets[g] &lt;= lastGuide) continue;
-                    if (guideOnsets[g] &gt; dt + tolerance) break;
-                    const double d = std::abs (guideOnsets[g] - dt);
-                    if (d &lt; bestDist) { bestDist = d; bestIdx = g; }
-                }
-                if (bestIdx &lt; n)
-                {
-                    lastGuide = guideOnsets[bestIdx];
-                    pairs.push_back ({ dt, guideOnsets[bestIdx] });
-                }
-            }
-            return pairs;
-        }
+            const double dubHi   = (seg &lt; sp.size()) ? editedOf (sp[seg].followerSec)
+                                                     : dubDurEdited;
+            const double guideHi = (seg &lt; sp.size()) ? sp[seg].leaderSec
+                                                     : map.guideDurationSec;
 
-        struct Cell { int count; double cost; unsigned char from; };
-        // from: 0 = pair (diag), 1 = skip dub, 2 = skip guide.
-        std::vector&lt;Cell&gt; dp ((m + 1) * (n + 1));
-        auto at = [&amp;] (size_t i, size_t j) -&gt; Cell&amp;
-        { return dp[i * (n + 1) + j]; };
+            std::vector&lt;double&gt; dubSeg, guideSeg;
+            std::vector&lt;double&gt; dubSegRaw;
+            for (const auto&amp; o : dubOnsets)
+                if (o.edited &gt;= dubLo &amp;&amp; o.edited &lt; dubHi)
+                    { dubSeg.push_back (o.edited); dubSegRaw.push_back (o.raw); }
+            for (double t : guideOnsets) if (t &gt;= guideLo &amp;&amp; t &lt; guideHi) guideSeg.push_back (t);
 
-        for (size_t i = 0; i &lt;= m; ++i)
-            for (size_t j = 0; j &lt;= n; ++j)
+            auto segPairs = pairOnsets (dubSeg, guideSeg, kMatchWindowSec);
+            for (const auto&amp; p : segPairs)
             {
-                if (i == 0 &amp;&amp; j == 0) { at (0, 0) = { 0, 0.0, 1 }; continue; }
-                Cell best { -1, 1.0e18, 1 };
-                if (i &gt; 0)
-                {
-                    const Cell&amp; c = at (i - 1, j);
-                    if (c.count &gt; best.count
-                        || (c.count == best.count &amp;&amp; c.cost &lt; best.cost))
-                        best = { c.count, c.cost, 1 };
-                }
-                if (j &gt; 0)
-                {
-                    const Cell&amp; c = at (i, j - 1);
-                    if (c.count &gt; best.count
-                        || (c.count == best.count &amp;&amp; c.cost &lt; best.cost))
-                        best = { c.count, c.cost, 2 };
-                }
-                if (i &gt; 0 &amp;&amp; j &gt; 0)
-                {
-                    const double d = std::abs (dubOnsets[i - 1] - guideOnsets[j - 1]);
-                    if (d &lt;= tolerance)
-                    {
-                        const Cell&amp; c = at (i - 1, j - 1);
-                        if (c.count + 1 &gt; best.count
-                            || (c.count + 1 == best.count &amp;&amp; c.cost + d &lt; best.cost))
-                            best = { c.count + 1, c.cost + d, 0 };
-                    }
-                }
-                at (i, j) = best;
+                // Recover the raw twin (pair dub values come verbatim from
+                // dubSeg, which is sorted -- binary search by value).
+                const auto it = std::lower_bound (dubSeg.begin(), dubSeg.end(), p.dub);
+                const double raw = (it != dubSeg.end() &amp;&amp; *it == p.dub)
+                    ? dubSegRaw[(size_t) std::distance (dubSeg.begin(), it)]
+                    : p.dub;
+                pairs.push_back ({ p.dub, raw, p.guide });
             }
 
-        size_t i = m, j = n;
-        while (i &gt; 0 || j &gt; 0)
-        {
-            const Cell&amp; c = at (i, j);
-            if (c.from == 0)
-                { pairs.push_back ({ dubOnsets[i - 1], guideOnsets[j - 1] }); --i; --j; }
-            else if (c.from == 1) { if (i &gt; 0) --i; else --j; }
-            else                  { if (j &gt; 0) --j; else --i; }
+            dubLo = dubHi; guideLo = guideHi;
         }
-        std::reverse (pairs.begin(), pairs.end());
-        return pairs;
-    }</code></pre></details>
+    }
+
+    if (diagOut != nullptr)
+        diagOut-&gt;pairs = (int) pairs.size();
+
+    const bool haveSync = ! sp.empty();
+    if (pairs.size() &lt; 2 &amp;&amp; ! haveSync)
+        return map;
+
+    // ── Residual-cap anchor build (QA-Fd, locked 9a/10a/15a) ────────────────
+    // Offset d = leader minus follower per pair.  Within the residual cap R
+    // the word keeps its natural timing (anchor lands AT the dub time);
+    // beyond R it is pulled to the cap edge, and Max Shift M bounds the
+    // applied movement: move = min(max(|d| - R, 0), M).  Tight R=0 = every
+    // pair lands on the leader (fully locked).  Sync points are user intent
+    // and land at their exact pairing regardless of the caps.
+    //
+    // Raw pitch deltas are sampled at the RAW pair positions (leader's word
+    // is at p.guide even when the cap leaves the anchor at dub) and stored
+    // unscaled -- Blend/Variation apply at publish.
+    const double R = juce::jmax (0.0, params.residualCapSec);
+    const double M = juce::jmax (0.0, params.maxShiftSec);
+
+    auto rawDeltaSemis = [&amp;] (double dubSec, double guideSec) -&gt; float
+    {
+        const float fDub   = f0AtSec (dubMono,   numDubSamples,   sampleRate,
+                                      dubSec,   params.dubMinHz,   params.dubMaxHz);
+        const float fGuide = f0AtSec (guideMono, numGuideSamples, sampleRate,
+                                      guideSec, params.guideMinHz, params.guideMaxHz);
+        if (fDub &gt; 0.0f &amp;&amp; fGuide &gt; 0.0f)
+            return juce::jlimit (-12.0f, 12.0f, 12.0f * std::log2 (fGuide / fDub));
+        return 0.0f;
+    };
+
+    // hard = endpoint or user sync point: never dropped by the slope bound.
+    struct Flagged { WarpAnchor a; bool hard; };
+    std::vector&lt;Flagged&gt; fl;
+
+    // Anchor at start (0,0) so the warp is well-defined from the start.
+    fl.push_back ({ { 0.0, 0.0, 1.0f, 0.0f }, true });
+    for (const auto&amp; p : pairs)
+    {
+        WarpAnchor a;
+        a.dubTimeSec   = p.dubEdited;
+        const double d    = p.guide - p.dubEdited;
+        const double move = juce::jlimit (0.0, M, std::abs (d) - R);
+        a.guideTimeSec = p.dubEdited + (d &gt;= 0.0 ? move : -move);
+        a.weight       = 1.0f;
+        a.pitchSemis   = rawDeltaSemis (p.dubRaw, p.guide);
+        fl.push_back ({ a, false });
+    }
+    for (const auto&amp; x : sp)
+    {
+        WarpAnchor a;
+        a.dubTimeSec   = editedOf (x.followerSec);
+        a.guideTimeSec = x.leaderSec;
+        a.weight       = 1.0f;
+        a.pitchSemis   = rawDeltaSemis (x.followerSec, x.leaderSec);
+        fl.push_back ({ a, true });
+    }
+
+    std::sort (fl.begin(), fl.end(),
+               [] (const Flagged&amp; l, const Flagged&amp; r)
+               { return l.a.dubTimeSec &lt; r.a.dubTimeSec; });
+
+    // End anchor continues the LAST anchor's offset at slope 1 (natural
+    // tail).  The old build pinned dubDur onto guideDur, which imposed a
+    // duration-equalizing stretch on the whole tail -- the residual model
+    // wants untouched timing everywhere no pairing demands movement.
+    // (Edited domain: the map's input is the edited performance timeline.)
+    if (dubDurEdited &gt; 0.0 &amp;&amp; dubDurEdited &gt; fl.back().a.dubTimeSec)
+    {
+        WarpAnchor end;
+        end.dubTimeSec   = dubDurEdited;
+        end.guideTimeSec = fl.back().a.guideTimeSec
+                         + (dubDurEdited - fl.back().a.dubTimeSec);
+        end.weight       = 1.0f;
+        fl.push_back ({ end, true });
+    }
+
+    // Monotonicity guard: guide times must never run backwards or applyWarp's
+    // segment ratios go negative.  Sync points + tolerant pairing can produce
+    // a crossing on hostile input -- clamp forward.
+    for (size_t i = 1; i &lt; fl.size(); ++i)
+        fl[i].a.guideTimeSec = juce::jmax (fl[i].a.guideTimeSec,
+                                           fl[i - 1].a.guideTimeSec);
+
+    // Segment-slope bound [1/r, r] on flexRatio r: an auto anchor whose
+    // segment demands more time-bend than the bound allows is a mispairing
+    // or an over-reach; drop it and let the neighbors span the region.  Sync
+    // points + endpoints survive (user intent; the lookup clamp bounds a
+    // hard-vs-hard breach).  The live recovery-glide 2:1 cap in the decode
+    // layer is a separate constant and intentionally stays.  r is fixed at
+    // 2.0 (Normal) since the Flexibility picker's removal (2026-07-11); the
+    // r &lt;= 1 unbounded branch is retained for a possible return of the
+    // control.
+    if (params.flexRatio &gt; 1.0)
+    {
+        const double rHi = params.flexRatio;
+        const double rLo = 1.0 / params.flexRatio;
+        for (bool changed = true; changed;)
+        {
+            changed = false;
+            for (size_t i = 1; i &lt; fl.size(); ++i)
+            {
+                const double dDub   = fl[i].a.dubTimeSec   - fl[i - 1].a.dubTimeSec;
+                const double dGuide = fl[i].a.guideTimeSec - fl[i - 1].a.guideTimeSec;
+                if (dDub &lt;= 1.0e-6) continue;
+                const double r = dGuide / dDub;
+                if (r &gt;= rLo &amp;&amp; r &lt;= rHi) continue;
+                if      (! fl[i].hard)     { fl.erase (fl.begin() + (long) i);       changed = true; break; }
+                else if (! fl[i - 1].hard) { fl.erase (fl.begin() + (long) (i - 1)); changed = true; break; }
+            }
+        }
+    }
+
+    map.anchors.clear();
+    map.anchors.reserve (fl.size());
+    for (const auto&amp; f : fl)
+        map.anchors.push_back (f.a);
+
+    // ── Protected areas post-pass (section 13c) ─────────────────────────────
+    // protectTime: ratio forced to 1 through the region -- anchors inside are
+    // rebased to (areaEntryGuide + elapsed follower time); offset continuity
+    // is preserved, the region itself never stretches.  protectPitch: anchor
+    // deltas zeroed inside.  Bounds placed on the raw lanes -&gt; compared in
+    // the edited domain the anchors live in.
+    for (const auto&amp; pa : protectedAreas)
+    {
+        if (pa.endSec &lt;= pa.startSec) continue;
+        const double paStart = editedOf (pa.startSec);
+        const double paEnd   = editedOf (pa.endSec);
+
+        if (pa.protectTime &amp;&amp; map.anchors.size() &gt;= 2)
+        {
+            const double entryGuide = map.mapDubToGuide (paStart);
+            for (auto&amp; a : map.anchors)
+                if (a.dubTimeSec &gt;= paStart &amp;&amp; a.dubTimeSec &lt;= paEnd)
+                    a.guideTimeSec = entryGuide + (a.dubTimeSec - paStart);
+            // Re-clamp monotonicity after the rebase.
+            for (size_t i = 1; i &lt; map.anchors.size(); ++i)
+                map.anchors[i].guideTimeSec = juce::jmax (map.anchors[i].guideTimeSec,
+                                                          map.anchors[i - 1].guideTimeSec);
+        }
+        if (pa.protectPitch)
+            for (auto&amp; a : map.anchors)
+                if (a.dubTimeSec &gt;= paStart &amp;&amp; a.dubTimeSec &lt;= paEnd)
+                    a.pitchSemis = 0.0f;
+    }
+
+    return map;
+}
+
+// Source/DSP/BaySickAlignDSP.cpp  -  BaySickAlignDSP::applyWarp (complete)
+juce::AudioBuffer&lt;float&gt; BaySickAlignDSP::applyWarp (const float* dubMono, int numDubSamples,
+                                                     double sampleRate,
+                                                     const WarpMap&amp; map,
+                                                     int pitchAlgo,
+                                                     float extraSemis,
+                                                     int oversample)
+{
+    juce::AudioBuffer&lt;float&gt; out;
+    if (dubMono == nullptr || numDubSamples &lt;= 0 || sampleRate &lt;= 0.0)
+        return out;
+
+    if (! map.isValid())
+    {
+        out.setSize (1, numDubSamples);
+        out.copyFrom (0, 0, dubMono, numDubSamples);
+        return out;
+    }
+
+    const double dubDurSec = (double) numDubSamples / sampleRate;
+    const int outLen = juce::jmax (1, (int) std::llround (
+        map.mapDubToGuide (dubDurSec) * sampleRate));
+    out.setSize (1, outLen);
+    out.clear();
+    float* dst = out.getWritePointer (0);
+
+    // ── Phase 1: continuous smooth-map warp (publish-equivalent lookup) ─────
+    // Review fix: the map splits into MONOTONE-SOURCE segments at backward
+    // jumps (a detached pill may reorder material) -- each segment renders
+    // through its own continuous pass into its own guide span, and the
+    // boundary is a clean splice: the render analog of the live forceSeek
+    // cut.  Maps without reordering are a single segment (previous behavior).
+    {
+        auto anchors = map.anchors;
+        std::sort (anchors.begin(), anchors.end(),
+                   [] (const WarpAnchor&amp; a, const WarpAnchor&amp; b)
+                   { return a.guideTimeSec &lt; b.guideTimeSec; });
+
+        oversample = juce::jlimit (1, 8, oversample);
+
+        auto renderSpan = [&amp;] (const AlignPlaySnapshot&amp; look,
+                               juce::int64 outStart, int spanLen)
+        {
+            if (spanLen &lt;= 0) return;
+            if (oversample &lt;= 1)
+            {
+                warpContinuous (dubMono, numDubSamples, sampleRate, look,
+                                dst + outStart, spanLen, outStart);
+                return;
+            }
+            // QA-Fd 16a High-Res: run the warp at sampleRate * oversample
+            // (384 kHz-class at 8x) for finer PhaseVocoder time resolution,
+            // then decimate.  The map is in seconds -- rate-invariant.
+            // Interpolator inputs get an 8-sample zero guard: Lagrange
+            // reads a few samples past ratio*numOut.
+            const int upLen  = numDubSamples * oversample;
+            const int upSpan = spanLen * oversample;
+            std::vector&lt;float&gt; srcPadded ((size_t) numDubSamples + 8, 0.0f);
+            std::copy (dubMono, dubMono + numDubSamples, srcPadded.begin());
+            juce::AudioBuffer&lt;float&gt; up (1, upLen);
+            {
+                juce::LagrangeInterpolator li;
+                li.reset();
+                li.process (1.0 / (double) oversample, srcPadded.data(),
+                            up.getWritePointer (0), upLen);
+            }
+            std::vector&lt;float&gt; warpedHi ((size_t) upSpan + 8, 0.0f);
+            warpContinuous (up.getReadPointer (0), upLen,
+                            sampleRate * (double) oversample, look,
+                            warpedHi.data(), upSpan,
+                            outStart * (juce::int64) oversample);
+            juce::LagrangeInterpolator down;
+            down.reset();
+            down.process ((double) oversample, warpedHi.data(),
+                          dst + outStart, spanLen);
+        };
+
+        size_t segFirst = 0;
+        for (size_t i = 1; i &lt;= anchors.size(); ++i)
+        {
+            const bool split = (i == anchors.size())
+                || (anchors[i].dubTimeSec &lt; anchors[i - 1].dubTimeSec - 1.0e-4);
+            if (! split) continue;
+
+            AlignPlaySnapshot look;
+            double lastDub = -1.0e18;
+            for (size_t k = segFirst; k &lt; i; ++k)
+            {
+                const auto&amp; a = anchors[k];
+                const double d = juce::jmax (lastDub, a.dubTimeSec);
+                if (! look.guideSec.empty()
+                    &amp;&amp; a.guideTimeSec - look.guideSec.back() &lt; 1.0e-4)
+                {
+                    look.dubSec.back()     = d;
+                    look.pitchSemis.back() = a.pitchSemis;
+                }
+                else
+                {
+                    look.guideSec  .push_back (a.guideTimeSec);
+                    look.dubSec    .push_back (d);
+                    look.pitchSemis.push_back (a.pitchSemis);
+                }
+                lastDub = d;
+            }
+            if (look.guideSec.size() == 1)
+            {
+                // Lone anchor after a split: extend at slope 1 for tangents.
+                look.guideSec  .push_back (look.guideSec.front() + 0.05);
+                look.dubSec    .push_back (look.dubSec.front() + 0.05);
+                look.pitchSemis.push_back (look.pitchSemis.front());
+            }
+            look.computeTangents();
+
+            const juce::int64 outStart = (segFirst == 0) ? 0
+                : juce::jlimit ((juce::int64) 0, (juce::int64) outLen,
+                    (juce::int64) std::llround (anchors[segFirst].guideTimeSec
+                                                * sampleRate));
+            const juce::int64 outEnd = (i == anchors.size())
+                ? (juce::int64) outLen
+                : juce::jlimit (outStart, (juce::int64) outLen,
+                    (juce::int64) std::llround (anchors[i].guideTimeSec
+                                                * sampleRate));
+            renderSpan (look, outStart, (int) (outEnd - outStart));
+            segFirst = i;
+        }
+    }
+
+    // ── Phase 2: pitch pass over the warped result (anchor deltas + Transpose) ──
+    // QA-Fe: bake the pitch envelope through the selected library engine
+    // (pitchAlgo -&gt; PitchEngine; Task 3 owns the dropdown + old-value migration).
+    bool anyPitch = std::abs (extraSemis) &gt; 0.01f;
+    for (const auto&amp; a : map.anchors)
+        if (std::abs (a.pitchSemis) &gt; 0.01f) { anyPitch = true; break; }
+    if (! anyPitch)
+        return out;
+
+    // Per-sample pitch ratio from the anchor-cursor semis lerp (guide-time domain)
+    // + the global Transpose, then a length-preserved bake over the warped result.
+    std::vector&lt;float&gt; ratio ((size_t) outLen, 1.0f);
+    {
+        const auto&amp; an = map.anchors;
+        size_t ai = 0;
+        for (int j = 0; j &lt; outLen; ++j)
+        {
+            float semis = 0.0f;
+            if (an.size() &gt;= 2)
+            {
+                const double gSec = (double) j / sampleRate;
+                while (ai + 2 &lt; an.size() &amp;&amp; gSec &gt;= an[ai + 1].guideTimeSec)
+                    ++ai;
+                const auto&amp; a = an[ai];
+                const auto&amp; b = an[ai + 1];
+                if (gSec &lt;= a.guideTimeSec)      semis = a.pitchSemis;
+                else if (gSec &gt;= b.guideTimeSec) semis = b.pitchSemis;
+                else
+                {
+                    const double d = b.guideTimeSec - a.guideTimeSec;
+                    const double t = (d &gt; 1.0e-9) ? (gSec - a.guideTimeSec) / d : 0.0;
+                    semis = a.pitchSemis + (float) t * (b.pitchSemis - a.pitchSemis);
+                }
+            }
+            else if (! an.empty())
+                semis = an.front().pitchSemis;
+            semis += extraSemis;
+            ratio[(size_t) j] = std::pow (2.0f, semis / 12.0f);
+        }
+    }
+
+    std::vector&lt;float&gt; shifted ((size_t) outLen, 0.0f);
+    if (auto shifter = makePitchShifter ((PitchEngine) juce::jlimit (0, 2, pitchAlgo)))
+        shifter-&gt;bake (dst, shifted.data(), outLen, sampleRate, ratio.data(), nullptr);
+    else
+        std::copy (dst, dst + outLen, shifted.begin());
+    std::copy (shifted.begin(), shifted.end(), dst);
+
+    return out;
+}</code></pre></details>
 <pre class="formulas">- Onset detection: FFT order 11 (2048), hop 512, Hann window; spectral flux = sum of positive per-bin magnitude increases; adaptive threshold = `mean + 1.6 * stddev` of the flux envelope; local-max peak pick with 40 ms refractory (`kMinPeakDistanceSec = 0.040`); onset time = `(frame*512 + 1024) / sr`.
 - Pairing: fixed match window `kMatchWindowSec = 0.4` s (BaySickAlignDSP.h line 311). DP objective: maximize pair count, tiebreak minimal total |dub-guide| distance; monotone by construction. DP cap `(m+1)*(n+1) &gt; 4*1024*1024` cells -&gt; greedy monotone fallback.
 - Anchor build (`AlignBuildParams` defaults, BaySickAlignDSP.h lines 139-148): residual cap `R = 0.05` s (word keeps natural timing within R), max shift `M = 0.4` s; applied movement `move = min(max(|d| - R, 0), M)` where `d = guide - dubEdited`. Tight preset R=0 = fully locked to leader.

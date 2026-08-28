@@ -21,7 +21,20 @@ public:
             mBufs[i] = nullptr;
         mCount = n;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\EngineSidechainHelper.h (ISidechainEngine, lines 13-19; class EngineSidechainHelper, lines 37-99)</summary><pre><code>class ISidechainEngine
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\EngineSidechainHelper.h (ISidechainEngine, lines 13-19; class EngineSidechainHelper, lines 37-99)</summary><pre><code>// Source/DSP/EngineSidechainHelper.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+#include &lt;atomic&gt;
+#include &lt;cmath&gt;
+
+// ─── ISidechainEngine ───────────────────────────────────────────────────────
+// Tag interface inherited by all engine processors that consume engine-level
+// sidechain (Harmless / BaySickSynth / BaySickBass / BaySickPlayer / BaySickNAMIR
+// + future: BaySickPedals (Phase I), BaySickDrumKit, etc).  PluginProcessor's
+// render loop dynamic_casts the AudioProcessor* before each engine's
+// processBlock and pushes the strip's SC array via setSidechainBuffers.
+// ────────────────────────────────────────────────────────────────────────────
+class ISidechainEngine
 {
 public:
     virtual ~ISidechainEngine() = default;
@@ -29,7 +42,22 @@ public:
     virtual float getSidechainLevel() const noexcept = 0;
 };
 
-// EngineSidechainHelper.h -- the per-engine primitive (complete class, lines 37-99)
+// ─── EngineSidechainHelper ──────────────────────────────────────────────────
+// C.4 Phase 2.2 (2026-04-30): per-engine sidechain primitive.  Each player
+// engine processor (Harmless / BaySickSynth / BaySickBass / BaySickPlayer /
+// BaySickNAMIR) holds one of these as a member.  PluginProcessor's render
+// loop pushes the engine's host InsertNode SC array via setSidechainBuffers
+// before processBlock; the engine calls updateLevel(numSamples) inside
+// processBlock to publish a current RMS level via getLevel(), which any
+// internal modulation source on the engine can sample.
+//
+// Address-only push: the actual sample data is owned by BaySickGraph's per-strip
+// scRecv buffers, filled by each task's pullSidechainPredecessorsToGraph from
+// upstream sources earlier in the topo-sorted process order.
+//
+// Per-engine internal consumers (UI routing, modulation depth, etc.) are
+// out of scope for this phase - this helper is the primitive only.
+// ────────────────────────────────────────────────────────────────────────────
 class EngineSidechainHelper
 {
 public:

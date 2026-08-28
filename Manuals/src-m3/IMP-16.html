@@ -47,6 +47,407 @@ linear.setResponseMatrix (entry (+1.0f, domL),    // LL
                           entry (-1.0f, domR),    // LR
                           entry (-1.0f, domL),    // RL
                           entry (+1.0f, domR));   // RR</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/Kbs/EqLinearPhase.h</summary><pre><code>// Source/DSP/Kbs/EqLinearPhase.h  -  EqLinearPhase (complete)
+class EqLinearPhase
+{
+public:
+    // Sizes come in powers of two. taps = N/2 + 1, hop = N/2 - taps + 1 + N/2
+    // ... spelled plainly: hop = N - taps + 1, and with taps = N/2 + 1 that is
+    // N/2, so every frame is half fresh input. Latency = hop + (taps - 1) / 2.
+    void prepare (int fftOrder, int channels)
+    {
+        order = fftOrder;
+        n     = 1 &lt;&lt; order;
+        taps  = n / 2 + 1;
+        hop   = n - taps + 1;              // = n/2, kept in this form because
+                                           // it is the overlap-save identity
+        fft   = std::make_unique&lt;FFT&gt; (order);
+
+        spectrum.assign ((size_t) n, { 0.0f, 0.0f });
+        scratch.assign ((size_t) n, { 0.0f, 0.0f });
+        design.assign ((size_t) n, { 0.0f, 0.0f });
+
+        // Matrix mode (QA-EqPro SC-3): per-domain routing needs a full 2x2
+        // convolution, so the cross spectra and the second channel's transform
+        // scratch are sized here - rebuilds run on the audio thread and must
+        // not allocate.
+        for (auto* v : { &amp;specLL, &amp;specLR, &amp;specRL, &amp;specRR, &amp;scratchB, &amp;outA, &amp;outB })
+            v-&gt;assign ((size_t) n, { 0.0f, 0.0f });
+        matrixOn = false;
+
+        chans.assign ((size_t) std::max (1, channels), {});
+        for (auto&amp; c : chans)
+        {
+            c.ring.assign ((size_t) n, 0.0f);
+            c.out.assign ((size_t) hop, 0.0f);
+            c.ringPos = 0;
+            c.gathered = 0;
+            c.outPos = 0;
+        }
+
+        // Identity until told otherwise: a flat EQ must pass audio from the
+        // first block, not after the first parameter touch.
+        setMagnitude ([] (int, int) { return 1.0f; });
+        resetStreams();
+    }
+
+    bool isReady() const { return fft != nullptr; }
+
+    int latencySamples() const { return hop + (taps - 1) / 2; }
+    int fftSize() const { return n; }
+    int firTaps() const { return taps; }
+
+    // ── the filter ────────────────────────────────────────────────────────
+    //
+    // magnitudeAt is sampled at bin frequencies k/N in normalised terms; the
+    // caller maps bins to Hz. Zero phase in, linear phase out: the FIR is the
+    // symmetric response centred at (taps-1)/2, so its spectrum carries the
+    // one delay the whole engine reports.
+    void setMagnitude (const std::function&lt;float (int bin, int fftSizeN)&gt;&amp; magnitudeAt)
+    {
+        if (! isReady()) return;
+        designSpectrum (spectrum, magnitudeAt, true);
+        matrixOn = false;
+    }
+
+    // The 2x2 form (QA-EqPro SC-3): per-band domain routing (mid / side /
+    // left / right) is a matrix operation in the L/R domain, not a pair of
+    // independent curves.  With per-bin domain products st, l, r, m, s the
+    // caller composes (L/R-domain diagonal first, then the M/S stage folded
+    // back through the encode):
+    //   LL = ((m+s)/2)*st*l   LR = ((m-s)/2)*st*r
+    //   RL = ((m-s)/2)*st*l   RR = ((m+s)/2)*st*r
+    // Cross terms are SIGNED - (m-s)/2 goes negative when side exceeds mid -
+    // which is still a real even spectrum and a legal zero-phase FIR, so the
+    // designer must not clamp them.
+    void setMagnitudeMatrix (const std::function&lt;float (int bin, int fftSizeN)&gt;&amp; ll,
+                             const std::function&lt;float (int bin, int fftSizeN)&gt;&amp; lr,
+                             const std::function&lt;float (int bin, int fftSizeN)&gt;&amp; rl,
+                             const std::function&lt;float (int bin, int fftSizeN)&gt;&amp; rr)
+    {
+        if (! isReady()) return;
+        designSpectrum (specLL, ll, false);
+        designSpectrum (specLR, lr, false);
+        designSpectrum (specRL, rl, false);
+        designSpectrum (specRR, rr, false);
+        matrixOn = true;
+    }
+
+    bool isMatrixOn() const { return matrixOn; }
+
+    // ── spectral dynamics hooks (QA-EqFlagship W-1) ───────────────────────
+    //
+    // The per-frame windows into the transform: `spectralAnalyze` sees both
+    // input spectra before anything touches them (the detector's view);
+    // `spectralApply` multiplies its gains into each OUTPUT spectrum before
+    // the inverse transform.  Null = feature off, zero cost.  Setting these
+    // routes processStereo through the lockstep frame even without the
+    // matrix, so both channels share one analysis.
+    std::function&lt;void (const std::complex&lt;float&gt;*, const std::complex&lt;float&gt;*, int)&gt; spectralAnalyze;
+    std::function&lt;void (std::complex&lt;float&gt;*, int)&gt; spectralApply;
+
+    // ── complex (mixed / per-band phase) designs (QA-EqFlagship W-9) ──────
+    //
+    // The FIR need not be zero-phase: sampling a COMPLEX response (magnitude
+    // plus an excess phase) with conjugate symmetry still yields a real
+    // impulse response, and the same rotate-to-center + Kaiser pipeline
+    // holds.  The center delay - the one latency the engine reports - is
+    // unchanged; what moves is where each band's energy sits around it
+    // (minimum-phase content leans forward, killing its pre-ring).
+    void setResponse (const std::function&lt;std::complex&lt;float&gt; (int bin, int fftSizeN)&gt;&amp; at)
+    {
+        if (! isReady()) return;
+        designSpectrumComplex (spectrum, at);
+        matrixOn = false;
+    }
+
+    void setResponseMatrix (const std::function&lt;std::complex&lt;float&gt; (int bin, int fftSizeN)&gt;&amp; ll,
+                            const std::function&lt;std::complex&lt;float&gt; (int bin, int fftSizeN)&gt;&amp; lr,
+                            const std::function&lt;std::complex&lt;float&gt; (int bin, int fftSizeN)&gt;&amp; rl,
+                            const std::function&lt;std::complex&lt;float&gt; (int bin, int fftSizeN)&gt;&amp; rr)
+    {
+        if (! isReady()) return;
+        designSpectrumComplex (specLL, ll);
+        designSpectrumComplex (specLR, lr);
+        designSpectrumComplex (specRL, rl);
+        designSpectrumComplex (specRR, rr);
+        matrixOn = true;
+    }
+
+    // Convenience for a flat curve without building a lambda at the call site.
+    void setIdentity() { setMagnitude ([] (int, int) { return 1.0f; }); }
+
+    // Overload taking plain magnitudes-by-bin, the shape the EQ produces.
+    void setMagnitude (const std::function&lt;float (float)&gt;&amp; magAtHz, double sampleRate)
+    {
+        const double binHz = sampleRate / (double) n;
+        setMagnitude ([&amp;] (int bin, int) { return magAtHz ((float) (bin * binHz)); });
+    }
+
+    // ── audio ─────────────────────────────────────────────────────────────
+    void resetStreams()
+    {
+        for (auto&amp; c : chans)
+        {
+            std::fill (c.ring.begin(), c.ring.end(), 0.0f);
+            std::fill (c.out.begin(), c.out.end(), 0.0f);
+            c.ringPos = 0;
+            c.gathered = 0;
+            c.outPos = 0;
+        }
+    }
+
+    void process (int channel, float* data, int numSamples)
+    {
+        if (! isReady() || channel &lt; 0 || channel &gt;= (int) chans.size()) return;
+        auto&amp; c = chans[(size_t) channel];
+
+        for (int i = 0; i &lt; numSamples; ++i)
+        {
+            c.ring[(size_t) c.ringPos] = data[i];
+            c.ringPos = (c.ringPos + 1) % n;
+
+            data[i] = c.out[(size_t) c.outPos];
+            c.out[(size_t) c.outPos] = 0.0f;
+
+            if (++c.gathered &gt;= hop)
+            {
+                c.gathered = 0;
+                convolveFrame (c);
+            }
+            c.outPos = (c.outPos + 1) % hop;
+        }
+    }
+
+    // Stereo entry: the matrix path needs both channels in one call (each
+    // output frame mixes both input transforms).  Without a matrix installed
+    // it is exactly the two independent per-channel streams.
+    void processStereo (float* l, float* r, int numSamples)
+    {
+        if (! isReady() || chans.size() &lt; 2) return;
+        if (! matrixOn &amp;&amp; ! spectralAnalyze)
+        {
+            process (0, l, numSamples);
+            process (1, r, numSamples);
+            return;
+        }
+
+        auto&amp; c0 = chans[0];
+        auto&amp; c1 = chans[1];
+        for (int i = 0; i &lt; numSamples; ++i)
+        {
+            c0.ring[(size_t) c0.ringPos] = l[i];
+            c1.ring[(size_t) c1.ringPos] = r[i];
+            c0.ringPos = (c0.ringPos + 1) % n;
+            c1.ringPos = (c1.ringPos + 1) % n;
+
+            l[i] = c0.out[(size_t) c0.outPos];
+            r[i] = c1.out[(size_t) c1.outPos];
+            c0.out[(size_t) c0.outPos] = 0.0f;
+            c1.out[(size_t) c1.outPos] = 0.0f;
+
+            // The two streams advance in lockstep by construction (this is
+            // the only entry that feeds them in matrix mode), so channel 0's
+            // gather counter times the shared frame.
+            if (++c0.gathered &gt;= hop)
+            {
+                c0.gathered = c1.gathered = 0;
+                convolveMatrixFrame();
+            }
+            c0.outPos = (c0.outPos + 1) % hop;
+            c1.outPos = (c1.outPos + 1) % hop;
+        }
+    }
+
+private:
+    struct Channel
+    {
+        std::vector&lt;float&gt; ring;   // last n input samples
+        std::vector&lt;float&gt; out;    // next hop output samples
+        int ringPos = 0, gathered = 0, outPos = 0;
+    };
+
+    // Overlap-save: transform the last n inputs, multiply, keep the final hop
+    // samples of the result - the region a taps-long FIR cannot wrap into.
+    void convolveFrame (Channel&amp; c)
+    {
+        for (int i = 0; i &lt; n; ++i)
+        {
+            const int src = (c.ringPos + i) % n;    // oldest first
+            scratch[(size_t) i] = { c.ring[(size_t) src], 0.0f };
+        }
+
+        fft-&gt;transform (scratch.data(), false);
+        for (int i = 0; i &lt; n; ++i)
+            scratch[(size_t) i] *= spectrum[(size_t) i];
+        fft-&gt;transform (scratch.data(), true);
+
+        // The last hop samples are valid linear convolution. The read head has
+        // already consumed out[outPos] this tick and will advance before the
+        // next read, so the oldest valid sample goes at outPos + 1 - the first
+        // position the head meets - and the newest lands back on outPos, to be
+        // read a full hop from now. One position of rotation, and exactly the
+        // kind of off-by-one the latency test exists to catch.
+        for (int i = 0; i &lt; hop; ++i)
+            c.out[(size_t) ((c.outPos + 1 + i) % hop)] = scratch[(size_t) (n - hop + i)].real();
+    }
+
+    // The one design pipeline: sample the curve on the grid, make it
+    // symmetric about Nyquist (real even spectrum -&gt; real zero-phase impulse
+    // response), rotate the centre of symmetry to (taps-1)/2, shape by a
+    // Kaiser (beta 8: about -80 dB sidelobes, transition narrow enough that a
+    // 24 dB/oct curve survives visibly intact on the smallest size), and
+    // transform the windowed FIR into its spectrum.  clampNonNegative is for
+    // plain magnitude curves; matrix cross terms carry legitimate signs.
+    void designSpectrum (std::vector&lt;std::complex&lt;float&gt;&gt;&amp; dest,
+                         const std::function&lt;float (int bin, int fftSizeN)&gt;&amp; at,
+                         bool clampNonNegative)
+    {
+        for (int k = 0; k &lt;= n / 2; ++k)
+        {
+            float m = at (k, n);
+            if (clampNonNegative) m = std::max (0.0f, m);
+            design[(size_t) k] = { m, 0.0f };
+            if (k &gt; 0 &amp;&amp; k &lt; n / 2)
+                design[(size_t) (n - k)] = { m, 0.0f };
+        }
+
+        fft-&gt;transform (design.data(), true);   // -&gt; impulse response at t=0
+
+        const int half = (taps - 1) / 2;
+        std::fill (scratch.begin(), scratch.end(), std::complex&lt;float&gt; { 0.0f, 0.0f });
+
+        for (int i = 0; i &lt; taps; ++i)
+        {
+            const int src = (i - half + n) % n;       // ..., n-2, n-1, 0, 1, ...
+            const double r = (double) (i - half) / (double) std::max (1, half);
+            const double w = besselI0 (8.0 * std::sqrt (std::max (0.0, 1.0 - r * r)))
+                           / besselI0 (8.0);
+            scratch[(size_t) i] = { design[(size_t) src].real() * (float) w, 0.0f };
+        }
+
+        fft-&gt;transform (scratch.data(), false);
+        std::copy (scratch.begin(), scratch.end(), dest.begin());
+    }
+
+    // The complex twin of designSpectrum: H(n-k) = conj(H(k)) keeps the
+    // impulse response real; everything after the sampling is the shared
+    // pipeline.  No clamp - a complex response's sign lives in its phase.
+    void designSpectrumComplex (std::vector&lt;std::complex&lt;float&gt;&gt;&amp; dest,
+                                const std::function&lt;std::complex&lt;float&gt; (int bin, int fftSizeN)&gt;&amp; at)
+    {
+        for (int k = 0; k &lt;= n / 2; ++k)
+        {
+            const auto h = at (k, n);
+            design[(size_t) k] = h;
+            if (k &gt; 0 &amp;&amp; k &lt; n / 2)
+                design[(size_t) (n - k)] = std::conj (h);
+        }
+
+        fft-&gt;transform (design.data(), true);
+
+        // NOT the Kaiser: a phase-blended response is no longer symmetric
+        // about the center - minimum-phase content starts AT the center and
+        // tails rightward - so a center-peaked window eats the tail and the
+        // magnitude with it (a low bell lost 3 dB to it).  A flat window
+        // with raised-cosine edge tapers keeps whatever the blend put where
+        // it put it; the pure-linear path keeps its proven Kaiser.
+        const int half = (taps - 1) / 2;
+        const int taper = std::max (8, taps / 8);
+        std::fill (scratch.begin(), scratch.end(), std::complex&lt;float&gt; { 0.0f, 0.0f });
+        for (int i = 0; i &lt; taps; ++i)
+        {
+            const int src = (i - half + n) % n;
+            double w = 1.0;
+            if (i &lt; taper)
+                w = 0.5 * (1.0 - std::cos (kPi * (double) i / (double) taper));
+            else if (i &gt;= taps - taper)
+                w = 0.5 * (1.0 - std::cos (kPi * (double) (taps - 1 - i) / (double) taper));
+            scratch[(size_t) i] = { design[(size_t) src].real() * (float) w, 0.0f };
+        }
+
+        fft-&gt;transform (scratch.data(), false);
+        std::copy (scratch.begin(), scratch.end(), dest.begin());
+    }
+
+    // The 2x2 frame: both input transforms feed both output frames.  Same
+    // overlap-save discipline as convolveFrame - keep the last hop, same
+    // one-position output rotation.
+    void convolveMatrixFrame()
+    {
+        auto&amp; c0 = chans[0];
+        auto&amp; c1 = chans[1];
+
+        for (int i = 0; i &lt; n; ++i)
+        {
+            scratch [(size_t) i] = { c0.ring[(size_t) ((c0.ringPos + i) % n)], 0.0f };
+            scratchB[(size_t) i] = { c1.ring[(size_t) ((c1.ringPos + i) % n)], 0.0f };
+        }
+
+        fft-&gt;transform (scratch.data(),  false);   // X_L
+        fft-&gt;transform (scratchB.data(), false);   // X_R
+
+        if (spectralAnalyze)
+            spectralAnalyze (scratch.data(), scratchB.data(), n);
+
+        if (matrixOn)
+        {
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const auto xl = scratch[(size_t) i];
+                const auto xr = scratchB[(size_t) i];
+                outA[(size_t) i] = specLL[(size_t) i] * xl + specLR[(size_t) i] * xr;
+                outB[(size_t) i] = specRL[(size_t) i] * xl + specRR[(size_t) i] * xr;
+            }
+        }
+        else
+        {
+            // Diagonal: the plain shared spectrum, in the lockstep frame only
+            // because the spectral hooks need both channels together.
+            for (int i = 0; i &lt; n; ++i)
+            {
+                outA[(size_t) i] = spectrum[(size_t) i] * scratch[(size_t) i];
+                outB[(size_t) i] = spectrum[(size_t) i] * scratchB[(size_t) i];
+            }
+        }
+
+        if (spectralApply)
+        {
+            spectralApply (outA.data(), n);
+            spectralApply (outB.data(), n);
+        }
+
+        fft-&gt;transform (outA.data(), true);
+        fft-&gt;transform (outB.data(), true);
+
+        for (int i = 0; i &lt; hop; ++i)
+        {
+            c0.out[(size_t) ((c0.outPos + 1 + i) % hop)] = outA[(size_t) (n - hop + i)].real();
+            c1.out[(size_t) ((c1.outPos + 1 + i) % hop)] = outB[(size_t) (n - hop + i)].real();
+        }
+    }
+
+    static double besselI0 (double x)
+    {
+        double s = 1.0, t = 1.0;
+        for (int i = 1; i &lt; 24; ++i)
+        {
+            t *= (x / (2.0 * i)) * (x / (2.0 * i));
+            s += t;
+            if (t &lt; 1.0e-13 * s) break;
+        }
+        return s;
+    }
+
+    std::unique_ptr&lt;FFT&gt; fft;
+    int order = 0, n = 0, taps = 0, hop = 0;
+
+    std::vector&lt;std::complex&lt;float&gt;&gt; spectrum, scratch, design;
+    std::vector&lt;std::complex&lt;float&gt;&gt; specLL, specLR, specRL, specRR;   // matrix mode
+    std::vector&lt;std::complex&lt;float&gt;&gt; scratchB, outA, outB;
+    bool matrixOn = false;
+    std::vector&lt;Channel&gt; chans;
+};</code></pre></details>
 <pre class="formulas">- Streaming is overlap-save: frames of `hop` fresh samples, transform the last N, multiply by the FIR&#x27;s spectrum, keep only the wrap-free last `hop` - no analysis window, no synthesis window, nothing to &quot;sum flat&quot;.  The engine this replaced windowed twice at 50% overlap (a structural 6 dB tremolo), multiplied a raw sampled magnitude (circular wrap and pre-echo), and reported HALF its true delay into the delay compensation.
 - Latency = `hop + (taps - 1) / 2` with `taps = N/2 + 1`, `hop = N/2` - and a test injects an impulse and requires the measured peak position to equal the report with tolerance ZERO.
 - Five precisions: FFT 1024 (Low) to 16384 (Maximum).  At Low the 513-tap design window smooths a Q=1 bell by most of a decibel - the precision dial&#x27;s honest tradeoff; High is exact to 0.3 dB.  The menu&#x27;s latency figures are computed from these constants at the session rate.

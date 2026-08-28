@@ -29,7 +29,11 @@ for the app.</p>
             const float shaped   = tapeAsymShaper (biasedX, k);
             hyst += alphaNow * (shaped - hyst);
             up[osN] = hyst;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source/DSP/SaturationDSP.cpp (all three engine bodies), Source/DSP/SaturationDSP.h (tapeAsymShaper)</summary><pre><code>// SaturationDSP::processConsole -- complete
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/SaturationDSP.cpp (all three engine bodies), Source/DSP/SaturationDSP.h (tapeAsymShaper)</summary><pre><code>// Source/DSP/SaturationDSP.cpp  -  SaturationDSP::processConsole (complete)
+// -- Console engine (stateless, takes per-sample smoothed params) -------------
+// Clean (SSL-style) vs Dirty (Neve-style) voicings; see the header decl for the
+// per-arg meaning.  drive = mFlowers (0..10), color = mDabs (0..10) -- same
+// input range as the Tube path so the Type switch keeps muscle memory.
 float SaturationDSP::processConsole (float x, float drive, float color,
                                        bool colorOn, bool dirty, bool isLow) noexcept
 {
@@ -43,7 +47,7 @@ float SaturationDSP::processConsole (float x, float drive, float color,
     if (! dirty)
     {
         // Clean (SSL-style): transparent soft-clip; Drive saturates at normal
-        // levels, output-compensated so enable doesn&#x27;t jump the loudness.
+        // levels, output-compensated so enable doesn't jump the loudness.
         const float driveAmount = 1.0f + drive * 0.60f;          // 1.0..7.0
         const float bias  = colorOn ? color * 0.07f : 0.0f;      // 0..0.7
         const float sb    = std::tanh (bias);
@@ -62,7 +66,7 @@ float SaturationDSP::processConsole (float x, float drive, float color,
     return (std::tanh (x * driveAmount + bias) - sb) / (driveAmount * sech2);
 }
 
-// SaturationDSP::processTube -- complete
+// Source/DSP/SaturationDSP.cpp  -  SaturationDSP::processTube (complete)
 float SaturationDSP::processTube (float x, float flowers, float dabs,
                                    int tubeType, bool transformer) noexcept
 {
@@ -114,24 +118,90 @@ float SaturationDSP::processTube (float x, float flowers, float dabs,
     return out;
 }
 
-// Hysteresis alpha helper (file-scope namespace) -- complete
-    // Hysteresis alpha (per-sample integrator coef for `y += alpha * (shaped - y)`).
-    // Spec at base rate: alpha_base = 0.2 + 0.8 * tapeSpeed.  HystAmount scales the
-    // memory: 0 = bypass (alpha=1), 1 = spec, 2 = strong.  Result is divided by
-    // the OS factor so cutoff stays constant regardless of OS factor (10c spec).
-    inline float computeTapeHystAlpha (float tapeSpeed, float hystAmount, int osFactor) noexcept
+// Source/DSP/SaturationDSP.cpp  -  SaturationDSP::processTape (complete)
+void SaturationDSP::processTape (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numSamples = buffer.getNumSamples();
+    if (numSamples &lt;= 0) return;
+    if (numSamples &gt; mMaxBlock) return;
+    if (mOversampler == nullptr) return;
+    if (mTapeWowBufL.empty()) return;
+    if (mTapeBandBuf.getNumSamples() &lt; numSamples) return;
+
+    const int numCh   = std::min (buffer.getNumChannels(), 2);
+    const int numChOS = 2;
+    // Factor the LIVE oversampler was built with, not the user-intent mOsLog2.
+    const int kOsNow  = 1 &lt;&lt; juce::jlimit (1, 4, mOsLog2Active);
+    const int wowSize = (int) mTapeWowBufL.size();
+
+    const float sr        = (float) mSampleRate;
+    const float a_preC    = mTapePreShelfCoef;
+    const float a_deC     = mTapeDeShelfCoef;
+    const float a_hissHp  = mTapeHissHpCoef;
+    const float a_dc      = mTapeDcCoef;
+    const float a_lp      = mTapeLpCoef;
+
+    // Sampled hiss: the active cassette bed (clamped index), or synthetic pink if
+    // no bed is loaded.  Read pointers are bounded each sample in the loop below.
+    const int  hissIdx        = juce::jlimit (0, kNumCassettes - 1, mTapeCassetteIdx);
+    const bool useSampledHiss = mTapeHissLoaded
+        &amp;&amp; hissIdx &lt; (int) mTapeHissSamples.size()
+        &amp;&amp; mTapeHissSamples[(size_t) hissIdx].getNumSamples() &gt; 0;
+    const int    hissLen = useSampledHiss ? mTapeHissSamples[(size_t) hissIdx].getNumSamples() : 0;
+    const float* hissCh0 = useSampledHiss ? mTapeHissSamples[(size_t) hissIdx].getReadPointer (0) : nullptr;
+    const float* hissCh1 = (useSampledHiss &amp;&amp; mTapeHissSamples[(size_t) hissIdx].getNumChannels() &gt; 1)
+                           ? mTapeHissSamples[(size_t) hissIdx].getReadPointer (1) : hissCh0;
+
+    // Phase 0: consume smoothers into scratch arrays.
+    for (int n = 0; n &lt; numSamples; ++n)
     {
-        if (hystAmount &lt;= 0.001f) return 1.0f;
-        const float alphaBase   = 0.2f + 0.8f * juce::jlimit (0.0f, 1.0f, tapeSpeed);
-        const float alphaScaled = alphaBase / juce::jmax (0.01f, hystAmount);
-        return juce::jlimit (0.001f, 1.0f,
-                             alphaScaled / (float) juce::jmax (1, osFactor));
+        mTapeVibeScr[(size_t) n]         = mTapeVibeSmooth        .getNextValue();
+        mTapeHystAlphaOSScr[(size_t) n]  = mTapeHystAlphaOSSmooth .getNextValue();
+        mTapeBiasScr[(size_t) n]         = mTapeBiasSmooth        .getNextValue();
+        mTapePreGainScr[(size_t) n]      = mTapePreGainSmooth     .getNextValue();
+        mTapeDeGainScr[(size_t) n]       = mTapeDeGainSmooth      .getNextValue();
+        mTapeInGainScr[(size_t) n]       = mTapeInGainSmooth      .getNextValue();
+        mTapeOutGainScr[(size_t) n]      = mTapeOutGainSmooth     .getNextValue();
+        mTapeWowDepthScr[(size_t) n]     = mTapeWowDepthSmooth    .getNextValue();
+        mTapeFlutterDepthScr[(size_t) n] = mTapeFlutterDepthSmooth.getNextValue();
+        mTapeHissScr[(size_t) n]         = mTapeHissSmooth        .getNextValue();
     }
 
-// SaturationDSP::processTape -- Phase 2: oversampled shaper + hysteresis
-// (Phase 1 input gain + 5 kHz pre-emphasis, Phase 3 de-emphasis + wow/flutter
-// delay modulation + hiss + DC blocker + output gain, and the cassette-IR
-// convolution are elided.)
+    // Phase 1: input gain + pre-emphasis (base rate).
+    for (int ch = 0; ch &lt; numChOS; ++ch)
+    {
+        float* dst = mTapeBandBuf.getWritePointer (ch);
+        if (ch &lt; numCh)
+        {
+            const float* src = buffer.getReadPointer (ch);
+            float&amp; preLP = (ch == 0) ? mTapePreShelfL : mTapePreShelfR;
+            for (int n = 0; n &lt; numSamples; ++n)
+            {
+                float x = src[n] * mTapeInGainScr[(size_t) n];
+                preLP = (1.0f - a_preC) * x + a_preC * preLP;
+                const float gPre = mTapePreGainScr[(size_t) n];
+                x = gPre * x + (1.0f - gPre) * preLP;
+                dst[n] = x;
+            }
+        }
+        else
+        {
+            // Mono: pad ch1 from ch0's processed stream.
+            const float* src0 = mTapeBandBuf.getReadPointer (0);
+            for (int n = 0; n &lt; numSamples; ++n)
+                dst[n] = src0[n];
+        }
+    }
+
+    // Phase 2: oversampled shaper + hysteresis.
+    juce::dsp::AudioBlock&lt;float&gt; bandBlock (mTapeBandBuf.getArrayOfWritePointers(),
+                                             (size_t) numChOS, 0, (size_t) numSamples);
+    auto upBlock = mOversampler-&gt;processSamplesUp (bandBlock);
+    const int upN = (int) upBlock.getNumSamples();
+    jassert (upN == numSamples * kOsNow);
+
     for (int ch = 0; ch &lt; numChOS; ++ch)
     {
         float* up = upBlock.getChannelPointer ((size_t) ch);
@@ -151,7 +221,117 @@ float SaturationDSP::processTube (float x, float flowers, float dabs,
             up[osN] = hyst;
         }
     }
-    mOversampler-&gt;processSamplesDown (bandBlock);</code></pre></details>
+    mOversampler-&gt;processSamplesDown (bandBlock);
+
+    // Phase 3: de-emphasis + wow/flutter + hiss + DC + output.
+    float* Lout = numCh &gt; 0 ? buffer.getWritePointer (0) : nullptr;
+    float* Rout = numCh &gt; 1 ? buffer.getWritePointer (1) : nullptr;
+    const float* processedL = mTapeBandBuf.getReadPointer (0);
+    const float* processedR = mTapeBandBuf.getReadPointer (1);
+
+    const float maxWowSamples = (float) (kTapeMaxWowMs * 0.5 * 0.001 * mSampleRate);
+    const double centreDelay  = kTapeMaxWowMs * 0.5 * 0.001 * mSampleRate;
+
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        float sampL = processedL[n];
+        float sampR = (numCh &gt; 1) ? processedR[n] : sampL;
+
+        // De-emphasis (base-rate shelf).
+        const float gDe = mTapeDeGainScr[(size_t) n];
+        mTapeDeShelfL = (1.0f - a_deC) * sampL + a_deC * mTapeDeShelfL;
+        sampL         = gDe * sampL + (1.0f - gDe) * mTapeDeShelfL;
+        mTapeDeShelfR = (1.0f - a_deC) * sampR + a_deC * mTapeDeShelfR;
+        sampR         = gDe * sampR + (1.0f - gDe) * mTapeDeShelfR;
+
+        // Cassette low-pass (HF rolloff) on the program signal.
+        mTapeLpL = (1.0f - a_lp) * sampL + a_lp * mTapeLpL;  sampL = mTapeLpL;
+        mTapeLpR = (1.0f - a_lp) * sampR + a_lp * mTapeLpR;  sampR = mTapeLpR;
+
+        // Write into wow/flutter delay buffer.
+        mTapeWowBufL[(size_t) mTapeWowWritePos] = sampL;
+        mTapeWowBufR[(size_t) mTapeWowWritePos] = sampR;
+
+        // LFO update.
+        const float wowLfo     = (float) std::sin (juce::MathConstants&lt;double&gt;::twoPi * mTapeWowPhase);
+        const float flutterSin = (float) std::sin (juce::MathConstants&lt;double&gt;::twoPi * mTapeFlutterPhase);
+        const float rawNoise   = mTapeRandomL.nextFloat() * 2.0f - 1.0f;
+        mTapeFlutterNoiseState = 0.999f * mTapeFlutterNoiseState + 0.001f * rawNoise;
+        const float flutter    = 0.9f * flutterSin + 0.1f * mTapeFlutterNoiseState;
+
+        const float wowDepthNow     = mTapeWowDepthScr[(size_t) n];
+        const float flutterDepthNow = mTapeFlutterDepthScr[(size_t) n];
+        const float totalModSmp =
+            maxWowSamples * (wowDepthNow * wowLfo + flutterDepthNow * flutter * 0.3f);
+
+        const float readOffsetF = juce::jlimit (0.0f, (float) (wowSize - 4),
+                                                (float) centreDelay + totalModSmp);
+        const int   iOff = (int) readOffsetF;
+        const float frac = readOffsetF - (float) iOff;
+
+        // Cubic-interp delay reads.
+        float wowL = tapeCubicCircular (mTapeWowBufL, mTapeWowWritePos, iOff, frac, wowSize);
+        float wowR = tapeCubicCircular (mTapeWowBufR, mTapeWowWritePos, iOff, frac, wowSize);
+
+        // Pink-filtered hiss + 200 Hz HPF (independent L/R RNG streams).
+        const float hissNow = mTapeHissScr[(size_t) n];
+        if (useSampledHiss)
+        {
+            // Bounded looping read: clamp before (the cassette may have just
+            // switched to a shorter bed), wrap after advancing.
+            if (mTapeHissReadPos &gt;= hissLen) mTapeHissReadPos = 0;
+            wowL += hissNow * hissCh0[mTapeHissReadPos];
+            wowR += hissNow * hissCh1[mTapeHissReadPos];
+            if (++mTapeHissReadPos &gt;= hissLen) mTapeHissReadPos = 0;
+        }
+        else
+        {
+            // Synthetic pink + 200 Hz HPF fallback (no real hiss bed loaded).
+            const float whiteL = mTapeRandomL.nextFloat() * 2.0f - 1.0f;
+            const float whiteR = mTapeRandomR.nextFloat() * 2.0f - 1.0f;
+            const float pinkL  = mTapePinkL.process (whiteL);
+            const float pinkR  = mTapePinkR.process (whiteR);
+            const float hpL    = a_hissHp * (mTapeHissHPy_L + pinkL - mTapeHissHPx_L);
+            const float hpR    = a_hissHp * (mTapeHissHPy_R + pinkR - mTapeHissHPx_R);
+            mTapeHissHPx_L = pinkL; mTapeHissHPy_L = hpL;
+            mTapeHissHPx_R = pinkR; mTapeHissHPy_R = hpR;
+            wowL += hissNow * hpL * 0.1f;
+            wowR += hissNow * hpR * 0.1f;
+        }
+
+        // DC blocker (5 Hz SR-aware).
+        const float dcInL = wowL;
+        wowL = dcInL - mTapeDcX_L + a_dc * mTapeDcY_L;
+        mTapeDcX_L = dcInL; mTapeDcY_L = wowL;
+        const float dcInR = wowR;
+        wowR = dcInR - mTapeDcX_R + a_dc * mTapeDcY_R;
+        mTapeDcX_R = dcInR; mTapeDcY_R = wowR;
+
+        // Output gain.
+        const float outLin = mTapeOutGainScr[(size_t) n];
+        if (Lout) Lout[n] = wowL * outLin;
+        if (Rout) Rout[n] = wowR * outLin;
+
+        mTapeWowWritePos = (mTapeWowWritePos + 1) % wowSize;
+
+        // LFO phase advance (positive deltas; while-wrap).
+        mTapeWowPhase     += (double) mTapeWowRate     / (double) sr;
+        while (mTapeWowPhase     &gt;= 1.0) mTapeWowPhase     -= 1.0;
+        mTapeFlutterPhase += (double) mTapeFlutterRate / (double) sr;
+        while (mTapeFlutterPhase &gt;= 1.0) mTapeFlutterPhase -= 1.0;
+    }
+
+    // Cassette IR: zero-latency convolution on the tape output when engaged.
+    if (mTapeIrOn)
+    {
+        juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
+        auto sub = blk.getSubBlock (0, (size_t) numSamples).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mTapeConv.process (ctx);
+    }
+
+    juce::ignoreUnused (sr);
+}</code></pre></details>
 <pre class="formulas">Shared chain (Tube + Console body): input gain (Sensitivity -12..+12 dB) -&gt; 10 kHz pre-tone shelf -&gt; oversample (2^osLog2, default 4x) -&gt; 350 Hz one-pole LP band split AT THE OS RATE (`coef = exp(-2*pi*350/srOS)`) -&gt; per-band shaper -&gt; Bass Relief blends dry low back in (`low_out = relief*low + (1-relief)*low_proc`, relief 0..1) -&gt; downsample -&gt; 5 Hz DC blocker (`R = 1 - 2*pi*5/sr`) -&gt; 10 kHz post-tone shelf -&gt; wet/dry -&gt; out gain (with optional AutoGain = 1/sensGain).
 
 Console:

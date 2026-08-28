@@ -17,7 +17,8 @@
             gain = coef * gain + (1.0f - coef) * targetGain;
 
             aud[i] *= gain;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\NoiseGateStyleDSP.cpp</summary><pre><code>void NoiseGateStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\NoiseGateStyleDSP.cpp</summary><pre><code>// Source/DSP/NoiseGateStyleDSP.cpp  -  NoiseGateStyleDSP::process (complete)
+void NoiseGateStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;

@@ -22,7 +22,8 @@
             d[i] = x;
         }
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\HighGainStyleDSP.cpp</summary><pre><code>void HighGainStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\HighGainStyleDSP.cpp</summary><pre><code>// Source/DSP/HighGainStyleDSP.cpp  -  HighGainStyleDSP::process (complete)
+void HighGainStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;
@@ -55,7 +56,7 @@
         for (int i = 0; i &lt; upN; ++i)
         {
             // Stage 1: clamp at 0.85 with a tiny tanh-shaped ramp into the
-            // ceiling so the wave doesn&#x27;t square off perfectly.  Acts as
+            // ceiling so the wave doesn't square off perfectly.  Acts as
             // the first transistor stage.
             float x = d[i] * drive;
             x = std::tanh (x * 1.2f) * kStage1Ceiling;

@@ -47,6 +47,63 @@ switch (ch)
     c = p;
     mEq.setBand (i, p);
 }</code></pre></div>
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/StripEq.cpp</summary><pre><code>// Source/DSP/StripEq.cpp  -  StripEq::pushBand (complete)
+void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
+{
+    if (i &lt; 0 || i &gt;= kBands) return;
+    auto&amp; c = mCached[(size_t) i];
+
+    const bool same =
+        c.on == p.on &amp;&amp; c.type == p.type &amp;&amp; c.freqHz == p.freqHz
+        &amp;&amp; c.gainDb == p.gainDb &amp;&amp; c.q == p.q &amp;&amp; c.slope == p.slope
+        &amp;&amp; c.channel == p.channel &amp;&amp; c.placement == p.placement
+        &amp;&amp; c.muted == p.muted &amp;&amp; c.isolated == p.isolated
+        &amp;&amp; c.dynamic == p.dynamic &amp;&amp; c.thresholdDb == p.thresholdDb
+        &amp;&amp; c.ratio == p.ratio &amp;&amp; c.attackMs == p.attackMs
+        &amp;&amp; c.releaseMs == p.releaseMs &amp;&amp; c.autoRelease == p.autoRelease
+        &amp;&amp; c.phaseMix == p.phaseMix
+        &amp;&amp; c.thresholdBDb == p.thresholdBDb &amp;&amp; c.ratioB == p.ratioB
+        &amp;&amp; c.rangeBDb == p.rangeBDb &amp;&amp; c.onsetMix == p.onsetMix
+        &amp;&amp; c.spectral == p.spectral &amp;&amp; c.density == p.density
+        &amp;&amp; c.satAmt == p.satAmt
+        &amp;&amp; c.lfoRateHz == p.lfoRateHz &amp;&amp; c.lfoDepth == p.lfoDepth
+        &amp;&amp; c.lfoTarget == p.lfoTarget &amp;&amp; c.envDepth == p.envDepth
+        &amp;&amp; c.envTarget == p.envTarget
+        &amp;&amp; c.rangeDb == p.rangeDb &amp;&amp; c.scExternal == p.scExternal
+        &amp;&amp; c.scSource == p.scSource;
+    if (same) return;
+
+    c = p;
+    mEq.setBand (i, p);
+}
+
+// Source/DSP/StripEq.cpp  -  StripEq::process (complete)
+void StripEq::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numCh      = buffer.getNumChannels();
+    if (numCh &lt; 2 || numSamples &lt;= 0) return;
+
+    float* l = buffer.getWritePointer (0);
+    float* r = buffer.getWritePointer (1);
+
+    if (auto* tap = scanTap.load (std::memory_order_acquire))
+        tap-&gt;push (l, r, numSamples);
+
+    // Identity behaves like bypass but the spectrum feeds stay alive - a
+    // skipped EQ with an empty analyser reads as broken (the EQ8MsDSP
+    // convention, kept).
+    if (bypassed || isIdentity())
+    {
+        preFeed .push (l, r, numSamples);
+        postFeed.push (l, r, numSamples);
+        return;
+    }
+
+    preFeed.push (l, r, numSamples);
+    mEq.process (l, r, numSamples);
+    postFeed.push (l, r, numSamples);
+}</code></pre></details>
 <pre class="formulas">- Encode: `M = 0.5*(L + R)`, `S = 0.5*(L - R)`; decode is the exact inverse - and it happens PER SAMPLE, PER BAND, only for bands that route mid or side.  There is no engine pair anymore: the old bus EQ was TWO 8-band engines run in series (a Mid set and a Side set); one 24-band engine now covers both with half the instances and half the linear-mode latency.
 - The window&#x27;s three views map onto `EqBandParams::channel`: a band created in the Mid view is `channel = mid`, Side view `= side`, Stereo view `= stereo` (or `left`/`right` via its picker).  &quot;Move to ... view&quot; rewrites the channel in place - settings kept.  The mono content of a stereo signal IS the mid, which is why there is no separate &quot;mono&quot; option anywhere.
 - Placement (the PAN knob) splits a gain band&#x27;s decibels across L and R (`placementWeights`: full weight own side, fading on the other) - gain types in the Stereo view only, separate L/R coefficient sets when the weights differ.  The drawn curve deliberately does not move with it.

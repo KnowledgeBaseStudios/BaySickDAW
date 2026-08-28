@@ -27,22 +27,38 @@ window says so, and the cabinet stage should be bypassed for those.</p>
             const double osRate     = mSampleRate * (double) (1 &lt;&lt; osFactor);
             const int    osMaxBlock = mMaxBlock   * (1 &lt;&lt; osFactor);
             newModel-&gt;ResetAndPrewarm (osRate, osMaxBlock);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickNAMIR\BaySickNAMIRProcessor.cpp</summary><pre><code>bool BaySickNAMIRProcessor::loadNamModel (const juce::String&amp; filePath, juce::String&amp; outErr, int slot)
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickNAMIR\BaySickNAMIRProcessor.cpp</summary><pre><code>// Source/BaySickNAMIR/BaySickNAMIRProcessor.cpp  -  BaySickNAMIRProcessor::loadNamModel (complete)
+// ─────────────────────────────────────────────────────────────────────────────
+// loadNamModel / loadImpulseResponse - message-thread file I/O + swap pattern.
+// ─────────────────────────────────────────────────────────────────────────────
+bool BaySickNAMIRProcessor::loadNamModel (const juce::String&amp; filePath, juce::String&amp; outErr, int slot)
 {
     slot = resolveSlot (slot);
-    ...
+
+    if (filePath.isEmpty())
+    {
+        outErr = "No file path provided.";
+        return false;
+    }
+    // filePath is the string that gets PERSISTED (see the assignment at the
+    // bottom), so it stays exactly as the caller wrote it: a bundled project
+    // stores "Samples/&lt;name&gt;.nam" and only the resolver knows what that means.
     const juce::File resolved = ProjectFileResolver::resolve (filePath);
-    if (! resolved.existsAsFile()) { outErr = &quot;File not found: &quot; + filePath; return false; }
+    if (! resolved.existsAsFile())
+    {
+        outErr = "File not found: " + filePath;
+        return false;
+    }
 
     // SECURITY (QA-Cleanup 2026-08-10): gate BEFORE nam::get_dsp.  The catch
-    // blocks below cannot help here - the vendored loader&#x27;s failure modes are an
+    // blocks below cannot help here - the vendored loader's failure modes are an
     // unchecked over-read (no exception; on Windows an access violation is a
     // Structured Exception, which /EHsc does not route to catch (...)) and a
     // prewarm loop driven by a file-supplied length (throws nothing, simply
     // never returns).  See SafeNamModel.h.
     if (const auto why = SafeNamModel::rejectReason (resolved); why.isNotEmpty())
     {
-        outErr = &quot;This NAM capture was refused: &quot; + why + &quot;.&quot;;
+        outErr = "This NAM capture was refused: " + why + ".";
         return false;
     }
 
@@ -53,15 +69,19 @@ window says so, and the cabinet stage should be bypassed for those.</p>
         nam::dspData data;
         std::filesystem::path p (resolved.getFullPathName().toStdString());
         newModel = nam::get_dsp (p, data);
-        if (! newModel) { outErr = &quot;NAM core returned a null model.&quot;; return false; }
-
-        // Full-rig auto-detect: peek metadata.gear_type (&quot;amp_cab&quot; /
-        // &quot;amp_pedal_cab&quot; mean the capture already includes a cabinet so the
-        // editor will suggest auto-bypassing the IR convolution).
-        if (data.metadata.contains (&quot;gear_type&quot;) &amp;&amp; data.metadata[&quot;gear_type&quot;].is_string())
+        if (! newModel)
         {
-            const std::string g = data.metadata[&quot;gear_type&quot;].get&lt;std::string&gt;();
-            isFullRigFlag = (g == &quot;amp_cab&quot; || g == &quot;amp_pedal_cab&quot;);
+            outErr = "NAM core returned a null model.";
+            return false;
+        }
+
+        // Full-rig auto-detect: peek metadata.gear_type ("amp_cab" /
+        // "amp_pedal_cab" mean the capture already includes a cabinet so the
+        // editor will suggest auto-bypassing the IR convolution).
+        if (data.metadata.contains ("gear_type") &amp;&amp; data.metadata["gear_type"].is_string())
+        {
+            const std::string g = data.metadata["gear_type"].get&lt;std::string&gt;();
+            isFullRigFlag = (g == "amp_cab" || g == "amp_pedal_cab");
         }
 
         if (mPrepared)
@@ -69,15 +89,23 @@ window says so, and the cabinet stage should be bypassed for those.</p>
             // Reset at the active oversampling rate so this slot is ready to
             // run as soon as the audio thread swaps it in.
             int osFactor = 0;
-            if (auto* pp = apvts.getRawParameterValue (&quot;oversampling&quot;))
+            if (auto* pp = apvts.getRawParameterValue ("oversampling"))
                 osFactor = juce::jlimit (0, 2, (int) pp-&gt;load());
             const double osRate     = mSampleRate * (double) (1 &lt;&lt; osFactor);
             const int    osMaxBlock = mMaxBlock   * (1 &lt;&lt; osFactor);
             newModel-&gt;ResetAndPrewarm (osRate, osMaxBlock);
         }
     }
-    catch (const std::exception&amp; ex) { outErr = juce::String (&quot;NAM load failed: &quot;) + ex.what(); return false; }
-    catch (...) { outErr = &quot;NAM load failed: unknown error.&quot;; return false; }
+    catch (const std::exception&amp; ex)
+    {
+        outErr = juce::String ("NAM load failed: ") + ex.what();
+        return false;
+    }
+    catch (...)
+    {
+        outErr = "NAM load failed: unknown error.";
+        return false;
+    }
 
     {
         const juce::ScopedLock lk (mLoadLock);

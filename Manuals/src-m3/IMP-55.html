@@ -27,7 +27,68 @@ decoder &mdash; which is switched off at build time.</p>
 
         std::vector&lt;short&gt; pcmL ((size_t) kPcmSlack), pcmR ((size_t) kPcmSlack);
         std::vector&lt;float&gt; outL, outR;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\MpglibAudioFormat.h (MpglibReader::MpglibReader + readSamples, lines 62-190)</summary><pre><code>// MpglibAudioFormat.h -- MpglibReader constructor decode loop + readSamples (lines 62-190)
+<details class="fullfn"><summary>Full function &mdash; Source\MpglibAudioFormat.h (MpglibReader::MpglibReader + readSamples, lines 62-190)</summary><pre><code>// Source/MpglibAudioFormat.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+
+#if BAYSICK_HAS_LAME
+ #include &lt;lame.h&gt;
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MpglibAudioFormat - MP3 DECODING through the vendored LAME tree.
+//
+// SECURITY (QA-Cleanup 2026-08-11, CL-289 Tier-1 follow-on).
+//
+// We already vendor LAME for MP3 EXPORT (Mp3Writer).  Import went through a
+// completely different decoder - JUCE's `JUCE_USE_MP3AUDIOFORMAT`, a ~3,185-line
+// hand-port whose own header describes it as a conversion of a decompiler's
+// output, and which has never been audited.  That is a second, redundant parser
+// of untrusted input for a format we already ship a maintained decoder for.
+//
+// `libs/lame/mpglib/*.c` is ALREADY compiled into BaySickLame (CMakeLists globs
+// it and defines HAVE_MPGLIB), so this costs no new dependency - only the
+// AudioFormat wrapper below.  JUCE's decoder is switched off in CMakeLists.
+//
+// FULLY DECODED ON OPEN, deliberately.  MP3 has no reliable random access
+// without building a frame index, and every consumer here needs seeking
+// (AudioClipStreamer plays clips from arbitrary positions).  Decoding once into
+// memory is also what the app ALREADY does with MP3: AudioClipStreamer RAM-loads
+// them up to 100 MB precisely because "MP3 decode is ~10x slower per chunk" made
+// streamed decode miss the audio deadline.  So this matches the existing
+// behaviour rather than introducing a new cost, and it removes per-seek decode
+// entirely.
+//
+// A file that decodes to more than the ceiling below is refused rather than
+// allowed to exhaust memory - the declared length in an MP3 header is attacker
+// controlled, and this runs on a background/message thread with no ceiling of
+// its own otherwise.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace MpglibAudio
+{
+    // ~22 minutes of 48 kHz stereo, chosen from the MEMORY it costs rather than
+    // from a duration that sounded generous: decoded stereo float at this length
+    // is ~512 MB, and the intermediate vectors are still alive alongside it when
+    // the AudioBuffer is filled, so the real peak is roughly double.
+    //
+    // An earlier value of 2 hours was not a ceiling in any useful sense - it
+    // permitted a ~5.5 GB peak, which on a 32-bit-ish allocation failure path
+    // gives a null buffer rather than an exception (juce::AudioBuffer::setSize
+    // uses HeapBlock without throwOnFailure).  Past any clip anyone drops on a
+    // timeline.
+    inline constexpr juce::int64 kMaxDecodedSamples = 48000LL * 60 * 22;
+
+    // Cheap pre-check before the file is read into memory at all: MP3 compresses
+    // ~10x at worst-case-useful bitrates, so anything past this cannot decode to
+    // less than the ceiling above and there is no reason to buffer it first.
+    inline constexpr juce::int64 kMaxEncodedBytes = 512 * 1024 * 1024;
+}
+
+#if BAYSICK_HAS_LAME
+
+class MpglibReader final : public juce::AudioFormatReader
+{
+public:
     MpglibReader (juce::InputStream* sourceStream)
         : juce::AudioFormatReader (sourceStream, "MP3")
     {
@@ -156,7 +217,66 @@ decoder &mdash; which is switched off at build time.</p>
         }
 
         return true;
-    }</code></pre></details>
+    }
+
+private:
+    juce::AudioBuffer&lt;float&gt; mDecoded;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MpglibReader)
+};
+
+#endif // BAYSICK_HAS_LAME
+
+class MpglibAudioFormat final : public juce::AudioFormat
+{
+public:
+    MpglibAudioFormat()
+        : juce::AudioFormat ("MP3 file", ".mp3") {}
+
+    juce::Array&lt;int&gt; getPossibleSampleRates() override    { return {}; }
+    juce::Array&lt;int&gt; getPossibleBitDepths()   override    { return {}; }
+    bool canDoStereo() override                           { return true; }
+    bool canDoMono()   override                           { return true; }
+    bool isCompressed() override                          { return true; }
+
+    juce::AudioFormatReader* createReaderFor (juce::InputStream* sourceStream,
+                                              bool deleteStreamIfOpeningFails) override
+    {
+       #if BAYSICK_HAS_LAME
+        std::unique_ptr&lt;MpglibReader&gt; r (new MpglibReader (sourceStream));
+
+        if (r-&gt;sampleRate &gt; 0 &amp;&amp; r-&gt;lengthInSamples &gt; 0)
+            return r.release();
+
+        // The reader owns the stream on success only; on failure JUCE's contract
+        // is that we delete it unless asked not to.
+        r-&gt;input = nullptr;
+
+        if (! deleteStreamIfOpeningFails)
+            return nullptr;
+       #else
+        juce::ignoreUnused (deleteStreamIfOpeningFails);
+       #endif
+
+        delete sourceStream;
+        return nullptr;
+    }
+
+    // Encoding stays with Mp3Writer, which talks to LAME directly and is wired
+    // into the export dialog.  A writer here would be a second path to the same
+    // encoder with none of that plumbing.
+    //
+    // JUCE 8 signature: the OutputStream*/sampleRate/... form is a DEPRECATED
+    // non-virtual wrapper, and this options-taking one is the pure virtual.
+    std::unique_ptr&lt;juce::AudioFormatWriter&gt;
+        createWriterFor (std::unique_ptr&lt;juce::OutputStream&gt;&amp;,
+                         const juce::AudioFormatWriterOptions&amp;) override
+    {
+        return nullptr;
+    }
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MpglibAudioFormat)
+};</code></pre></details>
 <pre class="formulas">- Everything is behind `BAYSICK_HAS_LAME`; the decoder replaced JUCE&#x27;s `JUCE_USE_MP3AUDIOFORMAT` (a ~3,185-line unaudited decompiler-port), switched off in CMakeLists (`JUCE_USE_WINDOWS_MEDIA_FORMAT=0` per MF-4). `libs/lame/mpglib/*.c` is already compiled into the BaySickLame target with `HAVE_MPGLIB`.
 - Decode ceilings: `kMaxDecodedSamples = 48000 * 60 * 22` (~22 min of 48 kHz — ~512 MB decoded stereo float, real peak ~double with intermediates alive); `kMaxEncodedBytes = 512 MB` pre-check (MP3 compresses ~10x at worst-useful bitrates). Overflow = refuse the file, not truncate.
 - Decode loop: 1024-byte pushes into `hip_decode1_headers` (AT MOST one frame per call), then drain with `len = 0`; `kMaxFrame = 1152`, PCM scratch `kPcmSlack = kMaxFrame * 8` shorts per channel. int16 → float scale `1.0f / 32768.0f`. `AudioBuffer::setSize` failure detected explicitly (HeapBlock without throwOnFailure → null buffer).

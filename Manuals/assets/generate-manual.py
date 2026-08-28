@@ -71,10 +71,69 @@ _CT_PREFIX = re.compile(r"^(mixer|swing)_[A-Za-z0-9_]+ ")
 def _ct_name(name):
     return _CT_PREFIX.sub("", str(name)).strip()
 
+UUID_ID = re.compile(r"^[A-Za-z0-9]+_[0-9a-f]{32}_(.+)$")
+FIG_EFFECT = {"Effects Panel": "De-esser", "Effects Panel with Visual": "Reverb"}
+
+def _effect_of(fig):
+    if fig in FIG_EFFECT:
+        return FIG_EFFECT[fig]
+    if fig.startswith("FX Panel "):
+        return fig[len("FX Panel "):].rsplit(" ", 1)[0]
+    return None
+
+def _fx_key(fig, rid, label):
+    eff = _effect_of(fig)
+    if not eff:
+        return None
+    m = UUID_ID.match(rid or "")
+    tail = m.group(1) if m else (label or "").strip().lower().replace(" ", "_")
+    if not tail:
+        return None
+    return "fx|" + eff + "|" + tail
+
+def controls_table_for_figure(*figs):
+    return _controls_table_rows([f for f in figs])
+
+
+# QA-ManualPress (Jeff, 2026-08-28): In View documents the effect panel frame
+# once; In Depth documents EVERY effect in Basic and Advanced with its own
+# generated control table.  Figures come from the harness ("FX Panel <name>
+# <view>.png"); effects whose Advanced view is identical ship one image.
+def effect_gallery():
+    names = []
+    for k in DOCS:
+        if k.startswith("FX Panel ") and k.endswith(" Basic"):
+            names.append(k[len("FX Panel "):-len(" Basic")])
+    if not names:
+        return ""
+    out = ['<h4 class="ctrlhead">Every effect, panel by panel</h4>',
+           '<p>Each effect below is the same frame with its own controls. '
+           'Basic is what a slot opens with; Advanced adds the full set '
+           '(three effects have no separate Advanced view).</p>']
+    for nm in sorted(names):
+        out.append('<section class="fxpanel"><h5>%s</h5>' % html.escape(nm))
+        for view in ("Basic", "Advanced"):
+            fig = "FX Panel %s %s" % (nm, view)
+            png = os.path.join(FIGD, fig + ".png")
+            if not os.path.exists(png):
+                continue
+            out.append('<figure><figcaption>%s</figcaption>'
+                       '<img src="figures/%s.png" alt="%s" loading="lazy"></figure>'
+                       % (view, html.escape(fig), html.escape(fig)))
+        tbl = controls_table_for_figure("FX Panel %s Basic" % nm,
+                                        "FX Panel %s Advanced" % nm)
+        if tbl:
+            out.append(tbl)
+        out.append('</section>')
+    return "\n".join(out)
+
 def controls_table(code):
+    return _controls_table_rows([os.path.splitext(os.path.basename(f))[0]
+                                 for f in (FIGS[code].get('files') or [])])
+
+def _controls_table_rows(figlist):
     rows_out, seen = [], set()
-    for fname in FIGS[code].get('files') or []:
-        fig = os.path.splitext(os.path.basename(fname))[0]
+    for fig in figlist:
         for row in (DOCS.get(fig) or {}).get('controls', []):
             rid = row.get('id') or ''
             param = row.get('param') or {}
@@ -91,7 +150,8 @@ def controls_table(code):
                     n += 1
                 key = key + '#' + str(n)
             seen.add(key)
-            blurb = BLURBS.get(rid) or BLURBS.get(key) or ''
+            fxk = _fx_key(fig, rid, row.get('label'))
+            blurb = (BLURBS.get(fxk) or BLURBS.get(rid) or BLURBS.get(key) or '')
             choices = param.get('choices') or row.get('choices') or []
             if choices:
                 rng = ", ".join(choices)
@@ -115,7 +175,7 @@ def controls_table(code):
             if row.get('minText') is not None and not choices:
                 rng = "%s to %s" % (_ct_clean(row.get('minText')),
                                     _ct_clean(row.get('maxText')))
-            if (name, default, rng) in {(r[0], r[2], r[3]) for r in rows_out}:
+            if not fxk and (name, default, rng) in {(r[0], r[2], r[3]) for r in rows_out}:
                 continue   # per-strip clones document once
             rows_out.append((name, blurb, default, rng))
     if not rows_out:
@@ -493,7 +553,8 @@ for g in GROUPS:
   {l3}
 </section>""".format(code=code, name=html.escape(f['name']), crumbs=ch, blurb=bl,
                      views=l1_views(code), table=l1_table(code),
-                     controls=controls_table(code),
+                     controls=controls_table(code)
+                              + (effect_gallery() if code == 'FX' else ''),
                      chapter=l2_chapter(code),
                      l3=('<div class="l3">%s</div>' % l3) if l3 else ''))
     bi = 0

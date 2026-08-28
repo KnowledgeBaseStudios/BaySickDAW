@@ -54,7 +54,7 @@ namespace MixerChannelIds
     constexpr int kInstBase  = 700;  // R1: Inst insert 0..29 → 700..729
     constexpr int kRustyBase = 800;  // J-4: BaySickRustyDrums insert 0..12 → 800..812
     constexpr int kPluginBase = 900; // TS6: hosted VST3 instrument insert 0..19 → 900..919</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.cpp (BaySickGraph::rebuildRoutingFromApvts, lines 3217-3255; RoutingGraph::rebuildFromApvts, lines 2682-2787)</summary><pre><code>// BaySickGraph.cpp -- BaySickGraph::rebuildRoutingFromApvts (full function, lines 3217-3255)
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickGraph.cpp (BaySickGraph::rebuildRoutingFromApvts, lines 3217-3255; RoutingGraph::rebuildFromApvts, lines 2682-2787)</summary><pre><code>// Source/BaySickGraph.cpp  -  BaySickGraph::rebuildRoutingFromApvts (complete)
 void BaySickGraph::rebuildRoutingFromApvts()
 {
     if (mApvts == nullptr) return;
@@ -63,12 +63,12 @@ void BaySickGraph::rebuildRoutingFromApvts()
     // constant for the process lifetime, and re-composing their prefixes would
     // put one juce::String allocation per bus per block on the audio thread.  ChId is
     // already known on the node, so the per-kind chId helpers (layerInsert /
-    // bassInsert / ...) aren&#x27;t needed below -- node-&gt;chId is the source of truth.
+    // bassInsert / ...) aren't needed below -- node-&gt;chId is the source of truth.
     mActiveChannels.resize(mFixedBusChannelCount);
 
     // QA-InsertMaps (2026-05-24): single sweep over mLiveInsertChannels
     // replaces 8 per-kind emplace_back blocks (Layer / Bass / Drum / Audio /
-    // Aux / Vox / Inst / Rusty -- see commit history for each block&#x27;s
+    // Aux / Vox / Inst / Rusty -- see commit history for each block's
     // historical comment context).  All 8 InsertKinds register their
     // _sendTo / _sendN_to APVTS values into the routing graph through this
     // unified pass; Vox / Inst / Rusty inclusion is preserved (was added
@@ -81,7 +81,7 @@ void BaySickGraph::rebuildRoutingFromApvts()
 
     // C.4 Phase 1 (2026-04-30): pre-allocate SC receive buffers for every
     // (dst, slot) pair the routing graph references this block.  Pulls
-    // allocation off the audio thread; the audio loop&#x27;s getScRecvBuffer
+    // allocation off the audio thread; the audio loop's getScRecvBuffer
     // calls then hit existing buffers and just .clear() them.
     for (const auto&amp; sce : mRoutingGraph.scEdges())
         getScRecvBuffer(sce.dstId, sce.dstSlot);
@@ -95,7 +95,7 @@ void BaySickGraph::rebuildRoutingFromApvts()
     armPreFaderTaps();
 }
 
-// BaySickGraph.cpp -- RoutingGraph::rebuildFromApvts (full function, lines 2682-2787)
+// Source/BaySickGraph.cpp  -  RoutingGraph::rebuildFromApvts (complete)
 bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState&amp; apvts,
                                      const std::vector&lt;std::pair&lt;int, juce::String&gt;&gt;&amp; activeChannels)
 {

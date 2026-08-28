@@ -20,7 +20,108 @@ inline float computeBandGain (float envSq, float threshSq, float ratio)
                 env = coef * env + (1.0f - coef) * xSq;
                 const float g = computeBandGain (env, threshSq, effRatio);
                 d[i] *= g;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassCompressorStyleDSP.cpp</summary><pre><code>void BassCompressorStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassCompressorStyleDSP.cpp</summary><pre><code>// Source/DSP/BassCompressorStyleDSP.cpp
+#include "BassCompressorStyleDSP.h"
+#include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
+
+namespace
+{
+    constexpr float kXover1Hz   = 200.0f;
+    constexpr float kXover2Hz   = 2000.0f;
+    constexpr float kAttackMs   = 10.0f;
+
+    // Per-sample squared-domain compressor: envSq follows |x|^2 with attack/
+    // release coefficients.  Returns the linear gain factor that should be
+    // applied to the audio sample given the current envelope.
+    inline float computeBandGain (float envSq, float threshSq, float ratio)
+    {
+        if (envSq &lt;= threshSq || ratio &lt;= 1.0f) return 1.0f;
+        // env above threshold -&gt; apply (1 - 1/ratio) of the over-threshold dB
+        // back as gain reduction.
+        const float envDb     = 0.5f * juce::Decibels::gainToDecibels (envSq, -120.0f);
+        const float threshDb  = 0.5f * juce::Decibels::gainToDecibels (threshSq, -120.0f);
+        const float overDb    = envDb - threshDb;
+        const float reductDb  = -overDb * (1.0f - 1.0f / ratio);
+        return juce::Decibels::decibelsToGain (reductDb, -60.0f);
+    }
+}
+
+void BassCompressorStyleDSP::prepare (double sampleRate, int maxBlockSize)
+{
+    mSampleRate = sampleRate;
+    mMaxBlock   = maxBlockSize;
+
+    juce::dsp::ProcessSpec spec { sampleRate,
+                                   (juce::uint32) juce::jmax (1, maxBlockSize),
+                                   2 };
+    auto setup = [&amp;] (juce::dsp::LinkwitzRileyFilter&lt;float&gt;&amp; f,
+                       juce::dsp::LinkwitzRileyFilterType type, float hz)
+    {
+        f.prepare (spec);
+        f.setType (type);
+        f.setCutoffFrequency (hz);
+        f.reset();
+    };
+    setup (mXover1Lp, juce::dsp::LinkwitzRileyFilterType::lowpass,  kXover1Hz);
+    setup (mXover1Hp, juce::dsp::LinkwitzRileyFilterType::highpass, kXover1Hz);
+    setup (mXover2Lp, juce::dsp::LinkwitzRileyFilterType::lowpass,  kXover2Hz);
+    setup (mXover2Hp, juce::dsp::LinkwitzRileyFilterType::highpass, kXover2Hz);
+
+    const int n = juce::jmax (1, maxBlockSize);
+    mLowBuf .setSize (2, n, false, true, true);
+    mMidBuf .setSize (2, n, false, true, true);
+    mHighBuf.setSize (2, n, false, true, true);
+
+    recomputeCoefs();
+
+    // GR meter decay matches CompressorDSP's pattern.
+    constexpr float kGrDecayDbPerSec = 30.0f;
+    mGrDecayDbPerBlock = kGrDecayDbPerSec * (float) maxBlockSize
+                          / (float) (sampleRate &gt; 0.0 ? sampleRate : 44100.0);
+
+    reset();
+}
+
+void BassCompressorStyleDSP::reset()
+{
+    mXover1Lp.reset();  mXover1Hp.reset();
+    mXover2Lp.reset();  mXover2Hp.reset();
+    mLow = mMid = mHigh = {};
+    mGainReductionDb.store (0.0f, std::memory_order_relaxed);
+}
+
+void BassCompressorStyleDSP::recomputeCoefs()
+{
+    if (mSampleRate &lt;= 0.0) return;
+    mAttackCoef  = (float) std::exp (-1.0 / (kAttackMs * 0.001 * mSampleRate));
+    mReleaseCoef = (float) std::exp (-1.0 / (mReleaseMs * 0.001 * mSampleRate));
+}
+
+void BassCompressorStyleDSP::setThresholdDb (float dB)
+{
+    dB = juce::jlimit (-48.0f, 0.0f, dB);
+    if (mThresholdDb != dB) mThresholdDb = dB;
+}
+
+void BassCompressorStyleDSP::setRatio (float r)
+{
+    r = juce::jlimit (1.0f, 10.0f, r);
+    if (mRatio != r) mRatio = r;
+}
+
+void BassCompressorStyleDSP::setReleaseMs (float ms)
+{
+    ms = juce::jlimit (50.0f, 500.0f, ms);
+    if (mReleaseMs != ms) { mReleaseMs = ms; recomputeCoefs(); }
+}
+
+void BassCompressorStyleDSP::setLevel (float dB)
+{
+    dB = juce::jlimit (-24.0f, 12.0f, dB);
+    if (mLevel != dB) mLevel = dB;
+}
+
+void BassCompressorStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;
@@ -127,6 +228,36 @@ inline float computeBandGain (float envSq, float threshSq, float ratio)
     const float decayedGr = juce::jmin (0.0f, prevGr + mGrDecayDbPerBlock);
     mGainReductionDb.store (juce::jmin (worstGrDb, decayedGr),
                               std::memory_order_relaxed);
+}
+
+void BassCompressorStyleDSP::getStateInformation (juce::MemoryBlock&amp; dest)
+{
+    juce::ValueTree state ("BassCompressorStyleDSP");
+    state.setProperty ("threshold", mThresholdDb,  nullptr);
+    state.setProperty ("ratio",   mRatio,         nullptr);
+    state.setProperty ("release", mReleaseMs,     nullptr);
+    state.setProperty ("level",   mLevel,         nullptr);
+    state.setProperty ("bypassed", (int) bypassed, nullptr);
+    if (auto xml = state.createXml())
+        juce::AudioProcessor::copyXmlToBinary (*xml, dest);
+}
+
+void BassCompressorStyleDSP::setStateInformation (const void* data, int sz)
+{
+    auto xml = SafeXml::parseBinaryBlob (data, sz);
+    if (! xml || ! xml-&gt;hasTagName ("BassCompressorStyleDSP")) return;
+    auto state = juce::ValueTree::fromXml (*xml);
+    // QA-EffectsReview Task 6: discrete threshold replaced the old "comp" macro.
+    // Migrate old presets -- if there's no threshold key, derive it from the old
+    // comp 0..1 (which mapped to -6..-36 dB).  Ratio is no longer macro-multiplied,
+    // so old presets compress a bit differently; re-save recommended.
+    const double oldComp    = (double) state.getProperty ("comp", 0.5);
+    const double migrateThr = -6.0 - 30.0 * juce::jlimit (0.0, 1.0, oldComp);
+    setThresholdDb ((float)(double) state.getProperty ("threshold", migrateThr));
+    setRatio     ((float)(double) state.getProperty ("ratio",   4.0));
+    setReleaseMs ((float)(double) state.getProperty ("release", 200.0));
+    setLevel     ((float)(double) state.getProperty ("level",   0.0));
+    bypassed = ((int) state.getProperty ("bypassed", 0)) != 0;
 }</code></pre></details>
 <pre class="formulas">- 3-band multiband: Linkwitz-Riley crossovers at 200 Hz and 2 kHz (Low &lt; 200 &lt; Mid &lt; 2000 &lt; High); split as LP@200 -&gt; Low, HP@200 then LP@2k -&gt; Mid, HP@200 then HP@2k -&gt; High; bands summed after compression.
 - Envelope: per-band per-channel squared-domain one-pole, fast attack fixed 10 ms, release = Release knob 50..500 ms; `env = c*env + (1-c)*x^2`.

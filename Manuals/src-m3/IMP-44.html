@@ -1,7 +1,7 @@
 <p>The low-latency path used while you are singing, where being fast matters more
 than being perfect.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\MonitorPitchShifter.h - key excerpts (full file 86 lines, header-only)</div><pre><code>// MonitorPitchShifter::process() -- dual-tap crossfade core
+<div class="codeblock"><div class="codehead">- Source\DSP\MonitorPitchShifter.h (86 lines, header-only)</div><pre><code>// MonitorPitchShifter::process() -- dual-tap crossfade core
     // In-place mono shift.  ratio = output pitch / input pitch.
     void process (float* buf, int n, float ratio) noexcept
     {
@@ -23,7 +23,29 @@ than being perfect.</p>
             mWrite = (mWrite + 1) &amp; mMask;   // wrap the accumulator itself, not just reads
         }
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\MonitorPitchShifter.h - key excerpts (full file 86 lines, header-only)</summary><pre><code>// MonitorPitchShifter -- prepare/reset/process/readTap (full)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\MonitorPitchShifter.h (86 lines, header-only)</summary><pre><code>// Source/DSP/MonitorPitchShifter.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+#include &lt;cmath&gt;
+#include &lt;vector&gt;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MonitorPitchShifter -- QA-Fe2 monitor-latency fix (docket 2a, 2026-07-16)
+// ─────────────────────────────────────────────────────────────────────────────
+// Low-latency time-domain pitch shifter for the CORRECTED LIVE MONITOR path.
+// Dual-tap delay-line crossfade -- the classic live-tuner / harmonizer-pedal
+// algorithm: two read taps sweep a short window behind the write head at the
+// shift ratio, each tap gained by a half-sine that peaks mid-window and hits
+// zero exactly where that tap wraps, so splices never click.  Effective
+// monitoring latency = the gain-weighted mean tap delay = half the window
+// (~12 ms at the 24 ms default) vs ~48 ms for the spectral R3 LiveShifter,
+// which keeps the WET-recording path untouched.  No formant handling --
+// artifacts (slight doubling on large shifts) are negligible at the
+// cents-scale corrections this stage applies.
+// Mono, audio-thread only, allocation-free after prepare().
+class MonitorPitchShifter
+{
+public:
     void prepare (double sampleRate, int maxBlockSize)
     {
         // 24 ms window: below ~20 ms the splice rate beats against low male
@@ -73,12 +95,21 @@ private:
         const double pos  = (double) mWrite - phase * (double) mWindow;
         const int    i0   = (int) std::floor (pos);
         const float  frac = (float) (pos - (double) i0);
-        // Two&#x27;s-complement AND wraps negative indices into [0, cap) because
+        // Two's-complement AND wraps negative indices into [0, cap) because
         // mMask is all-ones (power-of-two ring).
         const float a = mRing[(size_t) (i0       &amp; mMask)];
         const float b = mRing[(size_t) ((i0 + 1) &amp; mMask)];
         return a + frac * (b - a);
-    }</code></pre></details>
+    }
+
+    std::vector&lt;float&gt; mRing;
+    int    mMask   { 0 };
+    int    mWrite  { 0 };
+    int    mWindow { 1024 };
+    double mPhase  { 0.0 };
+
+    JUCE_LEAK_DETECTOR (MonitorPitchShifter)
+};</code></pre></details>
 <pre class="formulas">- Window: 24 ms -&gt; `mWindow = max(64, round(sr * 0.024))`. Calibration: below ~20 ms the splice rate beats against ~100 Hz male fundamentals; above ~30 ms tap doubling reads as slap.
 - Ring capacity: next power of two &gt;= `mWindow*2 + maxBlockSize + 8`; index wrap by AND mask (`mMask = cap - 1`; two&#x27;s-complement AND also wraps negative tap indices).
 - Tap drift per sample: `drift = (1 - ratio) / mWindow` in window-phase units; phase wrapped to [0,1); second tap at `phase + 0.5` (mod 1).

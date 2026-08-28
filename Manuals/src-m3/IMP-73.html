@@ -25,14 +25,21 @@ already in place.</p>
     // The actual teardown + rebuild, past the save prompt.  Never call directly:
     // loadTemplate owns the unsaved-changes gate for every entry point.
     void applyTemplate (const juce::File&amp; templateXml);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8718+, applyTemplate lines 8735+, saveTemplateAs lines 8891+)</summary><pre><code>// StandaloneEditor.cpp -- StandaloneEditor::loadTemplate (full function, lines 8766-8781)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\StandaloneEditor.cpp (loadTemplate lines 8718+, applyTemplate lines 8735+, saveTemplateAs lines 8891+)</summary><pre><code>// Source/Standalone/StandaloneEditor.cpp  -  StandaloneEditor::loadTemplate (complete)
+// QA-ProjectSave Task 3 (2026-07-26): the dirty gate every template load goes
+// through.  loadTemplate was the ONLY File-level teardown with no save prompt --
+// picking a template silently discarded unsaved work.  The gate lives here, not
+// at the menu entries, so Task 4's submenu (and anything added later) inherits
+// it rather than having to remember it.  confirmDiscardChanges runs its
+// continuation inline on a clean or blank project, so those load directly;
+// Cancel simply never runs it, leaving the current project untouched.
 void StandaloneEditor::loadTemplate (const juce::File&amp; templateXml)
 {
     if (! templateXml.existsAsFile())
     {
         juce::AlertWindow::showMessageBoxAsync (
-            juce::MessageBoxIconType::WarningIcon, &quot;Load Template&quot;,
-            &quot;The template file is missing:\n&quot; + templateXml.getFullPathName(), &quot;OK&quot;);
+            juce::MessageBoxIconType::WarningIcon, "Load Template",
+            "The template file is missing:\n" + templateXml.getFullPathName(), "OK");
         return;
     }
 
@@ -41,6 +48,257 @@ void StandaloneEditor::loadTemplate (const juce::File&amp; templateXml)
     {
         if (safeThis) safeThis-&gt;applyTemplate (templateXml);
     });
+}
+
+// Source/Standalone/StandaloneEditor.cpp  -  StandaloneEditor::applyTemplate (complete)
+void StandaloneEditor::applyTemplate (const juce::File&amp; templateXml)
+{
+    auto parsed = SafeXml::parse (templateXml);
+    if (! parsed || ! parsed-&gt;hasTagName ("BaySickTemplate"))
+    {
+        // The dirty gate may just have prompted a save -- ending in silence
+        // here read as the app doing nothing at all.
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon, "Load Template",
+            "Could not load template: '" + templateXml.getFileName()
+                + "' is not a BaySickDAW template file (or is damaged).", "OK");
+        return;
+    }
+
+    // QA-Ef (2026-05-22): shield the whole template apply -- this is a load-type
+    // rebuild (loadKitImpl + spawn*FromTemplate register ~13 render tasks) and
+    // runs while the audio device is live (apply-template mid-playback).
+    // loadTemplate is the only caller, so this call is always the outermost
+    // shield owner; the save/restore form is what lets the inner project-restore
+    // paths (deserializeUIState, restoreAudioStripsFromArrangement) nest under it
+    // rather than clearing it early.  closeAllDynamicTabs + the inner helpers run
+    // under this shield.
+    const bool shieldWasUp = mProcessor.isProjectLoadInProgress();
+    mProcessor.setProjectLoadInProgress (true);
+    if (! shieldWasUp)
+        mProcessor.settleAudioThread();
+
+    // QA-Ef #4 (2026-05-22): tear down prior-project aux inserts under the
+    // shield, before the rebuild.  Pairs with the same call in
+    // deserializeProject and doFileNew -- aux strips have no per-tab teardown
+    // hook so we clear them explicitly at each load-type entry point.
+    mProcessor.clearAllAuxInserts();
+
+    // QA-ProjectSave Task 3 (2026-07-26, docket 9=A): v2 templates carry the
+    // project shape, so they restore through the project's own path rather than
+    // a second implementation.  Teardown is symmetric to what gets restored --
+    // deserializeUIState opens with its own closeAllDynamicTabs, which is
+    // correct here because a v2 template replaces every tab type.
+    if (parsed-&gt;getIntAttribute ("version", 1) &gt;= 2)
+    {
+        // QA-ProjectSave docket 19 (2026-07-26): loading a template is NEW
+        // PROJECT semantics, not a merge.  A template is a rig you start from,
+        // so the current song goes with everything else -- patterns, notes,
+        // arrangement, audio library.  Without this the old notes survive and
+        // play through whatever engines the template happened to put at those
+        // indices, which is nobody's intent.
+        //
+        // Order mirrors doFileNew exactly, then applies the template on top of
+        // the blank state.  clearDynamicStrips must precede applyProcessorState:
+        // it resets the aux/vox/inst next-index counters, and running it after
+        // would rewind them past the aux inserts that call had just registered.
+        closeAllDynamicTabs();
+        if (mMixerPage) mMixerPage-&gt;clearDynamicStrips();
+        mProcessor.resetToBlankState();
+
+        mProcessor.applyProcessorState (*parsed);   // mixer / routing / racks / EQ
+        deserializeUIState (*parsed);               // tabs + strip names/orders
+        // Per-insert racks are replayed INSIDE restoreAudioStripsFromArrangement,
+        // after its ensureAudioInsert calls -- exactly where the project load
+        // does it.  Calling applyPendingRackStates here instead would consume
+        // the stash (it clears itself) before those Audio InsertNodes exist, so
+        // their racks would come back empty.
+        //
+        // Engines restoring from a template reference the same external files a
+        // project does (NAM captures, sfizz kits, IRs) and report the same way.
+        // The noun must be "template": the fault is in the template just picked,
+        // not in the user's own project.  It is passed INTO the call because that
+        // call drains at its own tail and would otherwise headline the whole
+        // batch "project"; the call below is the backstop for anything banked
+        // after it.
+        restoreAudioStripsFromArrangement (/*isLoadContext*/ true, "template");
+        refreshAllKitViews();
+        if (mEffectsPage) mEffectsPage-&gt;rebuildChannelDropdown();
+        mProcessor.setProjectLoadInProgress (shieldWasUp);
+        mProcessor.reportMissingFilesIfAny ("template");
+        return;
+    }
+
+    // ── v1 FACTORY schema below (the shipped template set) ──────────────────
+    // 1. Tear down ONLY what this branch can restore.  It rebuilds Layers /
+    //    Bass / Drums and nothing else, so Clips / Vox / Inst / Rusty tabs stay
+    //    put rather than being destroyed by a load that cannot bring them back.
+    //    Deliberately NO clearDynamicStrips() here: that wipes EVERY strip
+    //    including the surviving tabs' -- onTabClosed already removes each
+    //    closed tab's own strip (MIX-05), which is exactly the scoped subset.
+    closeDynamicTabs (TabTeardownScope::LayersBassDrumsOnly);
+
+    // 2. Load kit (creates Drums tabs).  Path is relative to factoryTemplatesDir's
+    //    sibling Kits/Factory/ tree, which is what generate_factory_templates writes.
+    juce::String kitPathStr;
+    if (auto* kitEl = parsed-&gt;getChildByName ("Kit"))
+        kitPathStr = kitEl-&gt;getStringAttribute ("path");
+    if (kitPathStr.isNotEmpty())
+    {
+        // No existsAsFile pre-guard: loadKitImpl alerts on a missing file
+        // itself (and on parse/root-tag failures the guard could not see).
+        // Bank 0: a v1 factory template describes ONE kit, and its kit file
+        // ships slots 0-15 (QA-SOUNDNESS).
+        loadKitImpl (factoryKitsDir().getChildFile (kitPathStr), 0);
+    }
+
+    // 3. Walk Layer + Bass entries in order so slots N=0,1,2,… line up.
+    const auto presetsRoot = AppPaths::appRoot().getChildFile ("Presets");
+
+    int firstNewLayer = -1;
+    for (int i = 0; i &lt; parsed-&gt;getNumChildElements(); ++i)
+    {
+        auto* el = parsed-&gt;getChildElement (i);
+        if (! el) continue;
+        const juce::String engine     = el-&gt;getStringAttribute ("engine");
+        const juce::String presetPath = el-&gt;getStringAttribute ("presetPath");
+        const bool         locked     = el-&gt;getIntAttribute    ("locked", 0) != 0;
+        const auto presetFile = presetsRoot.getChildFile (presetPath);
+
+        // The spawn helpers skip a missing preset silently (the tab still
+        // spawns, at engine defaults) -- report it so the template does not
+        // read as loaded while sounding wrong.  Gated on presetPath so
+        // entries that never named a preset stay silent.
+        if (presetPath.isNotEmpty() &amp;&amp; ! presetFile.existsAsFile())
+            MissingFileReport::add ("Template preset", presetFile.getFullPathName());
+
+        if (el-&gt;hasTagName ("Layer"))
+        {
+            spawnLayerTabFromTemplate (engine, presetFile, locked);
+            if (firstNewLayer &lt; 0)
+            {
+                // Find the just-created layer tab id (the newest Layers entry).
+                for (auto&amp; e : mPages)
+                    if (e &amp;&amp; e-&gt;type == RibbonTabBar::TabType::Layers)
+                        firstNewLayer = e-&gt;ribbonTabId;   // overwrites; last entry wins
+            }
+        }
+        else if (el-&gt;hasTagName ("Bass"))
+        {
+            spawnBassTabFromTemplate (engine, presetFile, locked);
+        }
+    }
+
+    // 4. Land on the first layer tab so the user sees something populated.
+    if (firstNewLayer &gt;= 0 &amp;&amp; mRibbon)
+    {
+        mRibbon-&gt;selectTab (firstNewLayer);
+        onTabSelected (firstNewLayer);
+    }
+
+    refreshAllKitViews();
+    if (mEffectsPage) mEffectsPage-&gt;rebuildChannelDropdown();
+
+    // QA-Ef (2026-05-22): rebuild complete -- restore prior shield state (clears
+    // it only when this call was the outermost owner).
+    mProcessor.setProjectLoadInProgress (shieldWasUp);
+    // Same drain as the v2 branch: template presets reference external files
+    // and report the same way a project load does.
+    mProcessor.reportMissingFilesIfAny ("template");
+}
+
+// Source/Standalone/StandaloneEditor.cpp  -  StandaloneEditor::saveTemplateAs (complete)
+void StandaloneEditor::saveTemplateAs ()
+{
+    auto* aw = new juce::AlertWindow ("Save Template As",
+        "Enter a name for this template.\n\n"
+        "Templates save your whole setup - every tab and its sound, the mixer "
+        "levels, routing, effects and EQ - but no patterns or arrangement, so "
+        "you start writing on a blank canvas.",
+        juce::AlertWindow::NoIcon);
+    aw-&gt;addTextEditor ("name", "My Template");
+    aw-&gt;addButton ("Save",   1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw-&gt;addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer&lt;StandaloneEditor&gt; safeThis (this);
+    aw-&gt;enterModalState (true, juce::ModalCallbackFunction::create (
+        [safeThis, aw] (int r)
+        {
+            std::unique_ptr&lt;juce::AlertWindow&gt; own (aw);
+            if (! safeThis || r != 1) return;
+            const juce::String name = aw-&gt;getTextEditorContents ("name").trim();
+            auto* se = safeThis.getComponent();
+
+            // QA-ProjectSave Task 2 (2026-07-26, docket 9=A + 15=B): template v2.
+            //
+            // v1 wrote a bespoke Layer/Bass/Drum-only schema with inline state
+            // that loadTemplate never read back (it only understood the FACTORY
+            // attribute form), so user templates did not round-trip at all.  v2
+            // reuses the PROJECT shape instead: the same &lt;Processor&gt; + &lt;UIState&gt;
+            // children a project.xml carries, minus the arrangement content.
+            // Every tab type comes for free, and the loader is the project
+            // restore path rather than a second implementation that can drift.
+            juce::XmlElement root ("BaySickTemplate");
+            root.setAttribute ("name", name);
+            root.setAttribute ("version", 2);
+
+            // Mixer strips, routing, racks + EQ.  Emitted FIRST so the child
+            // order matches project.xml.
+            se-&gt;mProcessor.writeProcessorState (root);
+
+            // Tabs + strip names/orders.  Deliberately NOT serializeUIState:
+            // that adds the session extras (active tab, scroll position,
+            // arrangement view + time selection, metronome, VU calibration,
+            // song-loop, piano-roll selection) which are properties of a
+            // session, not of a skeleton to start new songs from.
+            auto* ui = root.createNewChildElement ("UIState");
+            ui-&gt;setAttribute ("version", 1);
+            se-&gt;serializeStructuralUIState (*ui, SaveShape::Template);
+            // Jeff's ruling 2026-08-24: a template made from a project WITH
+            // MIDI Learn carries it, like everything else in the setup.
+            if (auto midiXml = se-&gt;mProcessor.getMidiLearnRegistry()
+                                   .saveToValueTree().createXml())
+                root.addChildElement (midiXml.release());
+
+            // Reject an unusable name BEFORE adoptTemplateSampleRefs: it copies
+            // referenced samples into My Samples, and those copies would
+            // outlive a save the name then loses.  resolveTarget is pure and
+            // fails on exactly the names the write rejects -- both sanitize
+            // through the same helper -- so handing the doomed name to
+            // writeXmlAsync here raises the family's own message ("Type a name
+            // for it first." or the illegal-character list) and writes nothing.
+            // The bare `if (name.isEmpty()) return;` this replaces bailed AHEAD
+            // of that box, so clearing the prefilled name and pressing Save did
+            // nothing at all, and it left the illegal-character case landing
+            // after the copies had already been made.
+            if (UserFileSave::resolveTarget (userTemplatesDir(), name) == juce::File())
+            {
+                UserFileSave::writeXmlAsync (userTemplatesDir(), name, root, {});
+                return;
+            }
+
+            // Dockets 23/24: a template is one loose XML with no folder beside
+            // it, so anything it references from outside a stable root has to be
+            // adopted into My Samples or the template breaks the moment that file
+            // moves.  Project saves deliberately skip this -- they have their own
+            // Samples folder that travels with them.
+            auto adopted = std::make_shared&lt;juce::Array&lt;juce::File&gt;&gt; ();
+            if (auto* tabs = ui-&gt;getChildByName ("Tabs"))
+                se-&gt;adoptTemplateSampleRefs (*tabs, *adopted);
+
+            // The adopt has to run BEFORE the write (the template carries the
+            // adopted refs), but the collision prompt means the user can still
+            // Cancel -- so on anything but Succeeded the copies this save just
+            // made are removed again.  Only NEWLY created files are collected,
+            // so a re-save reusing an earlier adoption deletes nothing.
+            UserFileSave::writeXmlAsync (userTemplatesDir(), name, root,
+                [adopted] (const UserFileSave::Result&amp; saved)
+                {
+                    if (saved.succeeded()) return;
+                    for (auto&amp; f : *adopted)
+                        f.deleteRecursively();
+                });
+        }), false);
 }</code></pre></details>
 <pre class="formulas">- Folder layout: `Documents/BaySickDAW/Templates/` with `Factory/` and `My Templates/` subfolders; File &gt; New from Template submenu ids start at `kTemplateMenuLoadBase = 900`, file list rebuilt on every menu open, resolved by id at dispatch.
 - Root tag `&quot;BaySickTemplate&quot;`; `version` attribute (default 1) forks the apply: v2 = project-shaped, v1 = the shipped factory schema (kit + Layer/Bass entries).

@@ -51,18 +51,24 @@ one is performance shape, the other is arrangement.</p>
 
     // ── 4. Inverse FFT → time-domain waveform ─────────────────────────────────
     mFFT.performRealOnlyInverseTransform (mFFTData.data());</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Harmless\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</summary><pre><code>void HarmonicEngine::buildWavetable()
+<details class="fullfn"><summary>Full function &mdash; Source\Harmless\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</summary><pre><code>// Source/Harmless/HarmonicEngine.cpp  -  HarmonicEngine::buildWavetable (complete)
+//==============================================================================
+void HarmonicEngine::buildWavetable()
 {
     // Choose the buffer that is NOT currently being read by the audio thread.
     int    readIdx  = mReadBuf.load (std::memory_order_acquire);
     int    buildIdx = 1 - readIdx;
     float* buf      = (buildIdx == 0) ? mBufA.data() : mBufB.data();
 
-    // ── 1. Make working copies so the user&#x27;s partial data is never modified ──
+    // ── 1. Make working copies so the user's partial data is never modified ──
     std::array&lt;float, kNumPartials&gt; workAmps   = amplitudes;
     std::array&lt;float, kNumPartials&gt; workPhases = phases;
 
     // ── 2. Apply spectral modules (all except Prism, which acts below) ────────
+    // 2026-04-19 (S1) T2-F: rm_fx scales each module's amount before processing.
+    // We snapshot each module's amount, apply the scale, run the module, and
+    // restore - preserves the user's knob values while honouring the rm_fx
+    // routing-matrix slider.
     auto withScaledAmount = [this] (auto&amp; mod, auto&amp;&amp; runFn)
     {
         const float saved = mod.getAmount();
@@ -75,9 +81,26 @@ one is performance shape, the other is arrangement.</p>
     withScaledAmount (filterMask, [&amp;] { filterMask.processPartials (workAmps.data(), workPhases.data(), kNumPartials); });
     withScaledAmount (phaserMask, [&amp;] { phaserMask.processPartials (workAmps.data(), workPhases.data(), kNumPartials); });
 
-    // [nyquist protect: soft exp rolloff above kNumPartials/4 -- elided]
+    // 2026-04-19 (S1) T2-F: nyquist protect - soft rolloff above kNumPartials/4.
+    // mNyquistProtect=0 -&gt; no rolloff; =1 -&gt; aggressive log-roll above corner.
+    if (mNyquistProtect &gt; 0.001f)
+    {
+        const int   corner = kNumPartials / 4;
+        const float k      = mNyquistProtect * 0.05f;
+        for (int i = corner; i &lt; kNumPartials; ++i)
+        {
+            const float over = float (i - corner);
+            workAmps[i] *= std::exp (-k * over);
+        }
+    }
 
     // ── 2a. Auto-gain pass (S4 AG-1) ──────────────────────────────────────────
+    // Mode 0 Relative: scale all partials by a common factor so the max
+    //                  partial fits inside the per-bin headroom.
+    // Mode 1 Absolute: hard-clip each partial at per-bin headroom without
+    //                  scaling others.
+    // Per-bin headroom = 1 / kNumPartials (conservative: guarantees no
+    // post-IFFT overshoot even if every partial sums constructively).
     {
         const float headroom = 1.0f / float (kNumPartials);
         if (mAutoGainMode == 0)
@@ -101,6 +124,8 @@ one is performance shape, the other is arrangement.</p>
     }
 
     // ── 2b. Brownian spectral weighting (1/n^α rolloff) ───────────────────────
+    // Mimics the natural harmonic decay of acoustic instruments and brown noise.
+    // Applied after spectral modules so module output is weighted, not the raw input.
     if (mBrownianAmount &gt; 0.001f)
     {
         for (int i = 0; i &lt; kNumPartials; ++i)
@@ -109,13 +134,81 @@ one is performance shape, the other is arrangement.</p>
 
     // ── 3. Assemble IFFT input ─────────────────────────────────────────────────
     std::fill (mFFTData.begin(), mFFTData.end(), 0.0f);
-    // [per-partial bin-scatter loop -- see excerpt above]
+
+    const float* sinLUT = getSineLUT();
+    constexpr float lutOverTwoPi =
+        float (kLUTSize) / juce::MathConstants&lt;float&gt;::twoPi;
+
+    for (int i = 0; i &lt; kNumPartials; ++i)
+    {
+        const float amp = workAmps[i];
+        if (amp &lt; 1.0e-6f)
+            continue;
+
+        const float phase = workPhases[i];
+
+        // Prism: fractional bin offset for inharmonicity.
+        // At prism.amount=0 this is 0 and binF is the integer partial index.
+        const float binF = float (i + 1) + prism.getFrequencyShift (i);
+
+        if (binF &lt; 1.0f || binF &gt;= float (kFFTSize / 2 - 1))
+            continue;
+
+        // sin/cos from LUT with linear interpolation.
+        float lutPos = phase * lutOverTwoPi;
+        int   li     = int (lutPos) &amp; (kLUTSize - 1);
+        float lf     = lutPos - float (int (lutPos));
+
+        float sinVal = sinLUT[li]
+                     + lf * (sinLUT[(li + 1)              &amp; (kLUTSize - 1)] - sinLUT[li]);
+        float cosVal = sinLUT[(li + kLUTSize / 4)             &amp; (kLUTSize - 1)]
+                     + lf * (sinLUT[(li + kLUTSize / 4 + 1) &amp; (kLUTSize - 1)]
+                              - sinLUT[(li + kLUTSize / 4)     &amp; (kLUTSize - 1)]);
+
+        // Fractional bin: interpolate energy between floor and ceil bins.
+        const int   binLo = int (binF);
+        const int   binHi = binLo + 1;
+        const float hi    = binF - float (binLo);
+        const float lo    = 1.0f - hi;
+
+        // JUCE FFT interleaved layout: d[2k] = Re[k], d[2k+1] = Im[k]
+        if (binLo &gt;= 1 &amp;&amp; binLo &lt; kFFTSize / 2)
+        {
+            mFFTData[2 * binLo]     += amp * cosVal * lo;
+            mFFTData[2 * binLo + 1] += amp * sinVal * lo;
+        }
+        if (binHi &lt; kFFTSize / 2)
+        {
+            mFFTData[2 * binHi]     += amp * cosVal * hi;
+            mFFTData[2 * binHi + 1] += amp * sinVal * hi;
+        }
+    }
 
     // ── 4. Inverse FFT → time-domain waveform ─────────────────────────────────
     mFFT.performRealOnlyInverseTransform (mFFTData.data());
 
-    // [── 5. Normalise to ±1 peak; ── 6. atomic double-buffer publish
-    //  (mReadBuf.store(buildIdx, release), mReady, mGeneration bump) -- elided]
+    // ── 5. Normalise to ±1 peak ────────────────────────────────────────────────
+    float peak = 1.0e-6f;
+    for (int i = 0; i &lt; kFFTSize; ++i)
+    {
+        float v = mFFTData[i];
+        if (std::isfinite (v)) peak = std::max (peak, std::abs (v));
+    }
+
+    const float scale = 1.0f / peak;
+    for (int i = 0; i &lt; kFFTSize; ++i)
+    {
+        float v = mFFTData[i] * scale;
+        buf[i]  = std::isfinite (v) ? v : 0.0f;
+    }
+
+    // ── 6. Atomic publish ──────────────────────────────────────────────────────
+    mReadBuf.store (buildIdx, std::memory_order_release);
+    mReady.store   (true,     std::memory_order_release);
+
+    // S4 Option 2: bump generation so voices observing this engine as a
+    // template know to re-sync their per-voice copy.
+    mGeneration.fetch_add (1, std::memory_order_release);
 }</code></pre></details>
 <pre class="formulas">- Additive synthesis is done OFFLINE into a wavetable: 516 partials (`kNumPartials`) scattered into IFFT bins, `performRealOnlyInverseTransform`, normalize to ±1, atomic double-buffer publish. The voice then plays the table -- harmonic &quot;summing&quot; per sample is a single wavetable read, not 516 sines.
 - Base spectra: saw `a_n = 1/n`; square odd-only `1/n`; triangle odd-only `1/n^2` with alternating pi phase; sine = fundamental only.

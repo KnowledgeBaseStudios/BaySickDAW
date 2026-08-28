@@ -38,7 +38,8 @@ cascade.</p>
         const juce::int64 q = (juce::int64) std::llround (d * 1000.0);
         return fnvBytes (h, &amp;q, sizeof (q));
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\EngineRig.cpp (FNV-1a helpers lines 847-889; EngineRig::freezeContentStamp lines 918-1036; staleness/retraction: markEngineContentChanged tail ~200-224, markPatternContentChanged 229-255, republishPatternSources 261-294, markAllFreezesStale 298-321)</summary><pre><code>juce::uint32 EngineRig::freezeContentStamp (TabKind k, int pageIndex, int patternIndex) const
+<details class="fullfn"><summary>Full function &mdash; - Source\EngineRig.cpp (FNV-1a helpers lines 847-889; EngineRig::freezeContentStamp lines 918-1036; staleness/retraction: markEngineContentChanged tail ~200-224, markPatternContentChanged 229-255, republishPatternSources 261-294, markAllFreezesStale 298-321)</summary><pre><code>// Source/EngineRig.cpp  -  EngineRig::freezeContentStamp (complete)
+juce::uint32 EngineRig::freezeContentStamp (TabKind k, int pageIndex, int patternIndex) const
 {
     auto* pm = mProc.getPatternManager();
     if (pm == nullptr) return 0;
@@ -63,13 +64,51 @@ cascade.</p>
         h = fnvBytes (h, t-&gt;engineType.toRawUTF8(), (size_t) t-&gt;engineType.getNumBytesAsUTF8());
         hashProcessorState (t-&gt;engine.get());
 
-        // Inst is a CHAIN: the wrapper&#x27;s own blob says nothing about the pedal
+        // Inst is a CHAIN: the wrapper's own blob says nothing about the pedal
         // board or amp/IR baked into its freeze -- every owned stage counts.
         for (const auto&amp; stage : t-&gt;ownedStages)
             hashProcessorState (stage.get());
     }
-    ...
-    // 2. Tempo -- moves every rendered sample in time.
+
+    // Processor-owned engines the rig's blob cannot see: the Inst tab's sfizz
+    // engine (whichever source mode owns one) and the kit.  Without these the
+    // player axis was INVISIBLE to the stamp for exactly those kinds -- a
+    // save/reload after any kit or amp change reused the old render.
+    if (k == TabKind::Inst)
+    {
+        hashProcessorState (mProc.getBaySickGuitars (pageIndex));
+        hashProcessorState (mProc.getBaySickBasses  (pageIndex));
+    }
+    if (k == TabKind::Rusty)
+        hashProcessorState (mProc.getBaySickRustyDrums());
+
+    // Swing shapes this tab's note timing and lives in the MAIN APVTS, which
+    // the per-engine watcher and the engine blob both miss.
+    {
+        juce::String sp;
+        switch (k)
+        {
+            case TabKind::Layers:  sp = "swing_layer_"  + juce::String (pageIndex); break;
+            case TabKind::Bass:    sp = "swing_bass_"   + juce::String (pageIndex); break;
+            case TabKind::Drums:   sp = "swing_drum_"   + juce::String (pageIndex); break;
+            case TabKind::Inst:    sp = "swing_inst_"   + juce::String (pageIndex); break;
+            case TabKind::Plugins: sp = "swing_plugin_" + juce::String (pageIndex); break;
+            case TabKind::Rusty:   sp = "swing_rusty";                              break;
+            case TabKind::Clips:   break;   // no swing params exist for these two
+            case TabKind::Vox:     break;
+        }
+        if (sp.isNotEmpty())
+        {
+            if (auto* v = mProc.apvts.getRawParameterValue (sp + "_mix"))
+                h = fnvDouble (h, (double) v-&gt;load());
+            if (auto* v = mProc.apvts.getRawParameterValue (sp + "_trunc"))
+                h = fnvDouble (h, (double) v-&gt;load());
+        }
+    }
+
+    // 2. Tempo -- moves every rendered sample in time.  The tempo MAP and the
+    //    time-signature map move samples exactly the same way; the stamp saw
+    //    neither, so a marker edit reused stale renders on reload.
     h = fnvDouble (h, pm-&gt;getGlobalTempo());
     for (int i = 0; i &lt; pm-&gt;getNumTempoChanges(); ++i)
     {
@@ -77,10 +116,17 @@ cascade.</p>
         h = fnvBytes  (h, &amp;tc.bar, sizeof (tc.bar));
         h = fnvDouble (h, tc.bpm);
     }
-    ...
+    for (int i = 0; i &lt; pm-&gt;getNumTimeSigChanges(); ++i)
+    {
+        const auto&amp; ts = pm-&gt;getTimeSigChange (i);
+        h = fnvBytes (h, &amp;ts.bar, sizeof (ts.bar));
+        h = fnvBytes (h, &amp;ts.num, sizeof (ts.num));
+        h = fnvBytes (h, &amp;ts.den, sizeof (ts.den));
+    }
+
     if (patternIndex &gt;= 0)
     {
-        // PATTERN SCOPE: this pattern&#x27;s notes for this tab, and its length.
+        // PATTERN SCOPE: this pattern's notes for this tab, and its length.
         if (patternIndex &lt; pm-&gt;getNumPatterns())
         {
             const auto&amp; pat = pm-&gt;getPattern (patternIndex);
@@ -92,7 +138,7 @@ cascade.</p>
     }
 
     // SONG SCOPE: the arrangement decides what plays and when, plus every
-    // pattern&#x27;s notes for this tab (any of them can appear in the arrangement).
+    // pattern's notes for this tab (any of them can appear in the arrangement).
     h = fnvDouble (h, pm-&gt;getSongEndBeats());
 
     for (int i = 0; i &lt; pm-&gt;getNumBlocks(); ++i)
@@ -111,6 +157,106 @@ cascade.</p>
             h = fnvNotes (h, *notes);
 
     return h;
+}
+
+// Source/EngineRig.cpp  -  EngineRig::markAllFreezesStale (complete)
+// Tempo and the tempo map move every engine's output in time, so they invalidate
+// every freeze rather than any one tab's.
+void EngineRig::markAllFreezesStale()
+{
+    // Same offline guard as markEngineContentChanged, and it matters more here:
+    // the render restores song mode, loop bounds and the current pattern on exit,
+    // all of which route through content-change signals -- so without this, every
+    // render would invalidate every freeze in the project on its way out.
+    if (mProc.isNonRealtime()) return;
+
+    for (auto&amp; t : mTabs)
+    {
+        if (! t-&gt;frozen) continue;
+
+        // Every cached pattern too, not just the flag: the republish gate
+        // reads stalePatterns, and leaving it empty here is exactly how a
+        // tempo change kept pattern mode serving pre-change renders.
+        for (const auto&amp; kv : t-&gt;freezePatternStreams)
+            t-&gt;stalePatterns.insert (kv.first);
+
+        const bool transition = ! t-&gt;freezeStale;
+        t-&gt;freezeStale = true;
+        mProc.retractFrozenSources (t-&gt;kind, t-&gt;pageIndex);
+        if (transition &amp;&amp; onFreezeStateChanged) onFreezeStateChanged (t-&gt;kind, t-&gt;pageIndex);
+    }
+}
+
+// Source/EngineRig.cpp  -  EngineRig::markPatternContentChanged (complete)
+// §6.8 AXIS TWO -- this PATTERN's notes changed, so its cached render is wrong
+// for every tab that has one, while those tabs' OTHER patterns stay valid.  The
+// song render is invalidated too: the arrangement contains this pattern.
+void EngineRig::markPatternContentChanged (int patternIndex)
+{
+    if (mProc.isNonRealtime() || patternIndex &lt; 0) return;
+
+    for (auto&amp; t : mTabs)
+    {
+        if (! t-&gt;frozen) continue;
+
+        const bool hasPattern = t-&gt;freezePatternStreams.count (patternIndex) &gt; 0;
+        if (hasPattern) t-&gt;stalePatterns.insert (patternIndex);
+
+        const bool transition = ! t-&gt;freezeStale;
+        t-&gt;freezeStale = true;
+        // §6.6: the song render contains this pattern, so it must stop playing
+        // NOW -- retraction is what makes stale-plays-live true during
+        // playback rather than a promise the next re-render keeps.
+        mProc.retractFrozenSources (t-&gt;kind, t-&gt;pageIndex);
+        if (transition &amp;&amp; onFreezeStateChanged)
+            onFreezeStateChanged (t-&gt;kind, t-&gt;pageIndex);
+    }
+
+    // Re-point every tab whose CURRENT pattern render is still valid -- the
+    // retraction above nulled those too, and the editor's poll only
+    // republishes on a pattern CHANGE, so without this they would sit on the
+    // live engine until the user switched away and back.
+    republishPatternSources (mProc.freezePatternIndexNow());
+}
+
+// Source/EngineRig.cpp  -  EngineRig::republishPatternSources (complete)
+// Point every frozen tab's task at the render for the pattern now looping, or at
+// nothing when there is none or it is stale -- which falls back to the live
+// engine.  Message thread; the audio thread only ever reads the published
+// pointer, so nothing here frees anything a block could be holding.
+void EngineRig::republishPatternSources (int patternIndex)
+{
+    for (auto&amp; t : mTabs)
+    {
+        if (! t-&gt;frozen) continue;
+
+        AudioClipStreamer* s = nullptr;
+
+        if (patternIndex &gt;= 0 &amp;&amp; t-&gt;stalePatterns.count (patternIndex) == 0)
+        {
+            auto it = t-&gt;freezePatternStreams.find (patternIndex);
+            if (it != t-&gt;freezePatternStreams.end() &amp;&amp; ! it-&gt;second.empty())
+                s = it-&gt;second.front().get();
+        }
+
+        // The kit is THIRTEEN tasks, not one -- renderTaskForTab cannot express
+        // it, which is the same reason its freeze has its own render path.
+        if (t-&gt;kind == TabKind::Rusty)
+        {
+            const std::vector&lt;std::unique_ptr&lt;AudioClipStreamer&gt;&gt;* v = nullptr;
+            if (patternIndex &gt;= 0 &amp;&amp; t-&gt;stalePatterns.count (patternIndex) == 0)
+            {
+                auto it = t-&gt;freezePatternStreams.find (patternIndex);
+                if (it != t-&gt;freezePatternStreams.end() &amp;&amp; ! it-&gt;second.empty())
+                    v = &amp;it-&gt;second;
+            }
+            mProc.setRustyFrozenPatternSources (v, patternIndex);
+            continue;
+        }
+
+        if (auto* task = mProc.renderTaskForTab (t-&gt;kind, t-&gt;pageIndex))
+            task-&gt;setFrozenPatternSource (s, patternIndex);
+    }
 }</code></pre></details>
 <pre class="formulas">- FNV-1a 32-bit: offset basis `2166136261u`, prime `16777619u`, per-byte `h = (h ^ b) * prime`. Doubles are quantized `llround(d * 1000.0)` (millibeats/milliunits) before hashing so XML text round-trip ULP drift doesn&#x27;t stale every restored freeze. A false MATCH only reuses a stale render — the stamp gates REUSE, never fresh-render correctness.
 - Stamp inputs, pattern scope: engine type string + full `getStateInformation` blob (plus every owned Inst chain stage; plus processor-owned sfizz engines/kit for Inst/Rusty), per-tab swing `_mix`/`_trunc` params, global tempo + tempo map (bar, bpm) + time-sig map (bar, num, den), this pattern&#x27;s notes for this tab (per note: midiNote, startBeat, durationBeats, velocity, finePitch, muted, type) + pattern content beats. Song scope adds `getSongEndBeats()` + every arrangement block (trackRow, patternIndex, effective start/length beats, muted) + every pattern&#x27;s notes for this tab.

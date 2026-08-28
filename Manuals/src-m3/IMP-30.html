@@ -44,7 +44,66 @@
                     (mSampleRate, 1000.0f, 0.7f, 1.0f);
             break;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticSimulatorStyleDSP.cpp</summary><pre><code>void AcousticSimulatorStyleDSP::rebuildPickupEQ()
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticSimulatorStyleDSP.cpp</summary><pre><code>// Source/DSP/AcousticSimulatorStyleDSP.cpp  -  AcousticSimulatorStyleDSP::rebuildBodyEQ (complete)
+void AcousticSimulatorStyleDSP::rebuildBodyEQ()
+{
+    // Body modeler -- 2 series IIR voicing stages (mBodyA + mBodyB) layered
+    // over the bundled body-IR base in process().  Task 9 re-voicing: the
+    // Body knob now maps -15..+15 -&gt; depth 0..1 (bottom = stage off, center
+    // ~60 %, top = full -- the old 0-centered/invert contract made every
+    // mode identical at the default), and the per-mode curves got real
+    // separation.  All values ear-tunable.
+    const float depth = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
+
+    juce::dsp::IIR::Coefficients&lt;float&gt;::Ptr a, b;
+
+    switch (mMode)
+    {
+        case Mode::Standard:
+            // Balanced dreadnought: low-mid scoop + presence.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 600.0f, 1.2f, juce::Decibels::decibelsToGain (-8.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 4000.0f, 0.9f, juce::Decibels::decibelsToGain (4.0f * depth));
+            break;
+        case Mode::Jumbo:
+            // Massive low shelf + low-mid cut -- big-body bloom.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makeLowShelf
+                    (mSampleRate, 110.0f, 0.7f, juce::Decibels::decibelsToGain (10.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 550.0f, 1.0f, juce::Decibels::decibelsToGain (-5.0f * depth));
+            break;
+        case Mode::Enhanced:
+            // Hi-fi sheen: strong high shelf + supporting low shelf.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf
+                    (mSampleRate, 6000.0f, 0.7f, juce::Decibels::decibelsToGain (9.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makeLowShelf
+                    (mSampleRate, 180.0f, 0.7f, juce::Decibels::decibelsToGain (4.0f * depth));
+            break;
+        case Mode::Piezo:
+            // Undersaddle quack @ ~2.5 kHz + tight low cut.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 2500.0f, 1.5f, juce::Decibels::decibelsToGain (10.0f * depth));
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighPass
+                    (mSampleRate, 100.0f, 0.7f);
+            break;
+        case Mode::User:
+        default:
+            // User mode bypasses the body EQ bank (Convolution handles it).
+            // Set both stages to neutral 1.0 gain peak filters.
+            a = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 1000.0f, 0.7f, 1.0f);
+            b = juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter
+                    (mSampleRate, 1000.0f, 0.7f, 1.0f);
+            break;
+    }
+
+    if (a) *mBodyA.state = *a;
+    if (b) *mBodyB.state = *b;
+}
+
+// Source/DSP/AcousticSimulatorStyleDSP.cpp  -  AcousticSimulatorStyleDSP::rebuildPickupEQ (complete)
+void AcousticSimulatorStyleDSP::rebuildPickupEQ()
 {
     // Static -4 dB peak at 2.5 kHz, Q ~0.7.  Flattens electric pickup
     // resonance peak that exists in single-coil + humbucker frequency
@@ -55,14 +114,178 @@
     *mPickupEQ.state = *coefs;
 }
 
+// Source/DSP/AcousticSimulatorStyleDSP.cpp  -  AcousticSimulatorStyleDSP::rebuildTopShelf (complete)
 void AcousticSimulatorStyleDSP::rebuildTopShelf()
 {
     // High-shelf at 4 kHz; gain modulated by envelope (set per sample).
+    // We bake the maximum gain here; per-sample modulation rides on top.
     const float maxGainDb = juce::jlimit (-15.0f, 15.0f, mTopDb);
     auto coefs = juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf
                     (mSampleRate, 4000.0f, 0.7f,
                      juce::Decibels::decibelsToGain (maxGainDb));
     *mTopShelf.state = *coefs;
+}
+
+// Source/DSP/AcousticSimulatorStyleDSP.cpp  -  AcousticSimulatorStyleDSP::process (complete)
+void AcousticSimulatorStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    // Conv IRs load on the message thread / prepare only -- never here.
+
+    juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
+    auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+    juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+
+    // ── 1. Pickup De-Emphasis ───────────────────────────────────────────────
+    mPickupEQ.process (ctx);
+
+    // ── 2. Transient Shaper ("Top" knob) ────────────────────────────────────
+    // Process the high-shelf into a scratch, then envelope-modulate the wet
+    // amount and blend back: out = dry + env * (wet - dry).  For Top&lt;0 the
+    // envelope DUCKS the highs (negative = pull pick attack out).
+    if (! juce::approximatelyEqual (mTopDb, 0.0f))
+    {
+        if (mShelfScratch.getNumChannels() &lt; numCh || mShelfScratch.getNumSamples() &lt; n)
+            mShelfScratch.setSize (numCh, n, false, false, true);
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            mShelfScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+
+        juce::dsp::AudioBlock&lt;float&gt; shBlk (mShelfScratch);
+        auto shSub = shBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; shCtx (shSub);
+        mTopShelf.process (shCtx);
+
+        // Envelope follower per sample (stereo summed for tracking, then per-ch blend).
+        for (int i = 0; i &lt; n; ++i)
+        {
+            float peak = 0.0f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                peak = juce::jmax (peak, std::abs (buffer.getReadPointer (ch)[i]));
+
+            // attack/release on instant peak
+            const float coef = (peak &gt; mEnv[0]) ? mEnvAttackCoef : mEnvReleaseCoef;
+            mEnv[0] = peak + coef * (mEnv[0] - peak);
+            // long-term running average
+            const float avgCoef = 0.9995f;
+            mEnvAvg = mEnv[0] * (1.0f - avgCoef) + mEnvAvg * avgCoef;
+
+            // transient = how much instant exceeds running avg, 0..1
+            const float ratio = (mEnvAvg &gt; 1.0e-5f) ? (mEnv[0] / mEnvAvg) : 1.0f;
+            const float transient = juce::jlimit (0.0f, 1.0f, (ratio - 1.0f) * 0.5f);
+
+            for (int ch = 0; ch &lt; numCh; ++ch)
+            {
+                float* dst = buffer.getWritePointer (ch);
+                const float* sh = mShelfScratch.getReadPointer (ch);
+                dst[i] = dst[i] + transient * (sh[i] - dst[i]);
+            }
+        }
+    }
+
+    // ── 3. Body Modeler ─────────────────────────────────────────────────────
+    // Body knob -15..+15 -&gt; depth 0..1 (bottom = stage off, center ~60 %).
+    const float depth01 = juce::jlimit (0.0f, 1.0f, (mBodyDb + 15.0f) / 30.0f);
+    if (mMode == Mode::User)
+    {
+        // User mode: convolution with the user IR, wet/dry from the depth.
+        if (depth01 &gt; 0.001f)
+        {
+            if (mConvScratch.getNumChannels() &lt; numCh || mConvScratch.getNumSamples() &lt; n)
+                mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+            juce::dsp::AudioBlock&lt;float&gt; wb (mConvScratch);
+            auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing&lt;float&gt; wctx (wsub);
+            mConv.process (wctx);
+
+            const float wetGain = depth01;
+            const float dryGain = 1.0f - depth01 * 0.5f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+            {
+                float* dst = buffer.getWritePointer (ch);
+                const float* w = mConvScratch.getReadPointer (ch);
+                for (int i = 0; i &lt; n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+            }
+        }
+    }
+    else if (depth01 &gt; 0.001f)
+    {
+        // Named modes (Task 9): the bundled body IR is the shared acoustic
+        // voice, blended by the depth; the per-mode voicing curves (rebuilt
+        // with the same depth baked into their gains) then separate the
+        // modes on top of it.
+        if (mSimIRLoaded)
+        {
+            if (mConvScratch.getNumChannels() &lt; numCh || mConvScratch.getNumSamples() &lt; n)
+                mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+            juce::dsp::AudioBlock&lt;float&gt; wb (mConvScratch);
+            auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing&lt;float&gt; wctx (wsub);
+            mConv.process (wctx);
+
+            // Center of the knob lands ~60 % wet so a fresh pedal is audibly
+            // acoustic; top = full voice.
+            const float wetGain = juce::jmin (1.0f, depth01 * 1.2f);
+            const float dryGain = 1.0f - wetGain * 0.5f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+            {
+                float* dst = buffer.getWritePointer (ch);
+                const float* w = mConvScratch.getReadPointer (ch);
+                for (int i = 0; i &lt; n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+            }
+        }
+        mBodyA.process (ctx);
+        mBodyB.process (ctx);
+    }
+
+    // ── 4. Schroeder Reverb ─────────────────────────────────────────────────
+    if (mReverb01 &gt; 0.001f)
+    {
+        if (mRevScratch.getNumChannels() &lt; numCh || mRevScratch.getNumSamples() &lt; n)
+            mRevScratch.setSize (numCh, n, false, false, true);
+
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            const int chIdx = juce::jmin (ch, 1);
+            float* rv = mRevScratch.getWritePointer (ch);
+            const float* in = buffer.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float x = in[i];
+                float c = 0.0f;
+                for (int k = 0; k &lt; 4; ++k) c += mCombs[k][chIdx].process (x);
+                c *= 0.25f;
+                float y = mAllpasses[0][chIdx].process (c);
+                y       = mAllpasses[1][chIdx].process (y);
+                rv[i] = y;
+            }
+        }
+
+        const float wetGain = mReverb01;
+        const float dryGain = 1.0f - mReverb01 * 0.5f;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* dst = buffer.getWritePointer (ch);
+            const float* rv = mRevScratch.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i) dst[i] = dst[i] * dryGain + rv[i] * wetGain;
+        }
+    }
+
+    // ── 5. Level (output gain) ──────────────────────────────────────────────
+    if (! juce::approximatelyEqual (mLevelDb, 0.0f))
+    {
+        const float g = juce::Decibels::decibelsToGain (mLevelDb, -60.0f);
+        buffer.applyGain (g);
+    }
 }</code></pre></details>
 <pre class="formulas">- Pickup De-Emphasis: static -4 dB peak at 2.5 kHz Q 0.7 — flattens the electric pickup resonance absent on acoustic output.
 - Top knob (transient shaper): high shelf at 4 kHz Q 0.7 with gain = Top (-15..+15 dB) processed in parallel; blended per sample by transient amount: `out = dry + transient * (shelf - dry)`. Envelope: 5 ms attack / 100 ms release one-pole peak follower; long-term average one-pole coef 0.9995; `transient = clamp((env/avg - 1) * 0.5, 0, 1)`. Negative Top ducks the highs on attacks.

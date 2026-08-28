@@ -14,7 +14,8 @@ static constexpr float kFreqs[kNumBands] = {
         ? juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf (mSampleRate, kFreqs[idx], 0.707f, gain)
         : juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter (mSampleRate, kFreqs[idx], 1.4f, gain);
     *mBands[idx].state = *coefs;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\GraphicEQStyleDSP.cpp</summary><pre><code>void GraphicEQStyleDSP::rebuildBand (int idx)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\GraphicEQStyleDSP.cpp</summary><pre><code>// Source/DSP/GraphicEQStyleDSP.cpp  -  GraphicEQStyleDSP::rebuildBand (complete)
+void GraphicEQStyleDSP::rebuildBand (int idx)
 {
     if (idx &lt; 0 || idx &gt;= kNumBands) return;
     const float gain = juce::Decibels::decibelsToGain (mGainsDb[idx]);
@@ -24,41 +25,6 @@ static constexpr float kFreqs[kNumBands] = {
         ? juce::dsp::IIR::Coefficients&lt;float&gt;::makeHighShelf (mSampleRate, kFreqs[idx], 0.707f, gain)
         : juce::dsp::IIR::Coefficients&lt;float&gt;::makePeakFilter (mSampleRate, kFreqs[idx], 1.4f, gain);
     *mBands[idx].state = *coefs;
-}
-
-void GraphicEQStyleDSP::setBandDb (int idx, float db)
-{
-    if (idx &lt; 0 || idx &gt;= kNumBands) return;
-    // jlimit passes NaN (every comparison is false), and a NaN gain bakes into
-    // the biquad coefficients and the saved project.  Debug-asserts so the
-    // WRITER is on the stack, not a later paint.
-    if (! std::isfinite (db)) { jassertfalse; return; }
-    db = juce::jlimit (-15.0f, 15.0f, db);
-    if (! juce::approximatelyEqual (mGainsDb[idx], db))
-    {
-        mGainsDb[idx] = db;
-        rebuildBand (idx);
-    }
-}
-
-void GraphicEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
-{
-    if (bypassed) return;
-    juce::ScopedNoDenormals noDenormals;
-
-    const int numCh = buffer.getNumChannels();
-    const int n     = buffer.getNumSamples();
-    if (numCh == 0 || n == 0) return;
-
-    juce::dsp::AudioBlock&lt;float&gt; blk (buffer);
-    auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
-    juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
-
-    for (auto&amp; b : mBands) b.process (ctx);
-
-    // Master level (+/-15 dB, matching the GE-7 Level slider; no -inf kill).
-    if (! juce::approximatelyEqual (mLevelDb, 0.0f))
-        buffer.applyGain (juce::Decibels::decibelsToGain (mLevelDb));
 }</code></pre></details>
 <pre class="formulas">- 7 bands, one octave apart: 100 / 200 / 400 / 800 / 1600 / 3200 / 6400 Hz.
 - Bands 1-6: peak (bell) biquads, Q = 1.4, gain +/-15 dB per band.

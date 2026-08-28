@@ -20,7 +20,8 @@ than swapped under a running engine.</p>
                         localStart += swingAmt;
                         swung = true;
                     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\PluginProcessor.h (MetroDSP struct, lines 1888+)</summary><pre><code>// PluginProcessor.h -- struct MetroDSP (full struct, lines 1845-1880)
+<details class="fullfn"><summary>Full function &mdash; Source\PluginProcessor.h (MetroDSP struct, lines 1888+)</summary><pre><code>// Source/PluginProcessor.h  -  MetroDSP (complete)
+    // ── Metronome DSP ─────────────────────────────────────────────────────
     struct MetroDSP {
         enum SoundType { Sine = 0, Click, Wood, Bell };
 
@@ -31,7 +32,7 @@ than swapped under a running engine.</p>
         std::atomic&lt;bool&gt;   countInActive { false };
         std::atomic&lt;double&gt; countInBpm    { 120.0 };
         // QA-G Task 6: signature at the record position (song = marker map,
-        // pattern = pattern&#x27;s effective TS), captured by the record path so
+        // pattern = pattern's effective TS), captured by the record path so
         // count-in clicks run in DENOMINATOR units with the right accent.
         std::atomic&lt;int&gt;    countInNum    { 4 };
         std::atomic&lt;int&gt;    countInDen    { 4 };
@@ -45,7 +46,7 @@ than swapped under a running engine.</p>
         bool   countInWasActive { false }; // edge-detect to reset phase on start
         int    countInBeatsFired{ 0 };     // 2026-04-26 (D-5 fix): tracks how many
                                            // count-in clicks have fired so the loop
-                                           // doesn&#x27;t double-fire beat 1 after its
+                                           // doesn't double-fire beat 1 after its
                                            // initial trigger (fires in-loop once the
                                            // QA-Fe2 PDC deferral elapses).
         // QA-Fe2 PDC (2026-07-16): the compensated mix reaches this buffer
@@ -53,10 +54,10 @@ than swapped under a running engine.</p>
         // they LEAD the music (default-audible now that De-reverb ships
         // active).  countInDelaySamp defers the whole count-in once at its
         // rising edge; transportWasPlaying edge-inits the transport click
-        // grid so the deferral can&#x27;t fire a stale catch-up click at play.
+        // grid so the deferral can't fire a stale catch-up click at play.
         int    countInDelaySamp { 0 };
         bool   transportWasPlaying { false };
-    } mMetro;</code></pre></details>
+    }</code></pre></details>
 <pre class="formulas">- Swing push formula (SW-4): `effectivePush = globalSwing * playerMix * 0.125 beats` (half a 16th). Applies to OFF-BEAT 16ths only: `(floor(localStart / 0.25) &amp; 1) != 0` — odd 16th index in the PATTERN-LOCAL grid (local, not absolute, so block placement never changes a pattern&#x27;s feel). The whole note shifts (note-off rides the pushed start).
 - Swing param ids (`ensureSwingParams`, eager bulk registration at startup): `globalSwing` (default 0) + per-player `swing_&lt;kind&gt;_&lt;i&gt;_mix` (default 1) / `swing_&lt;kind&gt;_&lt;i&gt;_trunc` (default false) for layer/bass/drum/inst/plugin families + rusty. Clip rolls take FULL GLOBAL (null mix pointer = mix 1.0, Jeff 2026-07-23); Vox rolls are swing-EXCLUDED (no vox MIDI).
 - Truncate rule (SW-5): a pushed note that newly overlaps the NEXT same-pitch note has its off clipped to that note&#x27;s POST-SWING start — same-pitch scope only, chords stay intact; active only when `swingTrunc &amp;&amp; swung`.

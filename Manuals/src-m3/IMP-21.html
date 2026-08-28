@@ -19,40 +19,329 @@
             const float minus2 = mDivBy4OutSign * env;
             // +1 oct = full-wave rectifier (Octavia trick).
             const float plus1raw = std::abs (mono) - 0.5f * env;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\OctaveStyleDSP.cpp</summary><pre><code>void OctaveStyleDSP::GranularShifter::process (const float* input,
-                                                float* output,
-                                                int numSamples)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\OctaveStyleDSP.cpp</summary><pre><code>// Source/DSP/OctaveStyleDSP.cpp  -  OctaveStyleDSP::process (complete)
+void OctaveStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
-    const float ratio = pitchRatio;
-    const float invGrain = 1.0f / (float) grainSize;
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
 
-    for (int i = 0; i &lt; numSamples; ++i)
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    // Floor of 2 channels: the mono-input lockstep path below parks the ch-1
+    // doublers' output in the scratch buffers' spare channel.
+    auto ensureSize = [n, numCh] (juce::AudioBuffer&lt;float&gt;&amp; b)
     {
-        ring[(size_t) writePos] = input[i];
-        writePos = (writePos + 1) % kBufferSize;
+        if (b.getNumChannels() &lt; numCh || b.getNumSamples() &lt; n)
+            b.setSize (juce::jmax (2, numCh), n, false, false, true);
+    };
+    ensureSize (mFilteredBuf);
+    for (auto&amp; b : mShiftedBuf) ensureSize (b);
+    for (auto&amp; b : mDoublerScratch) ensureSize (b);
+    if (mMonoScratch.getNumSamples() &lt; n) mMonoScratch.setSize (1, n, false, false, true);
 
-        // [ELIDED: adjust(readPos1/readPos2) — jump a head back by grainSize when
-        //  it gets within one grain of the write head, forward when it falls more
-        //  than (kBufferSize - grainSize) behind; keeps rp bounded in the ring.]
+    // 1. Copy input into the Range-filtered scratch (used as the source for
+    //    the pitch-shift paths; the dry signal stays in `buffer` until the
+    //    final sum below).
+    for (int ch = 0; ch &lt; numCh; ++ch)
+        mFilteredBuf.copyFrom (ch, 0, buffer, ch, 0, n);
+    {
+        juce::dsp::AudioBlock&lt;float&gt; blk (mFilteredBuf);
+        auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mRangeLpf.process (ctx);
+    }
 
-        const float s1 = interp (readPos1);
-        const float s2 = interp (readPos2);
+    // 2. Generate the three pitch-shifted streams.
+    if (mMode == Mode::Polyphonic)
+    {
+        // Mono mix of the Range-filtered input (fundamental dominates) -&gt; both
+        // trackers + the mark detector, one pass.
+        {
+            float* mono = mMonoScratch.getWritePointer (0);
+            const float* lp = mFilteredBuf.getReadPointer (0);
+            const float* rp = (numCh &gt; 1) ? mFilteredBuf.getReadPointer (1) : lp;
+            for (int i = 0; i &lt; n; ++i) mono[i] = 0.5f * (lp[i] + rp[i]);
+        }
+        const float* mono = mMonoScratch.getReadPointer (0);
+        mYin .pushAudio (mono, n);
+        mPoly.pushAudio (mono, n);   // #12: real poly detection feeds the granular grain sizing
 
-        // [ELIDED: windowPhase(rp) = fmod(writePos - rp, grainSize) / grainSize]
+        // YIN drives the doubler (a mono, single-note engine) -- eligibility +
+        // the fractional tracked period.
+        const float hz   = mYin.getFrequencyHz();
+        const float conf = mYin.getConfidence();
+        bool doublerEligible = false;
+        if (hz &gt;= PitchTrackerYIN::kMinFreqHz)
+        {
+            const double P = mSampleRate / (double) hz;
+            if (P &gt;= PeriodDoubler::kMinPeriod &amp;&amp; P &lt;= PeriodDoubler::kMaxPeriod)
+            {
+                mTrackedPeriod = P;
+                for (auto&amp; chArr : mDoublers) for (auto&amp; d : chArr) d.setTrackedPeriod (P);
+                doublerEligible = true;
+            }
+        }
 
-        const float w1 = hann (windowPhase (readPos1));
-        const float w2 = hann (windowPhase (readPos2));
+        // Granular grain size -&gt; period-aligned OLA (kills warble).  #12: on a
+        // chord the mono YIN reading is garbage, so size the grain to the
+        // LOWEST detected poly note instead of the flailing mono period; a
+        // confident single note stays on YIN (mono behavior preserved).
+        double grainP = 0.0;
+        if (hz &gt;= PitchTrackerYIN::kMinFreqHz &amp;&amp; conf &gt; kConfEngage)
+        {
+            grainP = mSampleRate / (double) hz;                 // confident mono -&gt; YIN
+        }
+        else
+        {
+            const auto notes = mPoly.getNotes();
+            if (notes.count &gt; 0)
+            {
+                float lowest = notes.freqs[0];
+                for (int k = 1; k &lt; notes.count; ++k)
+                    if (notes.freqs[k] &gt; 0.0f) lowest = juce::jmin (lowest, notes.freqs[k]);
+                if (lowest &gt; 0.0f) grainP = mSampleRate / (double) lowest;   // chord -&gt; lowest note
+            }
+            if (grainP &lt;= 0.0 &amp;&amp; hz &gt;= PitchTrackerYIN::kMinFreqHz)
+                grainP = mSampleRate / (double) hz;             // low-conf mono still beats nothing
+        }
+        if (grainP &gt; 0.0)
+        {
+            const int Pi    = juce::jmax (1, (int) std::lround (grainP));
+            const int nPer  = juce::jmax (1, (int) std::lround (1024.0 / grainP));   // ~1024-sample target
+            const int grain = juce::jlimit (256, GranularShifter::kBufferSize / 2, nPer * Pi);
+            for (auto&amp; chArr : mShifters) for (auto&amp; s : chArr) s.setGrainSize (grain);
+        }
 
-        // #35 final form (smoke #55): plain overlap-add.  Unity now comes from
-        // the STRUCTURE -- setGrainSize re-anchors the pair to an exact
-        // half-grain offset (Hann halves sum to 1.0 at every phase) and head
-        // jumps preserve phase mod grain.
-        output[i] = s1 * w1 + s2 * w2;
+        // Engine handoff (QA-OctavePedal): doubler vs granular is SWITCHED with
+        // a short fade, never summed as a standing blend -- two desynced
+        // octave-down engines at half gain comb.  Hysteresis stops the switch
+        // flapping around a single confidence threshold.
+        if (mDoublerOn) { if (! doublerEligible || conf &lt; kConfRelease) mDoublerOn = false; }
+        else            { if (  doublerEligible &amp;&amp; conf &gt; kConfEngage)  mDoublerOn = true;  }
+        const float mixTarget = mDoublerOn ? 1.0f : 0.0f;
+        const float prevMix   = mDoublerMix;
+        mDoublerMix += (mixTarget - mDoublerMix) * kConfSmooth;   // per-block one-pole
+        if (std::abs (mDoublerMix - mixTarget) &lt; 1.0e-3f) mDoublerMix = mixTarget;
 
-        readPos1 += (double) ratio;
-        if (readPos1 &gt;= (double) kBufferSize) readPos1 -= (double) kBufferSize;
-        readPos2 += (double) ratio;
-        if (readPos2 &gt;= (double) kBufferSize) readPos2 -= (double) kBufferSize;
+        // Pitch-mark detection, shared across channels: Schmitt rising crossings
+        // on the mono Range-filtered input, sub-sample refined at the threshold
+        // crossing, validated against the YIN period (&gt;= half a period since the
+        // last mark rejects harmonic chatter).  Brief Schmitt dropouts are
+        // bridged by synthesizing marks on the tracked-period grid so the
+        // doublers never starve mid-note.
+        {
+            const double P = mTrackedPeriod;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float m     = mono[i];
+                const bool  wasHi = mMarkSchmittHi;
+                if      (m &gt; kSchmittHi) mMarkSchmittHi = true;
+                else if (m &lt; kSchmittLo) mMarkSchmittHi = false;
+                if (mMarkSchmittHi &amp;&amp; ! wasHi)
+                {
+                    const float denom = m - mMarkPrevMono;
+                    const double frac = (denom &gt; 1.0e-9f)
+                        ? juce::jlimit (0.0, 1.0, (double) ((kSchmittHi - mMarkPrevMono) / denom))
+                        : 0.0;
+                    const double c = mMarkClockAbs + (double) (i - 1) + frac;
+                    if (c - mLastMarkAbs &gt;= 0.5 * P)
+                    {
+                        for (auto&amp; chArr : mDoublers) for (auto&amp; d : chArr) d.pushMark (c);
+                        mLastMarkAbs = c;
+                    }
+                }
+                mMarkPrevMono = m;
+            }
+            mMarkClockAbs += (double) n;
+            if (doublerEligible &amp;&amp; mLastMarkAbs &gt;= 0.0)
+            {
+                const double gap = mMarkClockAbs - mLastMarkAbs;
+                if (gap &gt; 6.0 * P)
+                {
+                    // Long dropout: re-sync instead of backfilling the whole gap.
+                    mLastMarkAbs = mMarkClockAbs - 2.0 * P;
+                    for (auto&amp; chArr : mDoublers) for (auto&amp; d : chArr) d.pushMark (mLastMarkAbs);
+                }
+                else while (mMarkClockAbs - mLastMarkAbs &gt; 2.0 * P)
+                {
+                    mLastMarkAbs += P;
+                    for (auto&amp; chArr : mDoublers) for (auto&amp; d : chArr) d.pushMark (mLastMarkAbs);
+                }
+            }
+        }
+
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            const int chIdx = juce::jmin (ch, 1);
+            const float* src = mFilteredBuf.getReadPointer (ch);
+
+            // +1 oct: period-synced granular shifter.
+            mShifters[(size_t) chIdx][kPlusOne].process (
+                src, mShiftedBuf[kPlusOne].getWritePointer (ch), n);
+
+            // -1 / -2 oct: both engines always run (rings + clocks stay warm for
+            // instant switch-back); only the OUTPUT mix is switched.
+            mShifters[(size_t) chIdx][kMinusOne].process (
+                src, mShiftedBuf[kMinusOne].getWritePointer (ch), n);
+            mShifters[(size_t) chIdx][kMinusTwo].process (
+                src, mShiftedBuf[kMinusTwo].getWritePointer (ch), n);
+            mDoublers[(size_t) chIdx][kDdMinusOne].process (
+                src, mDoublerScratch[0].getWritePointer (ch), n);
+            mDoublers[(size_t) chIdx][kDdMinusTwo].process (
+                src, mDoublerScratch[1].getWritePointer (ch), n);
+
+            if (prevMix &lt; 1.0f || mDoublerMix &lt; 1.0f)
+            {
+                mShiftedBuf[kMinusOne].applyGainRamp (ch, 0, n, 1.0f - prevMix, 1.0f - mDoublerMix);
+                mShiftedBuf[kMinusTwo].applyGainRamp (ch, 0, n, 1.0f - prevMix, 1.0f - mDoublerMix);
+            }
+            else
+            {
+                mShiftedBuf[kMinusOne].clear (ch, 0, n);
+                mShiftedBuf[kMinusTwo].clear (ch, 0, n);
+            }
+            if (prevMix &gt; 0.0f || mDoublerMix &gt; 0.0f)
+            {
+                mDoublerScratch[0].applyGainRamp (ch, 0, n, prevMix, mDoublerMix);
+                mDoublerScratch[1].applyGainRamp (ch, 0, n, prevMix, mDoublerMix);
+                mShiftedBuf[kMinusOne].addFrom (ch, 0, mDoublerScratch[0], ch, 0, n);
+                mShiftedBuf[kMinusTwo].addFrom (ch, 0, mDoublerScratch[1], ch, 0, n);
+            }
+        }
+
+        if (numCh == 1)
+        {
+            // Mono blocks would stall the ch-1 doublers' write clocks and desync
+            // every future mark compare against the shared mark clock -- keep
+            // them in lockstep by feeding them the same mono input (outputs land
+            // in the scratch buffers' spare channel and are discarded).
+            const float* src = mFilteredBuf.getReadPointer (0);
+            mDoublers[1][kDdMinusOne].process (src, mDoublerScratch[0].getWritePointer (1), n);
+            mDoublers[1][kDdMinusTwo].process (src, mDoublerScratch[1].getWritePointer (1), n);
+        }
+    }
+    else // Vintage
+    {
+        for (int i = 0; i &lt; n; ++i)
+        {
+            // Mono mix for Vintage trigger paths.
+            const float l = mFilteredBuf.getReadPointer (0)[i];
+            const float r = (numCh &gt; 1) ? mFilteredBuf.getReadPointer (1)[i] : l;
+            const float mono = 0.5f * (l + r);
+
+            // Schmitt trigger zero-crossing detection.
+            bool prevHi = mSchmittHi;
+            if (mono &gt; kSchmittHi) mSchmittHi = true;
+            else if (mono &lt; kSchmittLo) mSchmittHi = false;
+
+            const bool zeroCross = (mSchmittHi != prevHi);
+            if (zeroCross)
+            {
+                if (++mDivBy2Counter &gt;= 2) { mDivBy2Counter = 0; mDivBy2OutSign = -mDivBy2OutSign; }
+                if (++mDivBy4Counter &gt;= 4) { mDivBy4Counter = 0; mDivBy4OutSign = -mDivBy4OutSign; }
+            }
+
+            // Track input envelope for amplitude scaling on the divider
+            // outputs.  Simple peak follower at one-pole release.
+            const float env = std::abs (mono);
+
+            // -1 oct = square wave at half input frequency.
+            const float minus1 = mDivBy2OutSign * env;
+            // -2 oct = square wave at quarter input frequency.
+            const float minus2 = mDivBy4OutSign * env;
+            // +1 oct = full-wave rectifier (Octavia trick).  Subtract DC
+            // pedestal so the rectified stream sits zero-mean before the
+            // separate output DC blocker (which catches the rest).
+            const float plus1raw = std::abs (mono) - 0.5f * env;
+
+            for (int ch = 0; ch &lt; numCh; ++ch)
+            {
+                mShiftedBuf[kPlusOne ].getWritePointer (ch)[i] = plus1raw;
+                mShiftedBuf[kMinusOne].getWritePointer (ch)[i] = minus1;
+                mShiftedBuf[kMinusTwo].getWritePointer (ch)[i] = minus2;
+            }
+        }
+
+        // DC-block the +1 oct rectifier per channel before mix-in.
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = mShiftedBuf[kPlusOne].getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mFwrDcXL : mFwrDcXR;
+            float&amp; yPrev = (ch == 0) ? mFwrDcYL : mFwrDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+
+    // 2b. C3 voicing (Polyphonic only -- Vintage keeps its own raw character):
+    //     transient-duck the shifted streams (the dry attack leads, the shifted
+    //     voices fade in behind it) + a gentle low-pass to mask pitch-shift smear.
+    //     The detector runs on the still-dry `buffer`.
+    if (mMode == Mode::Polyphonic)
+    for (int i = 0; i &lt; n; ++i)
+    {
+        float mono = 0.0f;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            mono += buffer.getSample (ch, i);
+        mono = std::abs (mono / (float) numCh);
+
+        mFastEnv += (mono - mFastEnv) * ((mono &gt; mFastEnv) ? mFastAtkCoef : mFastRelCoef);
+        mSlowEnv += (mono - mSlowEnv) * mSlowCoef;
+        if (mFastEnv &gt; mSlowEnv * kTransRatio + kTransFloor)
+            mDuck = kDuckDepth;                              // duck on the attack
+        mDuck += (1.0f - mDuck) * mDuckRecoverCoef;          // recover toward 1
+
+        for (int v = 0; v &lt; 3; ++v)
+            for (int ch = 0; ch &lt; numCh; ++ch)
+            {
+                float* d  = mShiftedBuf[v].getWritePointer (ch);
+                float&amp; lp = mVoiceLpState[v][juce::jmin (ch, 1)];   // state array is 2-wide; extra channels share ch1
+                lp += (d[i] - lp) * mVoiceLpCoef;            // gentle 1-pole LP
+                d[i] = lp * mDuck;                           // + transient duck
+            }
+    }
+
+    // 3. Sum: out = direct*level + sum(shifted * level).  Scale dry by
+    // mDirectLevel so 0 = effect-only, 1 = full dry plus shifted.
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        float* dry = buffer.getWritePointer (ch);
+        const float* p1 = mShiftedBuf[kPlusOne ].getReadPointer (ch);
+        const float* m1 = mShiftedBuf[kMinusOne].getReadPointer (ch);
+        const float* m2 = mShiftedBuf[kMinusTwo].getReadPointer (ch);
+        for (int i = 0; i &lt; n; ++i)
+            dry[i] = dry[i] * mDirectLevel
+                   + p1[i] * mOct1Up
+                   + m1[i] * mOct1Down
+                   + m2[i] * mOct2Down;
+    }
+
+    // 4. 5 Hz DC blocker on the final sum.
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
     }
 }</code></pre></details>
 <pre class="formulas">- Range knob: first-order LPF, log sweep 300 Hz -&gt; 3 kHz: `hz = 300 * (3000/300)^range01` (feeds the shift paths only; dry stays unfiltered).

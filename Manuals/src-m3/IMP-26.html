@@ -19,7 +19,8 @@
         }
         mClipLevel.store (blockPeak, std::memory_order_relaxed);
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\FurmanEQStyleDSP.cpp</summary><pre><code>void FurmanEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\FurmanEQStyleDSP.cpp</summary><pre><code>// Source/DSP/FurmanEQStyleDSP.cpp  -  FurmanEQStyleDSP::process (complete)
+void FurmanEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;

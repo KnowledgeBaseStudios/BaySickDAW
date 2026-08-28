@@ -25,7 +25,21 @@ inline float waveSample (double phase01, const WaveMix&amp; mix)
             mEnvelope = coef * mEnvelope + (1.0f - coef) * absX;
             float s = waveSample (mPhase, mix);
             s *= mEnvelope;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\SynthStyleDSP.cpp (SynthStyleDSP::process, line 266: mono-mix build lines 279-289, mono branch lines 333-365)</summary><pre><code>    // 1. Build mono mix for YIN.
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\SynthStyleDSP.cpp (SynthStyleDSP::process, line 266: mono-mix build lines 279-289, mono branch lines 333-365)</summary><pre><code>// Source/DSP/SynthStyleDSP.cpp  -  SynthStyleDSP::process (complete)
+void SynthStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    if (mMonoIn  .getNumSamples() &lt; n) mMonoIn  .setSize (1,    n, false, false, true);
+    if (mSynthBuf.getNumSamples() &lt; n
+     || mSynthBuf.getNumChannels() &lt; numCh) mSynthBuf.setSize (numCh, n, false, false, true);
+
+    // 1. Build mono mix for YIN.
     {
         float* mono = mMonoIn.getWritePointer (0);
         const float* l = buffer.getReadPointer (0);
@@ -36,8 +50,49 @@ inline float waveSample (double phase01, const WaveMix&amp; mix)
     // 2-3. QA-EffectsReview Task 4: mono (YIN, 1 voice) vs poly (FFT tracker + voice pool).
     const auto&amp;  profile = kProfiles[(int) mType];
     const WaveMix mix    = variationMix (mType, mVariation);
+    float* synthL = mSynthBuf.getWritePointer (0);
+    float* synthR = (numCh &gt; 1) ? mSynthBuf.getWritePointer (1) : synthL;
+    const float* monoIn = mMonoIn.getReadPointer (0);
 
-// SynthStyleDSP::process, mono branch (lines 333-365): YIN drives the oscillator
+    if (mPolyMode)
+    {
+        mPoly.pushAudio (monoIn, n);
+        allocateVoices (mPoly.getNotes());
+
+        for (int i = 0; i &lt; n; ++i)
+        {
+            const float absX  = std::abs (monoIn[i]);
+            const float ecoef = (absX &gt; mEnvelope) ? mEnvCoefAtt : mEnvCoefRel;
+            mEnvelope = ecoef * mEnvelope + (1.0f - ecoef) * absX;
+
+            mLfoPhase += mLfoPhaseInc;
+            if (mLfoPhase &gt;= 1.0) mLfoPhase -= 1.0;
+
+            float s = 0.0f;
+            for (auto&amp; v : mVoices)
+            {
+                if (v.env &lt; 1.0e-4f &amp;&amp; ! v.gate) continue;
+                const float target = v.gate ? 1.0f : 0.0f;
+                const float vcoef  = v.gate ? mEnvCoefAtt : mEnvCoefRel;
+                v.env = vcoef * v.env + (1.0f - vcoef) * target;
+                s += waveSample (v.phase, mix) * v.env;
+                v.phase += v.phaseInc;
+                if (v.phase &gt;= 1.0) v.phase -= 1.0;
+            }
+            s *= 0.4f * mEnvelope;   // poly headroom + input-dynamics scaling
+
+            if (profile.lfoModulatesAmp)
+            {
+                const float lfo01 = 0.5f * (1.0f + std::sin ((float) mLfoPhase
+                                                              * juce::MathConstants&lt;float&gt;::twoPi));
+                s *= (1.0f - mDepth + mDepth * lfo01);
+            }
+            synthL[i] = s;
+            if (numCh &gt; 1) synthR[i] = s;
+        }
+    }
+    else
+    {
         mYin.pushAudio (monoIn, n);
         const float trackedHz  = mYin.getFrequencyHz();
         const float confidence = mYin.getConfidence();
@@ -70,7 +125,57 @@ inline float waveSample (double phase01, const WaveMix&amp; mix)
             }
             synthL[i] = s;
             if (numCh &gt; 1) synthR[i] = s;
-        }</code></pre></details>
+        }
+    }
+
+    // 4. Filter sweep.  LFO modulation is applied at block boundary (not
+    // per-sample) for cost; sounds fine for the 0.1-10 Hz range.
+    if (! profile.lfoModulatesAmp)
+    {
+        const float lfoMod = std::sin ((float) mLfoPhase
+                                          * juce::MathConstants&lt;float&gt;::twoPi);
+        updateToneCutoff (lfoMod);
+    }
+    else
+    {
+        updateToneCutoff (0.0f);
+    }
+
+    {
+        juce::dsp::AudioBlock&lt;float&gt; blk (mSynthBuf);
+        auto sub = blk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (sub);
+        mLpf.process (ctx);
+    }
+
+    // 5. Mix: out = direct * dry + effectLevel * synthVoice.
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        float* out = buffer.getWritePointer (ch);
+        const float* synth = mSynthBuf.getReadPointer (ch);
+        for (int i = 0; i &lt; n; ++i)
+            out[i] = out[i] * mDirectLevel + synth[i] * mEffectLevel;
+    }
+
+    // 6. 5 Hz DC blocker.
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+}</code></pre></details>
 <pre class="formulas">- Pitch-to-synth: mono mode tracks YIN (accepts frequency at confidence &gt; 0.2, else holds last pitch and lets the envelope decay); poly mode uses the FFT PolyPitchTracker feeding a voice pool (Guitar: 70-1300 Hz full poly; Bass: 35-400 Hz, max 2 notes).
 - Oscillator: `out = sine*sin(2*pi*p) + saw*(2p - 1) + sqr*(p &lt; 0.5 ? +1 : -1)` with per-Type/Variation crossfade weights (table above); Variation 1..11 maps to `v = (variation-1)/10`.
 - Type octave shift: `freq * 2^(octaveShift/12)` — Bass -12 semitones, Bell +12.

@@ -24,7 +24,8 @@
         target = best;
         targetCents = (midiF - (float) target) * 100.0f;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\TunerStyleDSP.cpp</summary><pre><code>bool TunerStyleDSP::getReading (Reading&amp; out) const noexcept
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\TunerStyleDSP.cpp</summary><pre><code>// Source/DSP/TunerStyleDSP.cpp  -  TunerStyleDSP::getReading (complete)
+bool TunerStyleDSP::getReading (Reading&amp; out) const noexcept
 {
     const float hz = mYin.getFrequencyHz();
     if (hz &lt; PitchTrackerYIN::kMinFreqHz || hz &gt; PitchTrackerYIN::kMaxFreqHz) return false;

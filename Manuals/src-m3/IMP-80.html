@@ -45,7 +45,43 @@ project.</p>
         {
             mProcessor-&gt;mInstIdleBlocks[(size_t) mIndex] = 0;   // wake
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Engine\Tasks\InstStripTask.cpp (InstStripTask::run, line 37; idle-suspend gate, lines 198-266)</summary><pre><code>// InstStripTask.cpp -- InstStripTask::run() (head, lines 37-45; idle gate, lines 198-266)
+<details class="fullfn"><summary>Full function &mdash; Source\Engine\Tasks\InstStripTask.cpp (InstStripTask::run, line 37; idle-suspend gate, lines 198-266)</summary><pre><code>// Source/Engine/Tasks/InstStripTask.cpp
+#include "InstStripTask.h"
+#include "../FrozenSourceRead.h"   // TS7 6.8: scope-matched frozen block read
+#include "../ChannelBufferArena.h"   // kChannelsPerStrip (scratch pre-size)
+#include "../../BaySickGraph.h"
+#include "../../PluginProcessor.h"
+#include "../../DSP/EngineSidechainHelper.h"
+#include "../../BaySickGuitars/BaySickGuitarsProcessor.h"   // getNumActiveVoices
+#include "../../BaySickBasses/BaySickBassesProcessor.h"     // getNumActiveVoices
+#include "../SidechainPullHelper.h"   // pullSidechainPredecessorsToGraph
+
+InstStripTask::InstStripTask (juce::AudioProcessor* engine,
+                              int                   index,
+                              int                   channelIdIn,
+                              BaySickGraph&amp;            graph,
+                              BaySickDAWProcessor&amp;   processor)
+    : mEngine (engine),
+      mScEngine (dynamic_cast&lt;ISidechainEngine*&gt; (engine)),
+      mIndex (index),
+      mGraph (&amp;graph),
+      mProcessor (&amp;processor),
+      mPrefix ("mixer_inst_" + juce::String (index))
+{
+    this-&gt;channelId = channelIdIn;
+
+    // Scratch buffers are grown to a whole arena-sized block HERE, on the
+    // message thread.  run() executes on pool workers, and its per-block setSize
+    // calls only skip the allocator while allocatedBytes already covers the
+    // request (juce::AudioBuffer::setSize, avoidReallocating branch) -- from a
+    // 0x0 buffer the first block that serves a recorded take, a freeze file or a
+    // Dry monitor flip would malloc on the render path instead.
+    const int maxBlock = juce::jmax (1, processor.mBlockSize);
+    mClipScratch   .setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
+    mEngineScratch .setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
+    mMonitorDryBuf .setSize (ChannelBufferArena::kChannelsPerStrip, maxBlock, false, true, false);
+}
+
 void InstStripTask::run()
 {
     if (mEngine == nullptr || mOutputBuffer == nullptr || mCtx == nullptr
@@ -55,7 +91,158 @@ void InstStripTask::run()
     const int n = mCtx-&gt;numSamples;
     if (n &lt;= 0)
         return;
-    ...
+
+    // Build per-block view.
+    float* const* ptrs = mOutputBuffer-&gt;getArrayOfWritePointers();
+    juce::AudioBuffer&lt;float&gt; blockView (ptrs, mOutputBuffer-&gt;getNumChannels(), n);
+    blockView.clear();
+
+    // ── Source-mode detection ────────────────────────────────────────────────
+    const bool guitarsActive = mProcessor-&gt;mGuitarsActive[(size_t) mIndex]
+                                          .load (std::memory_order_acquire);
+    const bool bassesActive  = mProcessor-&gt;mBassesActive [(size_t) mIndex]
+                                          .load (std::memory_order_acquire);
+    const bool sfizzActive   = guitarsActive || bassesActive;
+
+    // ── APVTS strip params ────────────────────────────────────────────────────
+    // QA-Fb: hoisted above the FilePlay branch -- active now selects between
+    // pure playback and the capture/monitor path below.  sfizz-active slots
+    // ignore arm / listen - sfizz is the source, no live input.
+    // run() is on a pool worker (and on the audio callback itself via the
+    // main-as-worker pump), so building each id with juce::String every block is
+    // a heap allocation per param per strip.  Resolve once, then read through
+    // the cached pointers; an unresolved strip simply retries next block.
+    auto&amp; apvts = mProcessor-&gt;apvts;
+    if (mArmP    == nullptr) mArmP    = apvts.getRawParameterValue (mPrefix + "_arm");
+    if (mIdxP    == nullptr) mIdxP    = apvts.getRawParameterValue (mPrefix + "_inputChannelIdx");
+    if (mStereoP == nullptr) mStereoP = apvts.getRawParameterValue (mPrefix + "_inputChannelStereo");
+    if (mListenP == nullptr) mListenP = apvts.getRawParameterValue (mPrefix + "_listen");
+    // QA-OctavePedal Task 5: live-monitor mode (0 = Dry raw input, 1 = With
+    // Effect processed; default 1 = With Effect per Jeff 2026-07-18).  A
+    // monitor-only fork applied around the engine render below.
+    if (mMonModeP == nullptr) mMonModeP = apvts.getRawParameterValue (mPrefix + "_monitorMode");
+
+    const auto* armP        = mArmP;
+    const auto* idxP        = mIdxP;
+    const auto* stereoP     = mStereoP;
+    const auto* listenP     = mListenP;
+    const auto* monModeP    = mMonModeP;
+    const int   monitorMode = (monModeP != nullptr) ? (int) monModeP-&gt;load() : 1;
+
+    const int  chIdx    = (idxP != nullptr) ? (int) idxP-&gt;load() : -1;
+    const bool isStereo = (stereoP != nullptr) &amp;&amp; stereoP-&gt;load() &gt; 0.5f;
+
+    const auto* snapshot = mCtx-&gt;liveInputSnapshot;
+    const int   snapChs  = (snapshot != nullptr) ? snapshot-&gt;getNumChannels() : 0;
+
+    const bool channelOK = (chIdx &gt;= 0 &amp;&amp; chIdx &lt; snapChs);
+    const bool armed     = ! sfizzActive
+                        &amp;&amp; (armP    != nullptr) &amp;&amp; armP   -&gt;load() &gt; 0.5f &amp;&amp; channelOK;
+    const bool listen    = ! sfizzActive
+                        &amp;&amp; (listenP != nullptr) &amp;&amp; listenP-&gt;load() &gt; 0.5f;
+    // QA-E Task 5 (2026-05-15): live input flows through the chain whenever
+    // either arm OR listen is engaged (with a channel selected).  Prior
+    // behavior gated on armed-only, making "monitor without recording"
+    // impossible.
+    const bool active    = channelOK &amp;&amp; (armed || listen);
+
+    // 2026-05-06 (Batch 9b Item 9): FilePlay -- audio clips routed to this
+    // Inst engine.  Gates mirror the pre-scan in BaySickDAWProcessor::
+    // processBlock; mCurrentBlockClipSnapshot is block-stable via the
+    // RetirementQueue ack protocol (Batch 9c B1).
+    const bool filePlay = mIndex &gt;= 0
+        &amp;&amp; mIndex &lt; (int) mProcessor-&gt;mInstFilePlayActive.size()
+        &amp;&amp; mProcessor-&gt;mInstFilePlayActive[(size_t) mIndex]
+        &amp;&amp; mCtx-&gt;posInfo != nullptr
+        &amp;&amp; mCtx-&gt;posInfo-&gt;getIsPlaying()
+        &amp;&amp; mProcessor-&gt;mPatternManager != nullptr
+        &amp;&amp; mProcessor-&gt;mSongMode.load (std::memory_order_relaxed);
+
+    // Shared FilePlay decode: sums every routed clip into mEngineScratch.
+    // QA-MultiBlockHazard (Task 2): one decode sum per block so a stateful
+    // engine + rack advance once per block, not once per FilePlay clip.
+    BaySickDAWProcessor::AudioClipBlockContext clipCtx;
+    bool anyClip = false;
+    auto decodeRoutedClips = [&amp;]()
+    {
+        const double bpm        = mCtx-&gt;bpm;
+        const double secPerBeat = 60.0 / juce::jmax (20.0, bpm);
+        const double beatStart  = mCtx-&gt;posInfo-&gt;getPpqPosition().orFallback (0.0);
+        // G1 smoke round 9 FIX: exact integer transport clock - the beat
+        // round-trip truncation wobbled projectStart by +-1 sample (see
+        // CompositeAudioInsertTask; same seam on Inst FilePlay).
+        const juce::int64 projectStart = mCtx-&gt;posInfo-&gt;getTimeInSamples().orFallback (
+            (juce::int64) (beatStart * secPerBeat * mProcessor-&gt;mSampleRate));
+
+        const auto&amp; mx = mProcessor-&gt;mPatternManager-&gt;getMixer();
+        clipCtx.bpm          = bpm;
+        clipCtx.anySolo      = mCtx-&gt;anySolo;
+        clipCtx.secPerBeat   = secPerBeat;
+        clipCtx.projectStart = projectStart;
+        clipCtx.projectEnd   = projectStart + n;
+        clipCtx.numSamples   = n;
+        clipCtx.numOut       = blockView.getNumChannels();
+        clipCtx.mxState      = &amp;mx;
+        // QA-E Task 3 follow-up (2026-05-12): per-task clip scratch -- see
+        // VoxStripTask.cpp for the cross-pollution rationale + the
+        // size-before-read requirement.
+        mClipScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+        clipCtx.clipScratch  = &amp;mClipScratch;
+
+        mEngineScratch.setSize (blockView.getNumChannels(), n, false, false, true);
+        mEngineScratch.clear();
+        for (auto&amp; player : mProcessor-&gt;mCurrentBlockClipSnapshot-&gt;players)
+        {
+            if (player.routeChannel != channelId) continue;
+            if (mProcessor-&gt;decodeFilePlayClip (player, clipCtx, mEngineScratch))
+                anyClip = true;
+        }
+    };
+
+    // ── TS7 §6.9: frozen playback (Jeff, 2026-07-30) ─────────────────────────
+    // Tested before the route split for the same reason as Vox: the playback
+    // route only fires when a clip overlaps THIS block, so substituting inside
+    // it would leave the chain (pedals + NAM/IR, the expensive stage) running
+    // over silence on every other block and give back almost nothing.
+    //
+    // GATED ON !active -- Jeff's (a): freeze STANDS ASIDE the moment the strip
+    // is armed or monitoring.  It has to.  Unlike Vox, this task merges the
+    // recorded takes into the live buffer BEFORE the engine ("QA-Fb Option A",
+    // locked 2026-07-10, so live and prior takes get one identical chain pass),
+    // and frozen audio already carries that chain -- joining it there would
+    // process it twice.  Standing aside costs nothing: the strip simply plays
+    // live exactly as it does today, which is freeze's existing fall-back
+    // behaviour rather than a special case invented here.
+    // §6.8 scope-matched (song render, or this pattern's own render at a
+    // loop-local position).  Still gated on `! active` for the reason above.
+    if (! active &amp;&amp; FreezeRead::serveBlock (*this, *mCtx, blockView, n))
+    {
+        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+        mGraph-&gt;processInsert (BaySickGraph::InsertKind::Inst, mIndex,
+                               blockView, mCtx-&gt;bpm, mCtx-&gt;anySolo);
+        return;
+    }
+
+    if (filePlay &amp;&amp; ! active)
+    {
+        // Pure playback (nobody listening to live input): drive the engine +
+        // insert chain ONCE on the decoded sum (finalizeFilePlayStrip -&gt;
+        // blockView).  QA-Fb #5 fold-in: the gate is !active so a LIVE strip
+        // -- armed OR listen -- takes the pre-engine merge path below instead
+        // of losing its live input to this branch.  sfizz strips always land
+        // here when clips overlap (arm/listen forced off above).
+        pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+
+        decodeRoutedClips();
+
+        juce::MidiBuffer  emptyMidi;
+        juce::MidiBuffer&amp; engineMidi = (mCtx-&gt;instPageMidi != nullptr)
+            ? mCtx-&gt;instPageMidi[mIndex] : emptyMidi;
+        if (anyClip)
+            mProcessor-&gt;finalizeFilePlayStrip (channelId, clipCtx, engineMidi, &amp;blockView, mEngineScratch);
+        return;
+    }
+
     // ── Idle suspend (sfizz-source only) ─────────────────────────────────────
     // When the tab has no MIDI activity AND sfizz reports 0 active voices,
     // stop rendering the whole chain.  Wakes on the next block where any gate
@@ -95,7 +282,7 @@ void InstStripTask::run()
                 auditionPending = b-&gt;isAuditionPending();
 
         // QA-G3Smoke Task 12: SlideSampler voices (gesture + ring-out tails)
-        // don&#x27;t count in sfizz&#x27;s active-voice total -- without this term the
+        // don't count in sfizz's active-voice total -- without this term the
         // chain suspends mid-slide and the tail freezes.
         bool slideActive = false;
         if (auto* g = mProcessor-&gt;getBaySickGuitars (mIndex))
@@ -124,7 +311,144 @@ void InstStripTask::run()
             mOutputBuffer-&gt;clear();   // faded out already - suspended this block
             return;
         }
-    }</code></pre></details>
+    }
+
+    if (active)
+    {
+        // 2026-05-06 (Batch 9b Item 8): dry-recorder tap (RAW pre-chain mono)
+        // - captured here so the recorded file is the unprocessed DI; chain
+        // runs ONCE on the dry source.  Only fire when ARMED (monitor-only
+        // mode produces no recording).  tapDryRecorder gates its own read of
+        // mStripRecorders on the mStripTapsLive flag the message thread lowers
+        // before mutating that vector.
+        if (armed)
+            mProcessor-&gt;tapDryRecorder (channelId,
+                                         snapshot-&gt;getReadPointer (chIdx),
+                                         n);
+
+        const int rightCh = (isStereo &amp;&amp; chIdx + 1 &lt; snapChs) ? (chIdx + 1) : chIdx;
+        if (blockView.getNumChannels() &gt; 0)
+            blockView.copyFrom (0, 0, *snapshot, chIdx,   0, n);
+        if (blockView.getNumChannels() &gt; 1)
+            blockView.copyFrom (1, 0, *snapshot, rightCh, 0, n);
+    }
+
+    // ── QA-Fb Option A (locked 2026-07-10): live strip over FilePlay clips ───
+    // Prior takes sum with the live DI BEFORE the engine, so the pedals/amp
+    // chain processes the stack in one pass -- bit-identical to how post-stop
+    // playback runs the summed decode through the same chain.  The DRY tap
+    // above reads the raw input snapshot directly, so capture never sees the
+    // merge.  armed &amp;&amp; !listen: live is captured but cleared from the monitor
+    // before the takes join.
+    if (filePlay)
+    {
+        decodeRoutedClips();
+        if (armed &amp;&amp; ! listen)
+            blockView.clear();
+        if (anyClip)
+        {
+            const int nc = juce::jmin (blockView.getNumChannels(),
+                                       mEngineScratch.getNumChannels());
+            for (int c = 0; c &lt; nc; ++c)
+                blockView.addFrom (c, 0, mEngineScratch, c, 0, n);
+        }
+    }
+
+    // ── Sidechain fill + push ─────────────────────────────────────────────────
+    // QA-Fe2 SC delay-match: fill + delay-match the strip's SC receive
+    // buffers FIRST (pre-compensation source taps via the pull helper), then
+    // hand those SAME aligned buffers to the engine -- engine-level SC and
+    // rack/preEq/postEq SC read identical keys.  (Pre-QA-Fe2 the engine got
+    // raw post-compensation predecessor outputs and the pull ran after the
+    // engine render.)
+    pullSidechainPredecessorsToGraph (*mGraph, channelId, mPredecessors, n);
+    if (mScEngine != nullptr)
+    {
+        const BaySickGraph::ScRecvArray scArr = mGraph-&gt;getScRecvArray (channelId);
+        juce::AudioBuffer&lt;float&gt;* scBufs[BaySickGraph::kMaxScRecvSlots] = {};
+        for (int i = 0; i &lt; BaySickGraph::kMaxScRecvSlots; ++i)
+            scBufs[i] = scArr[(size_t) i];
+        mScEngine-&gt;setSidechainBuffers (scBufs, BaySickGraph::kMaxScRecvSlots);
+    }
+
+    // ── Engine + insert chain ─────────────────────────────────────────────────
+    juce::MidiBuffer  emptyMidi;
+    juce::MidiBuffer* midi = (mCtx-&gt;instPageMidi != nullptr)
+                              ? &amp;mCtx-&gt;instPageMidi[mIndex]
+                              : &amp;emptyMidi;
+
+    // QA-OctavePedal Task 5: stash the pre-engine live signal so the monitor
+    // can cross-fade back to it in Dry mode.  Live-input strips only -- for
+    // sfizz sources `active` is already false (arm/listen forced off), and pure
+    // FilePlay playback returned above, so this only fires for real monitoring.
+    // Gated so steady "With Effect" (the default) pays ZERO extra work: the
+    // fork engages only while Dry is selected or a flip is still fading out.
+    const bool monitorFork = active &amp;&amp; (monitorMode == 0 || mMonitorDryGain &gt; 0.0f);
+    if (monitorFork)
+    {
+        mMonitorDryBuf.setSize (blockView.getNumChannels(), n, false, false, true);
+        for (int ch = 0; ch &lt; blockView.getNumChannels(); ++ch)
+            mMonitorDryBuf.copyFrom (ch, 0, blockView, ch, 0, n);
+    }
+
+    mEngine-&gt;processBlock (blockView, *midi);
+
+    // Monitor-only fork: With Effect (default) keeps the processed output; Dry
+    // cross-fades back to the raw pre-engine signal (~15 ms ramp per flip =
+    // click-free).  The recorded take (raw DI tap above) + playback (DI -&gt;
+    // engine) are byte-identical in both modes -- this re-weights the MONITOR
+    // path only.
+    if (monitorFork)
+    {
+        const float target = (monitorMode == 0) ? 1.0f : 0.0f;   // 1 = Dry, 0 = With Effect
+        const float step   = 1.0f / juce::jmax (1.0f, 0.015f * (float) mProcessor-&gt;mSampleRate);
+        const int   nc     = juce::jmin (blockView.getNumChannels(), mMonitorDryBuf.getNumChannels());
+        float gEnd = mMonitorDryGain;
+        for (int ch = 0; ch &lt; nc; ++ch)
+        {
+            float*       out = blockView.getWritePointer (ch);
+            const float* dry = mMonitorDryBuf.getReadPointer (ch);
+            float g = mMonitorDryGain;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                out[i] += (dry[i] - out[i]) * g;             // out*(1-g) + dry*g
+                g += juce::jlimit (-step, step, target - g);
+            }
+            gEnd = g;
+        }
+        mMonitorDryGain = gEnd;
+    }
+
+    mGraph-&gt;processInsert (BaySickGraph::InsertKind::Inst, mIndex,
+                           blockView, mCtx-&gt;bpm, mCtx-&gt;anySolo);
+
+    // ── Listen gate ───────────────────────────────────────────────────────────
+    // sfizz-source: always route. Armed live + !listen: kill output.
+    // Unarmed + listen: route naturally (input was copied into blockView above).
+    // Unarmed + !listen: silent strip, nothing to clear.
+    // QA-Fb: overlap blocks skip this -- live was already cleared pre-merge
+    // and clearing here would kill the monitored prior takes.
+    //
+    // The two edits below land AFTER the chain pass, which is where the
+    // pre-fader tap was filled, so each has to be applied to the tap as well or
+    // a pre-fader send would carry signal this strip is not actually producing.
+    // Null unless this strip is a pre-fader send source, so it costs one
+    // relaxed load otherwise.
+    auto* preFaderTap = mGraph-&gt;getPreFaderTapBuffer (channelId);
+
+    if (! filePlay &amp;&amp; armed &amp;&amp; ! listen)
+    {
+        blockView.clear();
+        if (preFaderTap != nullptr) preFaderTap-&gt;clear();
+    }
+
+    // Idle-suspend envelope, applied last so it covers the whole strip output
+    // the suspend is about to stop producing - the insert chain's tail, not
+    // just the sampler's own voices.
+    IdleSuspendFade::apply (blockView, suspendRamp);
+    if (preFaderTap != nullptr)
+        IdleSuspendFade::apply (*preFaderTap, suspendRamp);
+}</code></pre></details>
 <pre class="formulas">- Suspend predicate (all four must hold to advance the idle counter): `midiEmpty &amp;&amp; noVoices &amp;&amp; !auditionPending &amp;&amp; !slideActive`. Any failure resets the counter to 0 (immediate wake). Applies to sfizz-source Inst tabs and the Rusty kit only; live-input Inst tabs are NEVER suspended (live audio + arm/listen can fire with no MIDI).
 - `isAuditionPending()` = `mAuditionNote.load(memory_order_acquire) != -1` — a peek on the same atomic the engine-audition pattern uses (`processBlock` opens with `mAuditionNote.exchange(-1)`), added QA-C DSP-10 on the 3 sfizz engines (Guitars / Basses / RustyDrums) so an audition queued during suspend wakes the chain instead of being silently swallowed.
 - `isSlideActive()` — SlideSampler voices (gesture + ring-out tails + release zones) don&#x27;t count in sfizz&#x27;s `getNumActiveVoices`; without this term the chain suspends mid-slide and the tail freezes (QA-G3Smoke Task 12).

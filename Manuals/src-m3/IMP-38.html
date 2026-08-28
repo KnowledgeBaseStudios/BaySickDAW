@@ -31,7 +31,10 @@ while the pitch moves.</p>
     {
         mCurrentTargetMidi = -1.0f;   // unvoiced: re-snap fresh next phrase
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchCorrectorDSP.cpp (implementation, 413 lines)</summary><pre><code>// PitchCorrectorDSP::process() -- core (lines 257-409, housekeeping elided)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchCorrectorDSP.cpp (implementation, 413 lines)</summary><pre><code>// Source/DSP/PitchCorrectorDSP.cpp  -  PitchCorrectorDSP::process (complete)
+// ─────────────────────────────────────────────────────────────────────────────
+// process()
+// ─────────────────────────────────────────────────────────────────────────────
 void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     const int numSamples = buffer.getNumSamples();
@@ -46,7 +49,40 @@ void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
     if (R != nullptr) mTracker.pushAudio (L, R, numSamples);
     else              mTracker.pushAudio (L, numSamples);
 
-    // [ELIDED: settled-bypass fast path + engage-edge cold start, lines 272-304]
+#if BAYSICK_HAS_RUBBERBAND
+    const bool wantOn = ! bypassed;
+
+    // Settled bypass: dry passthrough with the shifter kept cold -- the ~48 ms
+    // engine never runs while correction is off (fast-path bypass).  On the
+    // just-settled edge, re-prime so the next engage is a clean cold start.
+    if (! wantOn &amp;&amp; mEngageFade &lt;= 0.0f)
+    {
+        if (mLiveActive)
+        {
+            if (mLive) mLive-&gt;reset();
+            mInFifo.clear(); mOutFifo.clear();
+            if (mBlockSize &gt; 0) mOutFifo.pushZeros (mBlockSize);
+            mLiveActive = false;
+        }
+        mCurrentTargetMidi = -1.0f;
+        mCurrentShiftRatio = 1.0f;
+        return;
+    }
+
+    // Engage edge: cold-start the shifter -- the delay is acquired here (B3/B6);
+    // the crossfade below masks the dry-side click.
+    if (! mLiveActive)
+    {
+        if (mLive)
+        {
+            mLive-&gt;reset();
+            mLive-&gt;setPitchScale   (mLivePitchScale);
+            mLive-&gt;setFormantScale (mLiveFormantScale);
+        }
+        mInFifo.clear(); mOutFifo.clear();
+        if (mBlockSize &gt; 0) mOutFifo.pushZeros (mBlockSize);
+        mLiveActive = true;
+    }
 
     // Read the latest pitch reading once per block (tracker is ~50 ms behind).
     const float detHz      = mTracker.getFrequencyHz();
@@ -59,6 +95,9 @@ void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
     {
         const float detMidi = hzToMidi (detHz);
 
+        // QA-F Task 5 note-change hysteresis: hold the current target note until
+        // the sung pitch commits to a different one.  0.65 st past the semitone
+        // midpoint stops vibrato riding a boundary from flip-flopping the target.
         if (mCurrentTargetMidi &lt; 0.0f
             || std::abs (detMidi - mCurrentTargetMidi) &gt; 0.65f)
             mCurrentTargetMidi = snapMidiToScale (detMidi);
@@ -81,7 +120,17 @@ void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
         mCurrentTargetMidi = -1.0f;   // unvoiced: re-snap fresh next phrase
     }
 
-    // [ELIDED: formant option / throat fScale change-guarded pushes, lines 344-352]
+    // Formant Preserve maps to the engine's native option; Throat to its formant
+    // scale (0.0 == auto-preserve).  Applied only on change (RT-safe setters).
+    if (mLive &amp;&amp; mFormantPreserve != mLivePreserve)
+    {
+        using RBL = RubberBand::RubberBandLiveShifter;
+        mLive-&gt;setFormantOption (mFormantPreserve ? RBL::OptionFormantPreserved
+                                                  : RBL::OptionFormantShifted);
+        mLivePreserve = mFormantPreserve;
+    }
+    const double fScale = (std::abs (mThroatSemis) &lt; 0.01f)
+                        ? 0.0 : std::pow (2.0, (double) mThroatSemis / 12.0);
 
     // Accumulate mono input, then drain whole shifter blocks.
     if (R != nullptr)
@@ -95,7 +144,7 @@ void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
     {
         mInFifo.pop (mInBlock.data(), mBlockSize);
         // Advance the ratio smoothing across the block so the RetuneSpeed time
-        // constant is unchanged by the shifter&#x27;s block granularity.
+        // constant is unchanged by the shifter's block granularity.
         for (int k = 0; k &lt; mBlockSize; ++k)
             mCurrentShiftRatio = retCoef * mCurrentShiftRatio + (1.0f - retCoef) * targetRatio;
 
@@ -115,7 +164,7 @@ void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
         }
     }
 
-    // Pop this block&#x27;s worth of wet, then equal-power crossfade dry &lt;-&gt; wet.
+    // Pop this block's worth of wet, then equal-power crossfade dry &lt;-&gt; wet.
     // The wet stream carries the shifter latency; at the engage edge it is the
     // primed silence filling in -- the documented one-time delay jump (B6).
     mOutFifo.pop (mWetOut.data(), numSamples);
@@ -134,6 +183,14 @@ void PitchCorrectorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
         L[i] = L[i] * gD + wet * gW;
         if (R != nullptr) R[i] = R[i] * gD + wet * gW;   // mono wet to both channels
     }
+
+    mDetectedHz       .store (detHz,       std::memory_order_release);
+    mTargetHz         .store (targetHzPub, std::memory_order_release);
+    mCurrentShiftCents.store (1200.0f * std::log2 (juce::jmax (mCurrentShiftRatio, 0.001f)),
+                               std::memory_order_release);
+#else
+    juce::ignoreUnused (L, R);   // corrector unavailable -&gt; dry passthrough
+#endif
 }</code></pre></details>
 <pre class="formulas">- Engine: RubberBand `RubberBandLiveShifter`, options `OptionFormantPreserved | OptionWindowShort`; ~48 ms latency; `mLatencySamples = getStartDelay() + getBlockSize()`.
 - Tracker gate: correction targets update only when `detHz &gt; 0` AND YIN `confidence &gt; 0.4f`.

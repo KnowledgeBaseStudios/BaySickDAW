@@ -1,6 +1,6 @@
 <p>Estimates a noise profile and subtracts it. Behind the "Cleaned" take types.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\DenoiseDSP.cpp - key excerpts (full file 341 lines)</div><pre><code>// Denoise::cleanFile() -- spectral subtraction gain + birdies suppression
+<div class="codeblock"><div class="codehead">- Source\DSP\DenoiseDSP.cpp (341 lines)</div><pre><code>// Denoise::cleanFile() -- spectral subtraction gain + birdies suppression
         for (int k = 0; k &lt; bins; ++k)
         {
             const float re = fftData[(size_t) (k * 2)];
@@ -23,60 +23,159 @@
             fftData[(size_t) (k * 2)]     *= g;
             if (k &gt; 0 &amp;&amp; k &lt; bins - 1) fftData[(size_t) (k * 2 + 1)] *= g;
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\DenoiseDSP.cpp - key excerpts (full file 341 lines)</summary><pre><code>void DenoiseLearner::processPending()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\DenoiseDSP.cpp (341 lines)</summary><pre><code>// Source/DSP/DenoiseDSP.cpp  -  Denoise::cleanFile (complete)
+bool Denoise::cleanFile (const juce::File&amp; in, const juce::File&amp; out,
+                         const DenoiseProfile&amp; profile, Strength strength,
+                         juce::String&amp; errorOut)
 {
-    if (mFFT == nullptr) return;
-    const int size = (int) mRing.size();
-    const juce::int64 w = mWrite.load (std::memory_order_acquire);
-    if (w - mRead &gt; (juce::int64) size)          // overwritten -&gt; resync
-        mRead = w - size + DenoiseProfile::kFFT;
+    errorOut.clear();
+    if (! profile.isValid()) { errorOut = "No noise profile available."; return false; }
+    auto reader = openWav (in);
+    if (reader == nullptr)   { errorOut = "Could not read " + in.getFileName(); return false; }
 
-    while (w - mRead &gt;= (juce::int64) DenoiseProfile::kFFT)
+    const int    numCh = (int) reader-&gt;numChannels;
+    const juce::int64 len = reader-&gt;lengthInSamples;
+    const double sr = reader-&gt;sampleRate;
+    if (len &lt;= 0 || numCh &lt;= 0) { errorOut = "Empty source file."; return false; }
+
+    // Calibration (ear-validated on the QA-Fe WORLD arc): Strong == the
+    // "cleantake" prototype (2x over-subtraction, gain floor -12 dB);
+    // Light == half-depth for takes that only need a trim.
+    const float overSub   = (strength == Strong) ? 2.00f : 1.25f;
+    const float gainFloor = (strength == Strong) ? 0.25f : 0.50f;
+
+    juce::AudioBuffer&lt;float&gt; src (numCh, (int) len);
+    reader-&gt;read (&amp;src, 0, (int) len, 0, true, true);
+
+    constexpr int N = DenoiseProfile::kFFT, hop = DenoiseProfile::kFFT / 4, bins = DenoiseProfile::kBins;
+    juce::dsp::FFT fft (10);
+    std::vector&lt;float&gt; window ((size_t) N);
+    for (int i = 0; i &lt; N; ++i)
+        window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants&lt;float&gt;::twoPi * (float) i / (float) N);
+
+    // Profile magnitudes were measured with the same window/FFT the STFT
+    // below uses, so they subtract 1:1 on this grid (after SR remap).
+    std::vector&lt;float&gt; prof ((size_t) bins);
+    for (int k = 0; k &lt; bins; ++k)
+        prof[(size_t) k] = profileAt (profile, (double) k * sr / (double) N);
+
+    juce::AudioBuffer&lt;float&gt; dst (numCh, (int) len);
+    dst.clear();
+    std::vector&lt;float&gt; wsum ((size_t) len, 0.0f);
+    std::vector&lt;float&gt; fftData ((size_t) N * 2);
+    std::vector&lt;float&gt; gain ((size_t) bins, 1.0f), gPrev ((size_t) bins, 1.0f), gSm ((size_t) bins);
+
+    for (juce::int64 start = 0; start &lt; len; start += hop)
     {
-        for (int i = 0; i &lt; DenoiseProfile::kFFT; ++i)
-            mFrame[(size_t) i] = mRing[(size_t) ((mRead + i) % size)];
-        mRead += kHop;
-
-        double e = 0.0;
-        for (int i = 0; i &lt; DenoiseProfile::kFFT; ++i) e += mFrame[(size_t) i] * mFrame[(size_t) i];
-        const float rms = (float) std::sqrt (e / DenoiseProfile::kFFT);
-        if (rms &lt; 1.0e-5f) continue;             // unrouted/silent strip: never learn digital zero
-
-        for (int i = 0; i &lt; DenoiseProfile::kFFT; ++i)
-            mFftData[(size_t) i] = mFrame[(size_t) i] * mWindow[(size_t) i];
-        std::fill (mFftData.begin() + DenoiseProfile::kFFT, mFftData.end(), 0.0f);
-        mFFT-&gt;performRealOnlyForwardTransform (mFftData.data());
-
-        const juce::ScopedLock sl (mFloorLock);
-        const int learned = mFrames.load (std::memory_order_relaxed);
-
-        // Voice gate: once warm, skip frames far above the tracked floor so
-        // singing/speech never inflates the room fingerprint.
-        if (learned &gt; 20)
+        // Gains from the mono fold; applied identically to every channel so
+        // stereo takes keep their image.
+        for (int i = 0; i &lt; N; ++i)
         {
-            double fe = 0.0, be = 0.0;
-            for (int k = 0; k &lt; DenoiseProfile::kBins; ++k)
-            {
-                const float re = mFftData[(size_t) (k * 2)];
-                const float im = mFftData[(size_t) (k * 2 + 1)];
-                fe += std::sqrt (re * re + im * im);
-                be += mFloor[(size_t) k];
-            }
-            if (be &gt; 1.0e-9 &amp;&amp; fe &gt; 4.0 * be) continue;    // &gt; +12 dB over floor = voice
+            const juce::int64 idx = start + i;
+            float s = 0.0f;
+            if (idx &lt; len)
+                for (int ch = 0; ch &lt; numCh; ++ch) s += src.getSample (ch, (int) idx);
+            fftData[(size_t) i] = (s / (float) numCh) * window[(size_t) i];
         }
+        std::fill (fftData.begin() + N, fftData.end(), 0.0f);
+        fft.performRealOnlyForwardTransform (fftData.data());
 
-        for (int k = 0; k &lt; DenoiseProfile::kBins; ++k)
+        for (int k = 0; k &lt; bins; ++k)
         {
-            const float re = mFftData[(size_t) (k * 2)];
-            const float im = mFftData[(size_t) (k * 2 + 1)];
+            const float re = fftData[(size_t) (k * 2)];
+            const float im = fftData[(size_t) (k * 2 + 1)];
             const float m  = std::sqrt (re * re + im * im);
-            float&amp; fl = mFloor[(size_t) k];
-            if (learned &lt; 20)       fl = (learned == 0) ? m : juce::jmin (fl, m);
-            else if (m &lt; fl)        fl += 0.30f * (m - fl);   // fast down: chase minima
-            else                    fl += 0.004f * (m - fl);  // slow up: track drifting rooms
+            gain[(size_t) k] = (m &gt; 1.0e-12f)
+                ? juce::jmax (gainFloor, 1.0f - overSub * prof[(size_t) k] / m)
+                : gainFloor;
         }
-        mFrames.store (learned + 1, std::memory_order_release);
+        // Musical-noise ("birdies") suppression: 3-bin frequency smoothing +
+        // one-pole time smoothing of the gain field.
+        gSm[0] = gain[0];
+        for (int k = 1; k &lt; bins - 1; ++k)
+            gSm[(size_t) k] = (gain[(size_t) (k - 1)] + gain[(size_t) k] + gain[(size_t) (k + 1)]) / 3.0f;
+        gSm[(size_t) (bins - 1)] = gain[(size_t) (bins - 1)];
+        for (int k = 0; k &lt; bins; ++k)
+        {
+            gPrev[(size_t) k] += 0.5f * (gSm[(size_t) k] - gPrev[(size_t) k]);
+            const float g = gPrev[(size_t) k];
+            fftData[(size_t) (k * 2)]     *= g;
+            if (k &gt; 0 &amp;&amp; k &lt; bins - 1) fftData[(size_t) (k * 2 + 1)] *= g;
+        }
+
+        fft.performRealOnlyInverseTransform (fftData.data());
+
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            // Per-channel resynthesis reuses the mono gain field: filter each
+            // channel's frame with it via a second FFT round-trip only when
+            // stereo; the common mono take path skips straight to OLA.
+            if (numCh == 1)
+            {
+                for (int i = 0; i &lt; N; ++i)
+                {
+                    const juce::int64 idx = start + i;
+                    if (idx &lt; len)
+                        dst.addSample (0, (int) idx, fftData[(size_t) i] * window[(size_t) i]);
+                }
+            }
+        }
+        if (numCh &gt; 1)
+        {
+            std::vector&lt;float&gt; chData ((size_t) N * 2);
+            for (int ch = 0; ch &lt; numCh; ++ch)
+            {
+                for (int i = 0; i &lt; N; ++i)
+                {
+                    const juce::int64 idx = start + i;
+                    chData[(size_t) i] = (idx &lt; len) ? src.getSample (ch, (int) idx) * window[(size_t) i] : 0.0f;
+                }
+                std::fill (chData.begin() + N, chData.end(), 0.0f);
+                fft.performRealOnlyForwardTransform (chData.data());
+                for (int k = 0; k &lt; bins; ++k)
+                {
+                    const float g = gPrev[(size_t) k];
+                    chData[(size_t) (k * 2)] *= g;
+                    if (k &gt; 0 &amp;&amp; k &lt; bins - 1) chData[(size_t) (k * 2 + 1)] *= g;
+                }
+                fft.performRealOnlyInverseTransform (chData.data());
+                for (int i = 0; i &lt; N; ++i)
+                {
+                    const juce::int64 idx = start + i;
+                    if (idx &lt; len)
+                        dst.addSample (ch, (int) idx, chData[(size_t) i] * window[(size_t) i]);
+                }
+            }
+        }
+        for (int i = 0; i &lt; N; ++i)
+        {
+            const juce::int64 idx = start + i;
+            if (idx &lt; len)
+                wsum[(size_t) idx] += window[(size_t) i] * window[(size_t) i];
+        }
     }
+
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        float* d = dst.getWritePointer (ch);
+        for (juce::int64 i = 0; i &lt; len; ++i)
+            d[i] = (wsum[(size_t) i] &gt; 1.0e-6f) ? d[i] / wsum[(size_t) i] : src.getSample (ch, (int) i);
+    }
+
+    const int bits = (reader-&gt;usesFloatingPointData || reader-&gt;bitsPerSample &gt; 24)
+                       ? 32 : juce::jmax (16, (int) reader-&gt;bitsPerSample);
+    out.deleteFile();
+    juce::WavAudioFormat fmt;
+    std::unique_ptr&lt;juce::FileOutputStream&gt; os (out.createOutputStream());
+    if (os == nullptr) { errorOut = "Could not write " + out.getFileName(); return false; }
+    std::unique_ptr&lt;juce::AudioFormatWriter&gt; writer (
+        fmt.createWriterFor (os.get(), sr, (unsigned int) numCh, bits, {}, 0));
+    if (writer == nullptr) { errorOut = "Could not create WAV writer."; return false; }
+    os.release();   // writer owns the stream now
+    if (! writer-&gt;writeFromAudioSampleBuffer (dst, 0, (int) len))
+        { writer.reset(); out.deleteFile(); errorOut = "WAV write failed."; return false; }
+    writer.reset();
+    return true;
 }</code></pre></details>
 <pre class="formulas">- STFT geometry: `kFFT = 1024` (order 10), `kBins = 513`, Hann window; learner hop `kHop = 256`; cleaner hop = `kFFT/4 = 256` (75% overlap); OLA normalized by the running window-squared sum (`wsum`), falling back to the dry sample where `wsum &lt;= 1e-6`.
 - Learner ring: 4 s mono (`sr * 4.0`); audio-thread `pushBlock` is wait-free (ring write + release publish); overrun resync `mRead = w - size + kFFT`.

@@ -26,7 +26,8 @@
                 dst[i] = (float) mMonoOut[(size_t) i];
         }
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\NAMPedalStyleDSP.cpp</summary><pre><code>void NAMPedalStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\NAMPedalStyleDSP.cpp</summary><pre><code>// Source/DSP/NAMPedalStyleDSP.cpp  -  NAMPedalStyleDSP::process (complete)
+void NAMPedalStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;

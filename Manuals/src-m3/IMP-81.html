@@ -40,33 +40,36 @@ float AdsrEnvelope::getNextSample()
     }
     return mLevel;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\AdsrEnvelope.cpp (the ADSR used by BaySickSynth/BaySickBass voices: mAmpEnv, mFltEnv, mPitchEnv in BaySickSynthVoice)</summary><pre><code>// AdsrEnvelope::setParameters / calcCoef / noteOn / noteOff -- Source/AdsrEnvelope.cpp
-void AdsrEnvelope::setParameters (float attackSec, float decaySec, float sustain, float releaseSec)
+<details class="fullfn"><summary>Full function &mdash; Source\AdsrEnvelope.cpp (the ADSR used by BaySickSynth/BaySickBass voices: mAmpEnv, mFltEnv, mPitchEnv in BaySickSynthVoice)</summary><pre><code>// Source/AdsrEnvelope.cpp  -  AdsrEnvelope::getNextSample (complete)
+float AdsrEnvelope::getNextSample()
 {
-    mAttack       = attackSec;
-    mDecay        = decaySec;
-    mSustain      = juce::jlimit (0.0f, 1.0f, sustain);
-    mRelease      = releaseSec;
-    mAttackCoef   = calcCoef (attackSec,  mSampleRate);
-    mDecayCoef    = calcCoef (decaySec,   mSampleRate);
-    mReleaseCoef  = calcCoef (releaseSec, mSampleRate);
-}
+    switch (mStage)
+    {
+        case Stage::Attack:
+            mLevel += mAttackCoef * (1.01f - mLevel);
+            if (mLevel &gt;= 1.0f) { mLevel = 1.0f; mStage = Stage::Decay; }
+            break;
 
-void AdsrEnvelope::noteOn()
-{
-    mStage = Stage::Attack;
-}
+        case Stage::Decay:
+            mLevel += mDecayCoef * (mSustain - 1.01f - mLevel);
+            if (mLevel &lt;= mSustain) { mLevel = mSustain; mStage = Stage::Sustain; }
+            break;
 
-void AdsrEnvelope::noteOff()
-{
-    if (mStage != Stage::Idle)
-        mStage = Stage::Release;
-}
+        case Stage::Sustain:
+            mLevel = mSustain;
+            break;
 
-float AdsrEnvelope::calcCoef (float timeSec, double sampleRate)
-{
-    if (timeSec &lt;= 0.0f) return 1.0f;
-    return static_cast&lt;float&gt; (1.0 - std::exp (-1.0 / (timeSec * sampleRate)));
+        case Stage::Release:
+            mLevel += mReleaseCoef * (0.0f - 1.01f - mLevel);
+            if (mLevel &lt;= 0.0001f) { mLevel = 0.0f; mStage = Stage::Idle; }
+            break;
+
+        case Stage::Idle:
+        default:
+            mLevel = 0.0f;
+            break;
+    }
+    return mLevel;
 }</code></pre></details>
 <pre class="formulas">- One-pole coefficient: `coef = 1 - exp(-1 / (timeSec * sampleRate))`; `timeSec &lt;= 0` gives `coef = 1` (instant).
 - Attack: `level += attackCoef * (1.01 - level)` -- target overshoots to 1.01 so the exponential actually reaches 1.0 and hands off to Decay.

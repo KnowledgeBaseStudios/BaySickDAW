@@ -18,7 +18,8 @@
     const float dGain = 1.0f - w;
     ...
             wet[i] = dry[i] * dGain + wet[i] * w;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassOverdriveStyleDSP.cpp</summary><pre><code>void BassOverdriveStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassOverdriveStyleDSP.cpp</summary><pre><code>// Source/DSP/BassOverdriveStyleDSP.cpp  -  BassOverdriveStyleDSP::process (complete)
+void BassOverdriveStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;

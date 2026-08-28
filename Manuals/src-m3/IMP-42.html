@@ -1,6 +1,6 @@
 <p>The built-in shifting methods.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PitchShifters.h - key excerpts (full file 214 lines, header-only)</div><pre><code>// CepstralFormantEngine::processFrame() -- envelope replacement core
+<div class="codeblock"><div class="codehead">- Source\DSP\PitchShifters.h (214 lines, header-only)</div><pre><code>// CepstralFormantEngine::processFrame() -- envelope replacement core
         // Target envelope: dry&#x27;s (preserve) or wet&#x27;s own (throat-only),
         // frequency-scaled by the throat ratio.
         const float scale = std::pow (2.0f, -throatSemis / 12.0f);   // sample source bin = k*scale
@@ -26,7 +26,125 @@
             if (k &gt; 0 &amp;&amp; k &lt; kSize / 2)
                 mSpecWet[(size_t) (kSize - k)] = std::conj (mSpecWet[(size_t) k]);
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchShifters.h - key excerpts (full file 214 lines, header-only)</summary><pre><code>// CepstralFormantEngine::processFrame()
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PitchShifters.h (214 lines, header-only)</summary><pre><code>// Source/DSP/PitchShifters.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+#include &lt;array&gt;
+#include &lt;vector&gt;
+#include &lt;memory&gt;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PitchShifters - CepstralFormantEngine (QA-F Tasks 3 + 5)
+// ─────────────────────────────────────────────────────────────────────────────
+// The PsolaShifter / GranularShifter / PvShifter trio that once lived here was
+// retired in QA-Fe when the vocal editor / Align / real-time correction moved to
+// the vendored library engines (LibraryPitchShifters + Rubber Band LiveShifter).
+// Only CepstralFormantEngine remains -- the Align offline throat still uses its
+// static formantShiftMono (BaySickVocalProcessor).  See the class comment below.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CepstralFormantEngine ────────────────────────────────────────────────────
+// Shared formant machinery (QA-F Tasks 3 + 5): cepstral spectral-envelope
+// extraction -&gt; envelope replacement/scaling, STFT frame-based.
+//
+//   Formant PRESERVE: impose the DRY (pre-shift) frame's envelope onto the
+//   WET (post-shift) frame -- kills the chipmunk/munchkin effect a plain
+//   time-domain shifter leaves behind.
+//   THROAT SHIFT: scale the target envelope along the frequency axis by
+//   2^(semis/12) -- deliberate character change without re-pitching.
+//
+// Envelope = cepstral liftering (log-magnitude -&gt; IFFT -&gt; keep quefrencies
+// below ~1 ms -&gt; FFT back).  The 1 ms cutoff sits under the shortest vocal
+// pitch period (~2 ms at a 500 Hz soprano) so harmonics never leak into the
+// "envelope".
+//
+// FFT 512 / hop 128 (75% overlap, Hann analysis + synthesis, (8/3)*Hs/N OLA
+// scale -- the PhaseVocoder normalization convention).  Latency = 2*kSize -
+// kHop = 896 samples (~20 ms @ 44.1k: one full frame to fire + the OLA
+// settle margin) ON TOP of the upstream shifter -- acceptable for an opt-in
+// toggle; the default monitor path stays shifter-only (Call 2a).
+//
+// THREADING: one instance per channel, all calls one thread.  No allocation
+// after prepare(); audio-thread safe.
+class CepstralFormantEngine
+{
+public:
+    static constexpr int kOrder = 9;
+    static constexpr int kSize  = 1 &lt;&lt; kOrder;   // 512
+    static constexpr int kHop   = kSize / 4;     // 128
+
+    void prepare (double sampleRate, int /*maxBlock*/)
+    {
+        mSampleRate = (sampleRate &gt; 0.0) ? sampleRate : 44100.0;
+        if (mFFT == nullptr)
+            mFFT = std::make_unique&lt;juce::dsp::FFT&gt; (kOrder);
+        for (int i = 0; i &lt; kSize; ++i)
+            mWindow[(size_t) i] = 0.5f * (1.0f - std::cos (
+                juce::MathConstants&lt;float&gt;::twoPi * (float) i / (float) (kSize - 1)));
+        // Quefrency lifter cutoff ~1 ms (see class comment).
+        mLifterBins = juce::jlimit (8, kSize / 4, (int) std::round (mSampleRate * 0.001));
+        reset();
+    }
+
+    void reset()
+    {
+        mDryRing.fill (0.0f);
+        mWetRing.fill (0.0f);
+        mOla.fill (0.0f);
+        mInAbs = 0;
+        mOutReadAbs = 0;
+        mOlaWriteAbs = 0;
+    }
+
+    // Streaming pair input: dry = pre-shift sample, wet = post-shift sample.
+    // Returns the formant-corrected wet stream, 2*kSize-kHop samples late.
+    // Caller engages this only while (preserve || throatSemis != 0) and
+    // resets on the engage edge (latency appears/disappears with the mode).
+    float processSample (float dry, float wet, bool preserve, float throatSemis) noexcept
+    {
+        mDryRing[(size_t) (mInAbs % kSize)] = dry;
+        mWetRing[(size_t) (mInAbs % kSize)] = wet;
+        ++mInAbs;
+
+        if (mInAbs &gt;= (juce::int64) kSize &amp;&amp; (mInAbs % kHop) == 0)
+            processFrame (preserve, throatSemis);
+
+        // Deliver only fully-settled OLA slots (every overlapping frame has
+        // contributed) -- the PhaseVocoder getOutputAvailable convention.
+        // Stalling during warmup IS the latency.
+        float out = 0.0f;
+        const juce::int64 settled = mOlaWriteAbs - (juce::int64) (kSize - kHop);
+        if (mOutReadAbs &lt; settled)
+        {
+            const size_t idx = (size_t) (mOutReadAbs % (juce::int64) mOla.size());
+            out = mOla[idx];
+            mOla[idx] = 0.0f;   // clear-after-read: future OLA lands on silence
+            ++mOutReadAbs;
+        }
+        return out;
+    }
+
+    // Offline convenience (Align bake): impose the buffer's own envelope
+    // scaled by throatSemis (formant character shift, pitch untouched).
+    // Latency-compensated.  Allocates; message/worker thread only.
+    static void formantShiftMono (float* buf, int n, double sampleRate, float throatSemis)
+    {
+        if (n &lt;= 0 || std::abs (throatSemis) &lt; 0.01f) return;
+        CepstralFormantEngine eng;
+        eng.prepare (sampleRate, 0);
+        const int lat = 2 * kSize - kHop;
+        std::vector&lt;float&gt; out ((size_t) n, 0.0f);
+        for (int i = 0; i &lt; n + lat; ++i)
+        {
+            const float in = (i &lt; n) ? buf[i] : 0.0f;
+            const float v  = eng.processSample (in, in, false, throatSemis);
+            const int   j  = i - lat;
+            if (j &gt;= 0 &amp;&amp; j &lt; n) out[(size_t) j] = v;
+        }
+        std::copy (out.begin(), out.end(), buf);
+    }
+
+private:
     void processFrame (bool preserve, float throatSemis) noexcept
     {
         // Windowed frames end at the current input head.
@@ -47,7 +165,7 @@
         if (preserve)
             computeEnvelope (mSpecDry, mEnvDry);
 
-        // Target envelope: dry&#x27;s (preserve) or wet&#x27;s own (throat-only),
+        // Target envelope: dry's (preserve) or wet's own (throat-only),
         // frequency-scaled by the throat ratio.
         const float scale = std::pow (2.0f, -throatSemis / 12.0f);   // sample source bin = k*scale
         auto&amp; srcEnv = preserve ? mEnvDry : mEnvWet;
@@ -65,7 +183,7 @@
                 target = srcEnv[(size_t) (kSize / 2)];
 
             // Correction in the log domain, clamped +/-24 dB per bin so a
-            // near-silent envelope can&#x27;t blow the frame up.
+            // near-silent envelope can't blow the frame up.
             const float corr = juce::jlimit (-2.7631f, 2.7631f, target - mEnvWet[(size_t) k]);
             const float g    = std::exp (corr);
             mSpecWet[(size_t) k] *= g;
@@ -87,7 +205,6 @@
         mOlaWriteAbs += kHop;
     }
 
-// CepstralFormantEngine::computeEnvelope()
     void computeEnvelope (const std::array&lt;juce::dsp::Complex&lt;float&gt;, kSize&gt;&amp; spec,
                           std::array&lt;float, kSize / 2 + 1&gt;&amp; env) noexcept
     {
@@ -105,7 +222,25 @@
         mFFT-&gt;perform (mCepOut.data(), mCepIn.data(), false);  // -&gt; log-spectral envelope
         for (int k = 0; k &lt;= kSize / 2; ++k)
             env[(size_t) k] = mCepIn[(size_t) k].real();
-    }</code></pre></details>
+    }
+
+    std::unique_ptr&lt;juce::dsp::FFT&gt; mFFT;
+    std::array&lt;float, kSize&gt;  mWindow {};
+    std::array&lt;float, kSize&gt;  mDryRing {};
+    std::array&lt;float, kSize&gt;  mWetRing {};
+    // 3x frame size: peak occupancy is write-frontier + kSize minus the
+    // settle-lagged read head = exactly 2*kSize -- 3x leaves real margin.
+    std::array&lt;float, kSize * 3&gt; mOla {};
+    std::array&lt;juce::dsp::Complex&lt;float&gt;, kSize&gt; mFrameWet {}, mFrameDry {};
+    std::array&lt;juce::dsp::Complex&lt;float&gt;, kSize&gt; mSpecWet {},  mSpecDry {};
+    std::array&lt;juce::dsp::Complex&lt;float&gt;, kSize&gt; mCepIn {},    mCepOut {};
+    std::array&lt;float, kSize / 2 + 1&gt; mEnvWet {}, mEnvDry {};
+    juce::int64 mInAbs       { 0 };
+    juce::int64 mOutReadAbs  { 0 };
+    juce::int64 mOlaWriteAbs { 0 };
+    int         mLifterBins  { 44 };
+    double      mSampleRate  { 44100.0 };
+};</code></pre></details>
 <pre class="formulas">- STFT geometry: `kOrder = 9` -&gt; FFT `kSize = 512`, hop `kHop = 128` (75% overlap), Hann analysis + synthesis windows, OLA scale `(8/3)*Hs/N` (PhaseVocoder convention).
 - Latency: `2*kSize - kHop = 896` samples (~20 ms @ 44.1k) on top of the upstream shifter; opt-in path only.
 - Cepstral lifter cutoff: `mLifterBins = clamp(round(sr * 0.001), 8, kSize/4)` - ~1 ms quefrency, below the shortest vocal pitch period (~2 ms at a 500 Hz soprano) so harmonics never leak into the envelope. Default member init 44.

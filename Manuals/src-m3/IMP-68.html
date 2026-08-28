@@ -29,47 +29,50 @@ struct AutomationLane
     float lfoRate  { 1.f }; // period in beats
     float lfoMin   { 0.f };
     float lfoMax   { 1.f };</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (ControlPoint / AutomationLane storage + the ONE evaluator, lines 21-160)</summary><pre><code>// PatternManager.h -- segment interpolation inside evalAutomationLaneAt
-// (verbatim, lines 121-159 -- the per-curve-type math)
-    switch (p0.curveType)
-    {
-        case CurveType::Stepped:
-            return p0.value01;
+<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (ControlPoint / AutomationLane storage + the ONE evaluator, lines 21-160)</summary><pre><code>// Source/PatternManager.h  -  ControlPoint (complete)
+struct ControlPoint
+{
+    float     timeTicks  { 0.f };   // 0..1, fraction of clip length
+    float     value01    { 0.5f };  // 0..1, normalized parameter value
+    CurveType curveType  { CurveType::Linear };
+    float     tension    { 0.f };   // reserved for future Bezier
+};
 
-        case CurveType::Spline:
-        {
-            // Catmull-Rom through the neighbouring values; clamped at the ends.
-            const float v0 = (idx &gt; 0) ? pts[(size_t) idx - 1].value01 : p0.value01;
-            const float v1 = p0.value01;
-            const float v2 = p1.value01;
-            const float v3 = (idx + 2 &lt; (int) pts.size()) ? pts[(size_t) idx + 2].value01
-                                                          : p1.value01;
-            const float t2 = t * t, t3 = t2 * t;
-            const float val = 0.5f * (  2.f * v1
-                                      + (-v0 + v2)                            * t
-                                      + (2.f * v0 - 5.f * v1 + 4.f * v2 - v3) * t2
-                                      + (-v0 + 3.f * v1 - 3.f * v2 + v3)      * t3);
-            return juce::jlimit (0.f, 1.f, val);
-        }
+// Source/PatternManager.h  -  AutomationLane (complete)
+struct AutomationLane
+{
+    juce::String              paramId;
+    std::vector&lt;ControlPoint&gt; points;
+    bool  isLFO   { false };
+    int   lfoShape { 0 };   // 0=Sine 1=Triangle 2=Saw 3=Square
+    float lfoRate  { 1.f }; // period in beats
+    float lfoMin   { 0.f };
+    float lfoMax   { 1.f };
 
-        case CurveType::Linear:
-        default:
-        {
-            // FL Studio scaled-exponential transfer function:
-            //   t_factor = 1 - T / (0.5*T + 0.5)^2 ;  y = (t_factor^x - 1) / (t_factor - 1)
-            // Positive tension eases out, negative eases in.
-            const float T = juce::jlimit (-0.999f, 0.999f, p0.tension);
-            if (std::abs (T) &lt; 0.001f)
-                return p0.value01 + t * (p1.value01 - p0.value01);
+    // Display-name system (decoupled from paramId so swapping the effect in a
+    // slot updates the shown name without breaking the backend key):
+    //  - paramId           : stable key (e.g. "layers_bus_s0_mix"). Never displayed.
+    //  - userDisplayName   : user-renamed label. Empty by default. When
+    //                        non-empty, takes precedence over the auto name
+    //                        everywhere in the UI. "Revert to auto" clears it.
+    //  - lastKnownName     : auto-resolved label captured at lane creation,
+    //                        while the target still existed.  Deleted-slot
+    //                        lanes fall back to it so the row keeps saying
+    //                        WHICH effect it drove.  Never goes stale for
+    //                        rack lanes: a slot UUID never revives (effect
+    //                        swap = old-slot deletion + a fresh UUID).
+    // The auto-generated display string is otherwise NOT stored here; it's
+    // resolved at display time via
+    // StandaloneEditor::resolveAutomationDisplayName(paramId) so effect-swap
+    // inside a slot reflects immediately without migration.
+    juce::String              userDisplayName;
+    juce::String              lastKnownName;
 
-            const float denom   = 0.5f * T + 0.5f;
-            const float tFactor = 1.0f - T / (denom * denom);
-            const float y = (std::abs (tFactor - 1.0f) &lt; 0.0001f)
-                              ? t
-                              : (std::pow (std::abs (tFactor), t) - 1.0f) / (tFactor - 1.0f);
-            return p0.value01 + juce::jlimit (0.0f, 1.0f, y) * (p1.value01 - p0.value01);
-        }
-    }</code></pre></details>
+    // Evaluate the lane at normalised clip position pos01 (0 = start, 1 = end).
+    // Returns a normalized 0..1 parameter value.  Forwards to
+    // evalAutomationLaneAt below -- the one evaluator.
+    float evaluateAt(float pos01) const;
+};</code></pre></details>
 <pre class="formulas">- Curve storage unit: `ControlPoint { timeTicks (0..1 fraction of clip length, despite the name), value01 (0..1 normalized), curveType, tension }` inside `AutomationLane { paramId, points, isLFO, lfoShape, lfoRate, lfoMin, lfoMax, userDisplayName, lastKnownName }`. Points are kept SORTED by timeTicks (every mutation site sorts — audio-thread evaluator assumes it).
 - `CurveType { Linear=0, Stepped=1, Spline=2 }` persisted as raw int (&quot;curve&quot; attr) — append-only, explicit values, never reorder.
 - Segment math (curve type is on the LEFT point of each segment): Stepped holds p0.value01; Spline is Catmull-Rom `0.5 * (2v1 + (-v0+v2)t + (2v0-5v1+4v2-v3)t^2 + (-v0+3v1-3v2+v3)t^3)` through neighbouring values, clamped at the ends; Linear with tension uses the FL Studio scaled-exponential transfer `t_factor = 1 - T/(0.5T+0.5)^2; y = (t_factor^t - 1)/(t_factor - 1)` with T clamped to ±0.999 (positive tension eases out, negative eases in; |T| &lt; 0.001 degrades to plain lerp).

@@ -21,7 +21,8 @@
     const float t   = juce::jlimit (0.0f, 1.0f, mTone);
     const float gLp = 1.0f - t;
     const float gHp = t;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\DistortionStyleDSP.cpp</summary><pre><code>void DistortionStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\DistortionStyleDSP.cpp</summary><pre><code>// Source/DSP/DistortionStyleDSP.cpp  -  DistortionStyleDSP::process (complete)
+void DistortionStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
     juce::ScopedNoDenormals noDenormals;
@@ -67,7 +68,7 @@
     }
     {
         juce::dsp::AudioBlock&lt;float&gt; hpfBlock (mScratchHpf);
-        // Restrict block to first n samples so we don&#x27;t run the filter on
+        // Restrict block to first n samples so we don't run the filter on
         // stale tail data when the buffer is smaller than maxBlock.
         juce::dsp::AudioBlock&lt;float&gt; sub = hpfBlock.getSubBlock (0, (size_t) n);
         juce::dsp::ProcessContextReplacing&lt;float&gt; hpfCtx (sub);

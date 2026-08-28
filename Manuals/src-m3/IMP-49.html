@@ -2,7 +2,7 @@
 peaks are real once the signal is converted back to sound, which is why a file
 that looks safe on a sample meter can still distort on playback.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\TruePeakMeter.cpp - key excerpts (full file 154 lines)</div><pre><code>// TruePeakMeter::pushAndPeak() -- 4-phase interpolated peak per input sample
+<div class="codeblock"><div class="codehead">- Source\DSP\TruePeakMeter.cpp (154 lines)</div><pre><code>// TruePeakMeter::pushAndPeak() -- 4-phase interpolated peak per input sample
 float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
 {
     auto&amp; hist = mHist[(size_t) ch];
@@ -29,33 +29,37 @@ float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
     }
     return peak;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\TruePeakMeter.cpp - key excerpts (full file 154 lines)</summary><pre><code>// besselI0() -- Kaiser window shaping term
-    double besselI0 (double x)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\TruePeakMeter.cpp (154 lines)</summary><pre><code>// Source/DSP/TruePeakMeter.cpp  -  TruePeakMeter::pushAndPeak (complete)
+// Pushes one input sample into the channel's history and returns the largest
+// magnitude across the four interpolated phase outputs.
+float TruePeakMeter::pushAndPeak (int ch, float x) noexcept
+{
+    auto&amp; hist = mHist[(size_t) ch];
+    int&amp;  pos  = mHistPos[(size_t) ch];
+
+    hist[(size_t) pos] = x;
+    pos = (pos + 1) % kTapsPerPhase;
+
+    const auto&amp; b = bank();
+    float peak = 0.0f;
+
+    for (int p = 0; p &lt; kPhases; ++p)
     {
-        double sum = 1.0, term = 1.0;
-        const double halfSq = (x * 0.5) * (x * 0.5);
-        for (int k = 1; k &lt; 40; ++k)
+        float acc = 0.0f;
+        // Walk history newest-first: index (pos - 1 - k) modulo the ring.
+        int idx = pos - 1;
+        for (int k = 0; k &lt; kTapsPerPhase; ++k)
         {
-            term *= halfSq / (double) (k * k);
-            sum  += term;
-            if (term &lt; 1.0e-16 * sum) break;
+            if (idx &lt; 0) idx += kTapsPerPhase;
+            acc += b[(size_t) p][(size_t) k] * hist[(size_t) idx];
+            --idx;
         }
-        return sum;
+        peak = juce::jmax (peak, std::abs (acc));
     }
+    return peak;
+}
 
-    // CALIBRATION (Rule 6 cat. 5): cutoff sits at 0.92 of the base-rate Nyquist
-    // rather than exactly at it.  With only 12 taps per phase the transition band
-    // is wide, and pushing the cutoff to Nyquist trades stopband attenuation for
-    // passband that carries no audible content -- 20.3 kHz..22.05 kHz at 44.1 k.
-    // 0.92 keeps the response flat through 20 kHz at 44.1/48/96 k while holding
-    // the stopband under -80 dB, which is what the true-peak estimate needs.
-    constexpr double kCutoffFractionOfNyquist = 0.92;
-
-    // Kaiser beta 8.0 -&gt; ~-80 dB stopband.  Higher beta widens the transition
-    // faster than 12 taps per phase can absorb.
-    constexpr double kKaiserBeta = 8.0;
-
-// TruePeakMeter::bank()
+// Source/DSP/TruePeakMeter.cpp  -  TruePeakMeter::bank (complete)
 const TruePeakMeter::Bank&amp; TruePeakMeter::bank()
 {
     // Built once, on first use, and const thereafter -- so concurrent readers on

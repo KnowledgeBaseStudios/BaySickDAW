@@ -33,7 +33,7 @@ if (invertWet) { delL = -delL; delR = -delR; }
 // Mix: dry + wet + cross
 if (L) L[n] = dryScale * inL + wetScale * delL + crossScale * delR;
 if (R) R[n] = dryScale * inR + wetScale * delR + crossScale * delL;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source/DSP/FlangerDSP.cpp</summary><pre><code>// FlangerDSP::process
+<details class="fullfn"><summary>Full function &mdash; - Source/DSP/FlangerDSP.cpp</summary><pre><code>// Source/DSP/FlangerDSP.cpp  -  FlangerDSP::process (complete)
 void FlangerDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
     if (bypassed) return;
@@ -125,7 +125,7 @@ void FlangerDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
             delR = mDampStateR;
         }
 
-        // Capture feedback (post-damp, pre-invertWet so feedback doesn&#x27;t double-invert)
+        // Capture feedback (post-damp, pre-invertWet so feedback doesn't double-invert)
         mFbL = delL;
         mFbR = delR;
 

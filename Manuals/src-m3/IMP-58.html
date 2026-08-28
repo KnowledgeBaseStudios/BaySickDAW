@@ -94,68 +94,27 @@ void WorkspaceWindow::saveBounds() const
         b.translate (-o.x, -o.y);
     }
     sessionBounds()[mPersistKey] = b;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WorkspaceWindow.cpp (WorkspaceWindow::attachTo, lines 775-864)</summary><pre><code>// WorkspaceWindow.cpp -- WorkspaceWindow::attachTo (full function, lines 775-864)
-void WorkspaceWindow::attachTo (Workspace&amp; ws)
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\WorkspaceWindow.cpp (WorkspaceWindow::attachTo, lines 775-864)</summary><pre><code>// Source/Standalone/WorkspaceWindow.cpp  -  Workspace::originInParentClient (complete)
+juce::Point&lt;int&gt; Workspace::originInParentClient() const
 {
-    mWorkspace = &amp;ws;
-    ws.addWindow (this);
-
-    // Parent-client space: the peer&#x27;s coordinates are measured from the MAIN
-    // window&#x27;s client origin, so the workspace&#x27;s own offset inside the frame
-    // has to be added on.  (See the contract note in the header -- this is the
-    // one line that differs from how a top-level JUCE window is positioned.)
-    //
-    // WAIT FOR A LAID-OUT WORKSPACE, not just a peer (fix 2026-08-04).  A
-    // zero-size Workspace reports originInParentClient() as (0,0), so every
-    // window restored at that moment landed short by the real origin -- saved
-    // at origin (1,91), restored against (0,0), i.e. 91px too high, every
-    // launch.  It also collapsed the first-open default size, which is a
-    // fraction of the workspace, to its 480x320 floor.  Both symptoms, one
-    // cause.  Queue instead; Workspace::resized drains the queue once the
-    // frame is laid out and the handle + bounds are both real.
-    auto* parent = ws.getNativeParentHandle();
-    if (parent == nullptr || ws.getWidth() &lt;= 0 || ws.getHeight() &lt;= 0)
+    if (auto* peer = getPeer())
     {
-        ws.queueForAttach (this);
-        return;
+        auto&amp; frame = peer-&gt;getComponent();
+        if (&amp;frame != this)
+        {
+            // The frame's origin expressed in OUR space; negating it gives our
+            // position in the frame's space, which is what the child peers'
+            // parent-client coordinates are measured from.
+            const auto frameOrigin = getLocalPoint (&amp;frame, juce::Point&lt;int&gt; (0, 0));
+            return { -frameOrigin.x, -frameOrigin.y };
+        }
     }
+    return {};
+}
 
-    bool hasPos = true;
-    auto saved = loadSavedBounds (hasPos);
-    // First open: the window&#x27;s OWN minimum is its natural size -- those are
-    // the measured &quot;smallest still readable&quot; numbers, which Jeff set as both
-    // the floor and the default (2026-08-04).  Offset per already-open window
-    // so a fresh window never lands exactly on top of the one before it.  A
-    // SIZE-ONLY seed (T5: player sizes carry across projects, placement does
-    // not) keeps its size and takes the default spot.
-    const int step = 28 * juce::jmin (6, ws.getWindows().size() - 1);
-    if (saved.isEmpty())
-    {
-        // Nothing remembered.  Use the default if it is already known; if it is
-        // not (engine-derived size, engine still binding) open at a neutral
-        // placeholder and flag it, so setDefaultWindowSize snaps the window the
-        // moment the default arrives.  It still OPENS now rather than waiting:
-        // a page whose engine never binds must not end up with no window.
-        mOpenedAtPlaceholder = ! mDefaultKnown;
-        const auto sz = mDefaultKnown ? mDefaultSize
-                                      : juce::Point&lt;int&gt; { 480, 320 };
-        saved = juce::Rectangle&lt;int&gt; (24 + step, 24 + step, sz.x, sz.y);
-    }
-    else if (! hasPos)
-        saved.setPosition (24 + step, 24 + step);
-    // Never reopen below the window&#x27;s own minimum.  When the default is not yet
-    // known the constrainer still holds the anti-degenerate clamp, and
-    // setDefaultWindowSize raises the window when the real number lands.
-    saved.setSize (juce::jmax (saved.getWidth(),  mConstrainer.getMinimumWidth()),
-                   juce::jmax (saved.getHeight(), mConstrainer.getMinimumHeight()));
-    setBounds (saved);
-
-    addToDesktop (0, parent);
-    const auto o = ws.originInParentClient();
-    setTopLeftPosition (saved.getX() + o.x, saved.getY() + o.y);
-
+// Source/Standalone/WorkspaceWindow.cpp  -  Workspace::resized (complete)
     // LAND ON SCREEN (Jeff, 2026-08-05).  attachTo was the one path that never
-    // checked a window&#x27;s opening position -- clampWindowsIntoView runs only from
+    // checked a window's opening position -- clampWindowsIntoView runs only from
     // Workspace::resized(), so a window opened after the last workspace layout
     // was placed verbatim and never looked at.
     //
@@ -178,13 +137,7 @@ void WorkspaceWindow::attachTo (Workspace&amp; ws)
     {
         const ScopedSaveSuppress noSave;
         setBounds (clampPositionToWorkspace (getBounds()));
-    }
-
-    loadSavedFillState();   // Jeff 2026-08-06: both sizes survive a restart
-
-    setVisible (true);
-    toFront (true);
-}</code></pre></details>
+    }</code></pre></details>
 <pre class="formulas">- Child-peer coordinate contract: `addToDesktop(0, parentHwnd)` creates a real WS_CHILD OS window (vendored JUCE juce_Windowing_windows.cpp :2239, :2437). setBounds AND getBounds agree in the PARENT WINDOW&#x27;S CLIENT space (:1614 set, :1653 get). Window position = workspace-local position + `Workspace::originInParentClient()`.
 - Z-ORDER TRAP: a native child peer always renders ABOVE anything drawn into its parent — `setAlwaysOnTop` does NOT cross the drawn/native boundary. Any overlay meant to cover the workspace must be promoted to its own desktop window (the app&#x27;s one `VibeTooltip` is parentless for exactly this reason).
 - Windows are contained INSIDE the fixed fullscreen main frame (locked call 2b — FL-style contained workspace); the shell chose native children specifically because a hosted VST3 editor is a foreign HWND, and only native-vs-native shares one z-order space.

@@ -18,7 +18,72 @@
         };
         const float tiltDb = v.shelfDb * k;
         const float peakDb = v.peakDb  * k;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticPreampStyleDSP.cpp</summary><pre><code>        // 2. Block-rate dynamics analysis (mono-summed peak).
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\AcousticPreampStyleDSP.cpp</summary><pre><code>// Source/DSP/AcousticPreampStyleDSP.cpp  -  AcousticPreampStyleDSP::process (complete)
+void AcousticPreampStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    // Signal flow: input -&gt; Acoustic Resonance (base-IR conv + adaptive
+    // de-quack / modal bank / size tilt; User body = static conv wet/dry)
+    // -&gt; Schroeder ambience -&gt; Notch (when on) -&gt; Level -&gt; output.
+    // Conv IRs load on the message thread / prepare only -- never here.
+
+    // ── Acoustic Resonance ───────────────────────────────────────────────────
+    if (mBody == Body::User)
+    {
+        // Static convolution wet/dry -- a user IR is a fixed capture (locked
+        // no-regression).  Scratch preallocated in prepare(); the size guard
+        // only fires if the host exceeds the prepared block size.
+        if (mConvScratch.getNumChannels() &lt; numCh || mConvScratch.getNumSamples() &lt; n)
+            mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+        juce::dsp::AudioBlock&lt;float&gt; wb (mConvScratch);
+        auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; wctx (wsub);
+        mConv.process (wctx);
+
+        const float wetGain = mResonance01;
+        const float dryGain = 1.0f - mResonance01 * 0.5f;   // gentle dry duck so wet has room
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* dst = buffer.getWritePointer (ch);
+            const float* w = mConvScratch.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+        }
+    }
+    else if (mResonance01 &gt; 0.001f)
+    {
+        // 1. Base correction IR (the bundled piezo-to-real fingerprint),
+        //    wet/dry under the same Resonance macro.  Missing file -&gt;
+        //    adaptive-only (no conv).
+        if (mBaseIRLoaded)
+        {
+            if (mConvScratch.getNumChannels() &lt; numCh || mConvScratch.getNumSamples() &lt; n)
+                mConvScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+            for (int ch = 0; ch &lt; numCh; ++ch)
+                mConvScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+            juce::dsp::AudioBlock&lt;float&gt; wb (mConvScratch);
+            auto wsub = wb.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+            juce::dsp::ProcessContextReplacing&lt;float&gt; wctx (wsub);
+            mConv.process (wctx);
+
+            const float wetGain = mResonance01;
+            const float dryGain = 1.0f - mResonance01 * 0.5f;
+            for (int ch = 0; ch &lt; numCh; ++ch)
+            {
+                float* dst = buffer.getWritePointer (ch);
+                const float* w = mConvScratch.getReadPointer (ch);
+                for (int i = 0; i &lt; n; ++i) dst[i] = dst[i] * dryGain + w[i] * wetGain;
+            }
+        }
+
+        // 2. Block-rate dynamics analysis (mono-summed peak).
         float blockPeak = 0.0f;
         for (int ch = 0; ch &lt; numCh; ++ch)
         {
@@ -26,7 +91,8 @@
             for (int i = 0; i &lt; n; ++i) blockPeak = juce::jmax (blockPeak, std::abs (p[i]));
         }
         // Fast: instant attack / ~80 ms release (pick transients).
-        // Slow: ~400 ms one-pole (playing level).
+        // Slow: ~400 ms one-pole (playing level).  Block-rate is plenty for
+        // body-resonance breathing; coefs below only refresh at block rate.
         const float blockSec = (float) n / (float) mSampleRate;
         const float fastRel  = std::exp (-blockSec / 0.080f);
         const float slowCf   = 1.0f - std::exp (-blockSec / 0.400f);
@@ -39,7 +105,12 @@
         const float transient01 = juce::jlimit (0.0f, 1.0f,
             (mEnvFast - mEnvSlow) / juce::jmax (mEnvSlow, 1.0e-4f) * 0.5f);
 
-        // 3. Macro map -- the Resonance knob is the CEILING of the adaptive depth.
+        // 3. Macro map -- the Resonance knob is the CEILING of the adaptive
+        //    depth.  Calibration starting points (ear-tunable):
+        //    de-quack fully in by noon; body depth breathes 55-100 % with
+        //    level; pick attacks bloom the modes; the air (lowest) mode gains
+        //    extra weight past noon ("adds bass" upper half).  Per-body
+        //    voicing (centers / weights / Qs / size tilt) from kVoicing[].
         const float k         = mResonance01;
         const float quackDb   = -7.0f * juce::jmin (1.0f, k * 2.0f);
         const float bodyDepth = k * (0.55f + 0.45f * level01);
@@ -55,6 +126,10 @@
             (bodyDepth * 4.5f                     + bloom * 3.0f) * v.topW,   // top (pick knock)
             (bodyDepth * 3.5f                     + bloom * 1.5f) * v.bodW    // body
         };
+        // Broadband body voice scales with the KNOB only (k), not the
+        // dynamics depth -- a body's size is static; tying it to bodyDepth
+        // halved the A/B contrast at moderate playing levels.  The adaptive
+        // breathing stays on the modes + bloom above.
         const float tiltDb = v.shelfDb * k;
         const float peakDb = v.peakDb  * k;
 
@@ -75,7 +150,116 @@
         {
             makePeakCoefs (mDeQuack, mSampleRate, 2000.0f, 1.1f, quackDb);
             mAppliedQuackDb = quackDb;
-        }</code></pre></details>
+        }
+        if (bodyChanged || std::abs (tiltDb - mAppliedTiltDb) &gt; 0.05f)
+        {
+            makeLowShelfCoefs (mTilt, mSampleRate, v.shelfHz, 0.707f, tiltDb);
+            mAppliedTiltDb = tiltDb;
+        }
+        if (bodyChanged || std::abs (peakDb - mAppliedPeakDb) &gt; 0.05f)
+        {
+            makePeakCoefs (mBodyPeak, mSampleRate, v.peakHz, v.peakQ, peakDb);
+            mAppliedPeakDb = peakDb;
+        }
+        if (bodyChanged)
+        {
+            mCoefBody = bodyIdx;
+            for (auto&amp; m : mModes) m.reset();   // clear stale ring on body switch
+            mTilt.reset();
+            mBodyPeak.reset();
+        }
+
+        // 5. In-place series pass:
+        //    de-quack -&gt; air -&gt; top -&gt; body -&gt; shelf -&gt; voicing peak.
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* p = buffer.getWritePointer (ch);
+            if (ch == 0)
+                for (int i = 0; i &lt; n; ++i)
+                {
+                    float y = mDeQuack.processL (p[i]);
+                    y = mModes[0].processL (y);
+                    y = mModes[1].processL (y);
+                    y = mModes[2].processL (y);
+                    y = mTilt.processL (y);
+                    p[i] = mBodyPeak.processL (y);
+                }
+            else
+                for (int i = 0; i &lt; n; ++i)
+                {
+                    float y = mDeQuack.processR (p[i]);
+                    y = mModes[0].processR (y);
+                    y = mModes[1].processR (y);
+                    y = mModes[2].processR (y);
+                    y = mTilt.processR (y);
+                    p[i] = mBodyPeak.processR (y);
+                }
+        }
+    }
+
+    // ── Schroeder ambience wet/dry ──────────────────────────────────────────
+    if (mAmbience01 &gt; 0.001f)
+    {
+        if (mAmbScratch.getNumChannels() &lt; numCh || mAmbScratch.getNumSamples() &lt; n)
+            mAmbScratch.setSize (numCh, n, false, false, true);
+
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            const int chIdx = juce::jmin (ch, 1);
+            float* amb = mAmbScratch.getWritePointer (ch);
+            const float* in = buffer.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float x = in[i];
+                // 4 parallel combs summed
+                float c = 0.0f;
+                for (int k = 0; k &lt; 4; ++k) c += mCombs[k][chIdx].process (x);
+                c *= 0.25f;
+                // 2 series allpass
+                float y = mAllpasses[0][chIdx].process (c);
+                y       = mAllpasses[1][chIdx].process (y);
+                amb[i] = y;
+            }
+        }
+
+        const float wetGain = mAmbience01;
+        const float dryGain = 1.0f - mAmbience01 * 0.5f;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* dst = buffer.getWritePointer (ch);
+            const float* amb = mAmbScratch.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i) dst[i] = dst[i] * dryGain + amb[i] * wetGain;
+        }
+    }
+
+    // ── Notch (band-stop, last in chain - surgical feedback rejection) ──────
+    // OFF unless the panel knob leaves its bottom position (reference default).
+    // Process bandpass tap and subtract from main buffer to get band-stop.
+    if (mNotchOn)
+    {
+        if (mNotchScratch.getNumChannels() &lt; numCh || mNotchScratch.getNumSamples() &lt; n)
+            mNotchScratch.setSize (juce::jmax (2, numCh), n, false, false, true);
+        for (int ch = 0; ch &lt; numCh; ++ch)
+            mNotchScratch.copyFrom (ch, 0, buffer, ch, 0, n);
+        juce::dsp::AudioBlock&lt;float&gt; bpBlk (mNotchScratch);
+        auto bpSub = bpBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; bpCtx (bpSub);
+        mNotch.process (bpCtx);
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* dst = buffer.getWritePointer (ch);
+            const float* bp = mNotchScratch.getReadPointer (ch);
+            for (int i = 0; i &lt; n; ++i) dst[i] -= bp[i];
+        }
+    }
+
+    // ── Level (final output gain) ───────────────────────────────────────────
+    if (! juce::approximatelyEqual (mLevelDb, 0.0f))
+    {
+        const float g = juce::Decibels::decibelsToGain (mLevelDb, -60.0f);
+        buffer.applyGain (g);
+    }
+}</code></pre></details>
 <pre class="formulas">- Envelope followers (block rate): fast = instant attack, release `exp(-blockSec/0.080)` (~80 ms); slow one-pole `1 - exp(-blockSec/0.400)` (~400 ms). `level01` maps slow env over -42..-10 dBFS (`(slowDb+42)/32`); `transient01 = clamp((fast - slow)/slow * 0.5)`.
 - Macro map (k = Resonance knob, the ceiling): de-quack cut `-7 dB * min(1, 2k)` at 2 kHz Q 1.1 (fully in by noon); `bodyDepth = k * (0.55 + 0.45*level01)` (breathes 55-100% with level); `bloom = transient01 * k`; `lowExtra = max(0, k-0.5)*2` (air mode gains extra weight past noon = &quot;adds bass&quot;).
 - Mode gains: air `(bodyDepth*(5 + 4*lowExtra) + bloom*2) * airW`; top `(bodyDepth*4.5 + bloom*3) * topW`; body `(bodyDepth*3.5 + bloom*1.5) * bodW`. Transients widen the modes: `qEff = qBase / (1 + 0.30*transient01)`.

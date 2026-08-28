@@ -1,7 +1,7 @@
 <p>Finds several simultaneous pitches. Harder, less certain, and what the
 send-notes-to feature uses.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\PolyPitchTracker.cpp - key excerpts (full file 205 lines)</div><pre><code>// PolyPitchTracker::WorkerThread::analyze() -- greedy harmonic-sum detection
+<div class="codeblock"><div class="codehead">- Source\DSP\PolyPitchTracker.cpp (205 lines)</div><pre><code>// PolyPitchTracker::WorkerThread::analyze() -- greedy harmonic-sum detection
         constexpr int H = 8;                                  // harmonics summed
         const float scoreThresh = meanMag * (float) H * 3.0f;
 
@@ -29,7 +29,64 @@ send-notes-to feature uses.</p>
                 if (s &gt; bestS) { bestS = s; bestF = f; }
             }
             if (bestF &lt;= 0.0f || bestS &lt; scoreThresh) break;</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyPitchTracker.cpp - key excerpts (full file 205 lines)</summary><pre><code>    void analyze (const float* window, const float* hann,
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\PolyPitchTracker.cpp (205 lines)</summary><pre><code>// Source/DSP/PolyPitchTracker.cpp
+#include "PolyPitchTracker.h"
+#include &lt;cmath&gt;
+#include &lt;algorithm&gt;
+#include &lt;cstring&gt;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WorkerThread - pulls from the ring, windowed FFT, polyphonic detect, publish.
+// ─────────────────────────────────────────────────────────────────────────────
+class PolyPitchTracker::WorkerThread : public juce::Thread
+{
+public:
+    WorkerThread (PolyPitchTracker&amp; o)
+        : juce::Thread ("PolyPitchTracker"), owner (o) {}
+
+    void run() override
+    {
+        const int W = kWindowSize;
+        std::vector&lt;float&gt; rolling ((size_t) W, 0.0f);
+        std::vector&lt;float&gt; hann    ((size_t) W);
+        for (int i = 0; i &lt; W; ++i)
+            hann[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants&lt;float&gt;::twoPi
+                                                        * (float) i / (float) (W - 1));
+
+        juce::dsp::FFT     fft    (kFftOrder);
+        std::vector&lt;float&gt; fftBuf ((size_t) (2 * W), 0.0f);
+        mWork.assign ((size_t) (W / 2), 0.0f);
+
+        int totalIn = 0, sinceLast = 0;
+
+        while (! threadShouldExit())
+        {
+            const int ready = owner.mFifo.getNumReady();
+            if (ready &lt; kHopSize) { wait (5); continue; }
+
+            const int pull = std::min (ready, kHopSize);
+            int s1 = 0, b1 = 0, s2 = 0, b2 = 0;
+            owner.mFifo.prepareToRead (pull, s1, b1, s2, b2);
+            std::memmove (rolling.data(), rolling.data() + pull,
+                          (size_t) (W - pull) * sizeof (float));
+            int dest = W - pull;
+            for (int i = 0; i &lt; b1; ++i) rolling[(size_t) (dest + i)] = owner.mFifoBuf[(size_t) (s1 + i)];
+            dest += b1;
+            for (int i = 0; i &lt; b2; ++i) rolling[(size_t) (dest + i)] = owner.mFifoBuf[(size_t) (s2 + i)];
+            owner.mFifo.finishedRead (pull);
+
+            totalIn   += pull;
+            sinceLast += pull;
+            if (totalIn &gt;= W &amp;&amp; sinceLast &gt;= kHopSize)
+            {
+                analyze (rolling.data(), hann.data(), fft, fftBuf);
+                sinceLast = 0;
+            }
+        }
+    }
+
+private:
+    void analyze (const float* window, const float* hann,
                   juce::dsp::FFT&amp; fft, std::vector&lt;float&gt;&amp; fftBuf)
     {
         const int W = kWindowSize;
@@ -91,7 +148,7 @@ send-notes-to feature uses.</p>
             }
             ns.freqs[ns.count++] = refF;
 
-            // Subtract the claimed note&#x27;s harmonics from the working spectrum.
+            // Subtract the claimed note's harmonics from the working spectrum.
             for (int h = 1; h &lt;= H; ++h)
             {
                 const int b = binOf (refF * (float) h);
@@ -105,7 +162,79 @@ send-notes-to feature uses.</p>
         owner.mSeq.fetch_add (1, std::memory_order_acq_rel);
         owner.mShared = ns;
         owner.mSeq.fetch_add (1, std::memory_order_release);
-    }</code></pre></details>
+    }
+
+    PolyPitchTracker&amp;  owner;
+    std::vector&lt;float&gt; mWork;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PolyPitchTracker
+// ─────────────────────────────────────────────────────────────────────────────
+
+PolyPitchTracker::PolyPitchTracker()
+{
+    mFifoBuf.resize ((size_t) kRingSize, 0.0f);
+}
+
+PolyPitchTracker::~PolyPitchTracker()
+{
+    releaseResources();
+}
+
+void PolyPitchTracker::prepare (double sampleRate)
+{
+    if (mWorker != nullptr) releaseResources();
+    mSampleRate = (sampleRate &gt; 0.0) ? sampleRate : 44100.0;
+    reset();
+    mWorker = std::make_unique&lt;WorkerThread&gt; (*this);
+    mWorker-&gt;startThread (juce::Thread::Priority::low);
+}
+
+void PolyPitchTracker::releaseResources()
+{
+    if (mWorker != nullptr)
+    {
+        mWorker-&gt;signalThreadShouldExit();
+        mWorker-&gt;stopThread (200);
+        mWorker.reset();
+    }
+}
+
+void PolyPitchTracker::reset() noexcept
+{
+    mFifo.reset();
+    std::fill (mFifoBuf.begin(), mFifoBuf.end(), 0.0f);
+    mSeq.store (0, std::memory_order_release);
+    mShared = NoteSet{};
+}
+
+void PolyPitchTracker::pushAudio (const float* mono, int numSamples) noexcept
+{
+    if (mono == nullptr || numSamples &lt;= 0) return;
+    int s1 = 0, b1 = 0, s2 = 0, b2 = 0;
+    const int n = juce::jmin (numSamples, mFifo.getFreeSpace());
+    if (n &lt;= 0) return;
+    mFifo.prepareToWrite (n, s1, b1, s2, b2);
+    if (b1 &gt; 0) std::memcpy (mFifoBuf.data() + s1, mono,      (size_t) b1 * sizeof (float));
+    if (b2 &gt; 0) std::memcpy (mFifoBuf.data() + s2, mono + b1, (size_t) b2 * sizeof (float));
+    mFifo.finishedWrite (n);
+}
+
+PolyPitchTracker::NoteSet PolyPitchTracker::getNotes() const noexcept
+{
+    NoteSet ns;
+    for (int attempt = 0; attempt &lt; 8; ++attempt)
+    {
+        const uint32_t s1 = mSeq.load (std::memory_order_acquire);
+        if (s1 &amp; 1u) continue;                 // write in progress
+        ns = mShared;                          // snapshot
+        const uint32_t s2 = mSeq.load (std::memory_order_acquire);
+        if (s1 == s2) break;                   // clean read
+    }
+    ns.count = juce::jlimit (0, kMaxNotes, ns.count);
+    return ns;
+}</code></pre></details>
 <pre class="formulas">- Geometry: `kFftOrder = 12` -&gt; window 4096 (~93 ms @ 44.1k), hop 1024, Hann window, `juce::dsp::FFT::performFrequencyOnlyForwardTransform`.
 - Note cap: `kMaxNotes = 6`; consumer-settable via `setMaxNotes` (Bass uses 1-2).
 - Frequency range defaults: 70..1200 Hz (`mMinHz`/`mMaxHz` atomics, set per instrument Guitar vs Bass); floor clamped to `binHz * 2`, ceiling to `sr * 0.45`.

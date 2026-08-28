@@ -1,6 +1,6 @@
 <p>Estimates tempo from audio. Behind the Tap button and the tempo field.</p>
 
-<div class="codeblock"><div class="codehead">- Source\DSP\BpmDetect.h - key excerpts (full file 119 lines, header-only, namespace BpmDetect)</div><pre><code>// BpmDetect::detect() -- comb-scored autocorrelation core
+<div class="codeblock"><div class="codehead">- Source\DSP\BpmDetect.h (119 lines, header-only, namespace BpmDetect)</div><pre><code>// BpmDetect::detect() -- comb-scored autocorrelation core
         // 3) autocorrelation over the 60-200 BPM lag range (+ double-lag
         //    headroom for the comb), comb-scored: score(L) = r(L) + r(2L)/2
         //    + r(L/2)/3.
@@ -29,7 +29,29 @@
             ++scored;
             if (s &gt; bestScore) { bestScore = s; bestLag = lag; }
         }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BpmDetect.h - key excerpts (full file 119 lines, header-only, namespace BpmDetect)</summary><pre><code>    inline Estimate detect (juce::AudioFormatReader&amp; reader)
+<details class="fullfn"><summary>Full function &mdash; - Source\DSP\BpmDetect.h (119 lines, header-only, namespace BpmDetect)</summary><pre><code>// Source/DSP/BpmDetect.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+#include &lt;vector&gt;
+#include &lt;cmath&gt;
+
+// QA-Ec G1-boundary (Jeff picks A/A, 2026-07-08): content tempo estimation.
+// Onset-energy-flux -&gt; comb-scored autocorrelation.  Used at import (a
+// confident estimate becomes the clip's natural tempo identity instead of
+// the project-tempo assumption) and by the per-clip Properties display.
+// Message thread only (file I/O).  Loops and full-band material detect
+// reliably; sparse/rubato material returns confident=false (callers fall
+// back / display "not detectable").  The comb scoring is the octave-error
+// guard: a true tempo's half and double lags also resonate.
+namespace BpmDetect
+{
+    struct Estimate
+    {
+        double bpm       { 0.0 };
+        bool   confident  { false };
+    };
+
+    inline Estimate detect (juce::AudioFormatReader&amp; reader)
     {
         Estimate out;
         const double sr = reader.sampleRate;
@@ -75,8 +97,34 @@
         mean /= (double) juce::jmax (1, nFrames - 1);
         for (auto&amp; v : flux) v -= (float) mean;
 
-        // [stage 3 = the comb-scored autocorrelation shown in the excerpt]
+        // 3) autocorrelation over the 60-200 BPM lag range (+ double-lag
+        //    headroom for the comb), comb-scored: score(L) = r(L) + r(2L)/2
+        //    + r(L/2)/3.
+        const double fps    = sr / (double) kFrame;
+        const int    minLag = juce::jmax (2, (int) std::floor (fps * 60.0 / 200.0));
+        const int    maxLag = (int) std::ceil (fps * 60.0 / 60.0);
+        if (maxLag * 2 + 1 &gt;= nFrames) return out;
 
+        std::vector&lt;double&gt; r ((size_t) (maxLag * 2 + 2), 0.0);
+        for (int lag = juce::jmax (1, minLag / 2); lag &lt;= maxLag * 2 + 1; ++lag)
+        {
+            double s = 0.0;
+            for (int f = 0; f + lag &lt; nFrames; ++f)
+                s += (double) flux[(size_t) f] * flux[(size_t) (f + lag)];
+            r[(size_t) lag] = s / (double) (nFrames - lag);
+        }
+
+        double bestScore = 0.0, meanScore = 0.0;
+        int    bestLag = 0, scored = 0;
+        for (int lag = minLag; lag &lt;= maxLag; ++lag)
+        {
+            double s = r[(size_t) lag];
+            if ((size_t) (lag * 2) &lt; r.size()) s += 0.5  * r[(size_t) (lag * 2)];
+            if (lag / 2 &gt;= juce::jmax (1, minLag / 2)) s += 0.33 * r[(size_t) (lag / 2)];
+            meanScore += s;
+            ++scored;
+            if (s &gt; bestScore) { bestScore = s; bestLag = lag; }
+        }
         if (bestLag &lt;= 0 || scored == 0 || bestScore &lt;= 0.0)
             return out;
         meanScore /= (double) scored;
@@ -99,7 +147,8 @@
         // real material over/under-triggers.
         out.confident = meanScore &gt; 1e-12 &amp;&amp; bestScore &gt; 2.0 * meanScore;
         return out;
-    }</code></pre></details>
+    }
+}</code></pre></details>
 <pre class="formulas">- Analysis bound: up to 60 s (`kMaxAnalyzeSeconds = 60.0`), frame size `kFrame = 512` (~86 Hz envelope rate at 44.1k); minimum `nFrames &gt;= 172` (~2 s) or no estimate.
 - Envelope: per-frame log energy `log10(1 + sum(x^2))` over all channels.
 - Onset strength: half-wave-rectified first difference of the log energy, mean-removed.

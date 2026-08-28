@@ -22,7 +22,69 @@
                 const float x = d[i] * env[baseIdx] + kAsymBias;
                 d[i] = std::tanh (x) - kAsymBiasOffset;
             }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassDriverStyleDSP.cpp</summary><pre><code>    // 2. Sum Mid + High into the &quot;to-be-clipped&quot; path.
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\BassDriverStyleDSP.cpp</summary><pre><code>// Source/DSP/BassDriverStyleDSP.cpp  -  BassDriverStyleDSP::process (complete)
+void BassDriverStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    if (bypassed) return;
+    juce::ScopedNoDenormals noDenormals;
+
+    const int numCh = buffer.getNumChannels();
+    const int n     = buffer.getNumSamples();
+    if (numCh == 0 || n == 0) return;
+
+    // Lazy resize scratch buffers if the host block grew.
+    auto ensureSize = [n, numCh] (juce::AudioBuffer&lt;float&gt;&amp; b)
+    {
+        if (b.getNumChannels() &lt; numCh || b.getNumSamples() &lt; n)
+            b.setSize (numCh, n, false, false, true);
+    };
+    ensureSize (mLowBuf);
+    ensureSize (mMidBuf);
+    ensureSize (mHighBuf);
+    ensureSize (mClippedSumBuf);
+    ensureSize (mCleanSumBuf);
+
+    // Copy input into the working buffers.  We need the input in two places:
+    // the low-pass branch (-&gt; mLowBuf) and the high-pass branch (-&gt; midHigh).
+    // Use mLowBuf as the LP destination and a local highpass into mMidBuf
+    // (which gets further split into Mid + High).
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        mLowBuf.copyFrom  (ch, 0, buffer, ch, 0, n);
+        mMidBuf.copyFrom  (ch, 0, buffer, ch, 0, n);  // shared starting point
+    }
+
+    // 1a. Xover1 split @ 500 Hz: mLowBuf &lt;- LP, mMidBuf &lt;- HP (rest).
+    {
+        juce::dsp::AudioBlock&lt;float&gt; lowBlk (mLowBuf);
+        juce::dsp::AudioBlock&lt;float&gt; midBlk (mMidBuf);
+        auto lowSub = lowBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        auto midSub = midBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; lowCtx (lowSub);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; midCtx (midSub);
+        mXover1Lp.process (lowCtx);
+        mXover1Hp.process (midCtx);
+    }
+
+    // 1b. Xover2 split @ 2 kHz: mMidBuf has both Mid + High after Xover1Hp;
+    //     mHighBuf &lt;- HP of Xover2 (the high band); mMidBuf &lt;- LP of Xover2
+    //     (the mid band).
+    for (int ch = 0; ch &lt; numCh; ++ch)
+        mHighBuf.copyFrom (ch, 0, mMidBuf, ch, 0, n);
+    {
+        juce::dsp::AudioBlock&lt;float&gt; midBlk  (mMidBuf);
+        juce::dsp::AudioBlock&lt;float&gt; highBlk (mHighBuf);
+        auto midSub  = midBlk .getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        auto highSub = highBlk.getSubBlock (0, (size_t) n).getSubsetChannelBlock (0, (size_t) numCh);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; midCtx  (midSub);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; highCtx (highSub);
+        mXover2Lp.process (midCtx);
+        mXover2Hp.process (highCtx);
+    }
+
+    // 2. Sum Mid + High into the "to-be-clipped" path.  Apply per-band trims
+    //    (mHigh on the high band) before summing -- the spec exposes Low and
+    //    High as gain knobs but Mid is whatever's left.
     for (int ch = 0; ch &lt; numCh; ++ch)
     {
         const float* mid  = mMidBuf .getReadPointer (ch);
@@ -95,7 +157,31 @@
         float* out           = buffer.getWritePointer (ch);
         for (int i = 0; i &lt; n; ++i)
             out[i] = low[i] * mLow + cleanMH[i] * gC + wetMH[i] * gW;
-    }</code></pre></details>
+    }
+
+    // 5. 5 Hz DC blocker (asymmetric shaper leaves bias at silence).
+    {
+        const float R = mDcCoef;
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            float* d = buffer.getWritePointer (ch);
+            float&amp; xPrev = (ch == 0) ? mDcXL : mDcXR;
+            float&amp; yPrev = (ch == 0) ? mDcYL : mDcYR;
+            for (int i = 0; i &lt; n; ++i)
+            {
+                const float in = d[i];
+                const float y  = in - xPrev + R * yPrev;
+                xPrev = in;
+                yPrev = y;
+                d[i]  = y;
+            }
+        }
+    }
+
+    // 6. Output level.
+    if (mLevel != 0.0f)
+        buffer.applyGain (juce::Decibels::decibelsToGain (mLevel, -60.0f));
+}</code></pre></details>
 <pre class="formulas">- Band split: Linkwitz-Riley crossovers at 500 Hz (low/mid — lows below 500 stay clean, BB-1X behavior) and 2 kHz (mid/high).
 - Drive scalar: `baseDrive = 1 + drive01 * 14` (1..15x — bass drivers gentler than guitar ODs).
 - Adaptive drive (MDP-style): envelope follower on the Mid+High sum (~3 ms attack, ~80 ms release); `lift = tanh(env * 3)`; per-sample drive = `baseDrive * (0.4 + 0.6 * lift)` — soft playing gets 40% of the knob, digging in reaches 100%.

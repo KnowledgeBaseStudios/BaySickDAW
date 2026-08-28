@@ -34,8 +34,33 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
     mOfflinePrevBlk  = getBlockSize();
     mOfflinePrevSong = isSongMode();
     mOfflinePrevHead = getPlayHead();</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7939+, endOfflineRender lines 8041+)</summary><pre><code>    // A freeze re-render during project load arrives with the load shield
-    // raised, and processBlock&#x27;s shield bail would clear every block of the
+<details class="fullfn"><summary>Full function &mdash; - Source\PluginProcessor.cpp (BaySickDAWProcessor::beginOfflineRender lines 7939+, endOfflineRender lines 8041+)</summary><pre><code>// Source/PluginProcessor.cpp  -  BaySickDAWProcessor::beginOfflineRender (complete)
+// ── QA-ModelShell TS2: offline render drive ──────────────────────────────────
+bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int renderBlockSize)
+{
+    if (renderSampleRate &lt;= 0.0 || renderBlockSize &lt;= 0) return false;
+
+    // ONE render at a time, whoever asks: export/measure call this from their
+    // background thread while freeze renders call it on the message thread.
+    // Two interleaved suspend/restore sequences corrupt both renders AND the
+    // restore set, so the loser fails cleanly instead.
+    bool expected = false;
+    if (! mOfflineRenderActive.compare_exchange_strong (expected, true))
+        return false;
+
+    // Device callbacks stop reaching processBlock (the standalone player
+    // checks isSuspended and outputs silence); the render loop becomes the
+    // only caller.  One settle outlasts any in-flight device block.
+    suspendProcessing (true);
+    juce::Thread::sleep (30);
+
+    mOfflinePrevSr   = getSampleRate();
+    mOfflinePrevBlk  = getBlockSize();
+    mOfflinePrevSong = isSongMode();
+    mOfflinePrevHead = getPlayHead();
+
+    // A freeze re-render during project load arrives with the load shield
+    // raised, and processBlock's shield bail would clear every block of the
     // render (the offline loop calls processBlock directly, so the suspension
     // above does not gate it).  Dropping the shield here is safe because the
     // device is already suspended -- the render loop is the only caller left
@@ -49,7 +74,7 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
         mEngineRig-&gt;forEachEngine ([offline] (juce::AudioProcessor&amp; p)
         {
             p.setNonRealtime (offline);
-            // The vocal&#x27;s embedded NAM/IR is not a rig-owned stage.
+            // The vocal's embedded NAM/IR is not a rig-owned stage.
             if (auto* v = dynamic_cast&lt;BaySickVocalProcessor*&gt; (&amp;p))
                 v-&gt;getNamIrProcessor().setNonRealtime (offline);
         });
@@ -67,16 +92,45 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
 
     // CL-282: clip streamers switch to synchronous blocking reads (a fast
     // render outruns the background prefetch by design); counter reset so
-    // endOfflineRender&#x27;s report proves the export had zero silent gaps.
+    // endOfflineRender's report proves the export had zero silent gaps.
     AudioClipStreamer::sUnderrunCount.store (0, std::memory_order_relaxed);
     AudioClipStreamer::sPeakPrefillMs.store (0.0f, std::memory_order_relaxed);
     AudioClipStreamer::sOfflineRender.store (true, std::memory_order_release);
 
+    // MESSAGE THREAD, GUARANTEED BY THE CALLER (Jeff's ruling B, 2026-08-22).
+    // Everything below reaches hosted VST3 plugins, and the VST3 spec requires
+    // IComponent::setupProcessing / setActive / activateBus on the MAIN thread --
+    // JUCE asserts it and says why: "some plugins may break".
+    //
+    // The first cut marshalled here with MessageManager::callSync so a worker
+    // could call in.  That was replaced: the export dialog joins its worker FROM
+    // the message thread, so a worker waiting on the message thread deadlocked
+    // whenever the window was closed during a render's setup or teardown.  Every
+    // caller now opens and closes the session from the message thread itself
+    // (BuilderPage::enterOfflineRender / leaveOfflineRender), so there is no
+    // cross-thread wait left anywhere on this path.
+    jassert (juce::MessageManager::getInstance()-&gt;isThisTheMessageThread());
+
+    // THE TIMELINE MUST SPEAK THE RENDER'S RATE (Jeff, 2026-08-22).  Every
+    // TempoMap segment's sample position is baked at the rate it was published
+    // with -- the live DEVICE rate -- and every beat&lt;-&gt;sample conversion the
+    // render performs goes through it: the per-block scheduling window, the clip
+    // start/end positions, the loop-wrap math.  Rendering at a rate the device is
+    // not running at therefore read the whole timeline through the wrong divisor
+    // (a 44.1k export on a 48k device: 0.91875).  Restored in endOfflineRender.
+    //
+    // Safe as a lone writer: the device is suspended above, the editor's rate
+    // watch is gated on ! isNonRealtime() which the sweep just set, and publish
+    // is message-thread-only -- which the caller guarantees.
+    mOfflinePrevMapSr = republishTempoMapAtRate (renderSampleRate);
+
     // Wet-tail hygiene: the render must not open on live reverb/delay tails.
     mVibeGraph.reset();
 
-    // Full re-prepare at the render config -- prepareToPlay sweeps every
-    // engine + the graph, so the render rate is independent of the device&#x27;s.
+    // Full re-prepare at the render config -- prepareToPlay sweeps every engine
+    // + the graph, so the render rate is independent of the device's.  The
+    // thread marker lets prepareToPlay tell a render's re-prepare from a real
+    // device open.
     mOfflineReconfigureThread.store (juce::Thread::getCurrentThreadId(),
                                      std::memory_order_release);
     prepareToPlay (renderSampleRate, renderBlockSize);

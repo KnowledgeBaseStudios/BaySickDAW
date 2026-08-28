@@ -18,85 +18,49 @@ thirty-block drag undo in a single press.</p>
     // unit test permanently over, making minimumTransactionsToKeep the exact
     // retained count.
     mUndoManager.setMaxNumberOfStoredUnits (1, 100);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Standalone\UndoActions.h (UndoContext, lines 17-46; StructuralOpAction, lines 325-370)</summary><pre><code>// UndoActions.h -- struct UndoContext (full struct, lines 17-46)
-struct UndoContext
+<details class="fullfn"><summary>Full function &mdash; Source\Standalone\UndoActions.h (UndoContext, lines 17-46; StructuralOpAction, lines 325-370)</summary><pre><code>// Source/Standalone/StandaloneEditor.cpp  -  StandaloneEditor::makeUndoContext (complete)
+UndoContext StandaloneEditor::makeUndoContext(const juce::String&amp; ownerKey)
 {
-    juce::UndoManager* manager { nullptr };
-
-    // Perform an undoable action. Takes ownership. Also updates the global
-    // history-label list maintained by StandaloneEditor.
-    std::function&lt;bool(juce::UndoableAction*, const juce::String&amp; label)&gt; perform;
-
-    // Undo / redo - ALWAYS use these instead of calling manager-&gt;undo/redo() directly.
-    // These route through StandaloneEditor::globalUndo/Redo() so mHistoryCursor stays
-    // in sync and the history window refreshes correctly.
-    std::function&lt;void()&gt; undo;
-    std::function&lt;void()&gt; redo;
-
-    // Open the global undo history window (optional - wire where available).
-    std::function&lt;void()&gt; showHistory;
-
-    // Jeff ruling 2026-08-06 (fix now): page-lifetime undo entries must
-    // survive delete + resurrect cycles.  Resurrection creates a NEW page
-    // object, so a SafePointer captured at gesture time goes null and the
-    // entry silently skips.  Apply lambdas resolve the LIVE page through
-    // this instead: it returns the CURRENT page owning this context&#x27;s
-    // identity (the editor derives kind + pageIndex from the ctx owner key),
-    // or nullptr while the tab is genuinely absent -- the history ORDER
-    // re-creates it before its rows replay.  Wired by
-    // StandaloneEditor::makeUndoContext; null on non-page contexts.
-    std::function&lt;juce::Component*()&gt; resolveOwnerPage;
-
-    bool isValid() const { return manager != nullptr &amp;&amp; (bool)perform; }
-};
-
-// UndoActions.h -- class StructuralOpAction (full class, lines 325-370)
-// ── StructuralOpAction (QA-UndoCoverage Task 7) ───────────────────────────────
-// One structural user gesture (tab add / delete / duplicate, engine pick or
-// swap, kit load) as one undoable transaction.  The op has ALREADY happened
-// when this action is performed (skip-first convention); undoFn reverses it
-// and redoFn re-applies it.  Snapshot temp files referenced by the lambdas
-// are owned here -- deleted when the action dies (depth-cap drop, history
-// clear, manager teardown), which is what keeps the UndoSnapshots store
-// bounded by the history depth.
-// ─────────────────────────────────────────────────────────────────────────────
-class StructuralOpAction : public juce::UndoableAction
-{
-public:
-    StructuralOpAction (std::function&lt;void()&gt; undoFn,
-                        std::function&lt;void()&gt; redoFn,
-                        juce::Array&lt;juce::File&gt; ownedSnapshots = {})
-        : mUndo (std::move (undoFn))
-        , mRedo (std::move (redoFn))
-        , mSnapshots (std::move (ownedSnapshots))
-    {}
-
-    ~StructuralOpAction() override
+    UndoContext ctx;
+    ctx.manager = &amp;mUndoManager;
+    ctx.perform  = [this, ownerKey](juce::UndoableAction* a, const juce::String&amp; l)
     {
-        for (const auto&amp; f : mSnapshots)
-            f.deleteFile();
-    }
-
-    bool perform() override
+        return doUndoAction(a, l, ownerKey);
+    };
+    ctx.undo        = [this] { globalUndo(); };
+    ctx.redo        = [this] { globalRedo(); };
+    ctx.showHistory = [this] { showHistoryWindow(); };
+    // Jeff ruling 2026-08-06: live-page resolution for page-lifetime undo
+    // entries (see the UndoContext decl).  The ctx owner key carries the
+    // page identity ("drm3", "lay0", ...) -- the same pageIndex-keyed
+    // identity the resurrection spine preserves, so a re-created page
+    // answers to its old key.  No prefix here prefixes another, so the
+    // first match is the match.
+    ctx.resolveOwnerPage = [this, ownerKey]() -&gt; juce::Component*
     {
-        if (mFirstPerform) { mFirstPerform = false; return true; }
-        if (mRedo) mRedo();
-        return true;
-    }
-    bool undo() override
-    {
-        if (mUndo) mUndo();
-        return true;
-    }
-    int getSizeInUnits() override { return (int) sizeof (*this); }
-
-private:
-    std::function&lt;void()&gt;  mUndo, mRedo;
-    juce::Array&lt;juce::File&gt; mSnapshots;
-    bool                   mFirstPerform { true };
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StructuralOpAction)
-};</code></pre></details>
+        static const struct { const char* prefix; RibbonTabBar::TabType type; } kOwnerMap[] = {
+            { "lay",  RibbonTabBar::TabType::Layers  },
+            { "bass", RibbonTabBar::TabType::Bass    },
+            { "drm",  RibbonTabBar::TabType::Drums   },
+            { "vox",  RibbonTabBar::TabType::Vox     },
+            { "inst", RibbonTabBar::TabType::Inst    },
+            { "plug", RibbonTabBar::TabType::Plugins },
+        };
+        for (const auto&amp; m : kOwnerMap)
+        {
+            if (! ownerKey.startsWith (m.prefix)) continue;
+            const juce::String rest = ownerKey.substring ((int) strlen (m.prefix));
+            if (rest.isEmpty() || ! rest.containsOnly ("0123456789")) continue;
+            const int idx = rest.getIntValue();
+            for (auto* e : mPages)
+                if (e != nullptr &amp;&amp; e-&gt;type == m.type &amp;&amp; pageIndexOfEntry (*e) == idx)
+                    return e-&gt;component.get();
+            return nullptr;
+        }
+        return nullptr;
+    };
+    return ctx;
+}</code></pre></details>
 <pre class="formulas">- ONE app-wide `juce::UndoManager`, owned by the processor, threaded by EngineRig into every engine APVTS ctor (each stamped with an undoOwnerTag so a parameter transaction re-resolves to its target after the engine is destroyed and re-created). Pages hold only an `UndoContext` by value.
 - Depth trick: `setMaxNumberOfStoredUnits(1, N)` — maxUnits = 1 keeps JUCE&#x27;s unit test PERMANENTLY over, so `minimumTransactionsToKeep` (the second argument) IS the retained transaction count. Menu depths: 100 (default) / 250 / 500 / 1000 (menu ids 510-513). The old (n, 30) shape silently collapsed every setting to ~30 transactions.
 - Skip-first convention (PianoRollEditAction / PitchEditAction / StructuralOpAction): the edit is ALREADY applied before commitEdit calls `UndoManager::perform()`, so the first perform() is a no-op; redo works on subsequent calls. AutomationLaneEditAction does NOT skip (perform applies mAfter directly).

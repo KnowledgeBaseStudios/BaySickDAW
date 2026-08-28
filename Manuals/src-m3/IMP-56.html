@@ -26,7 +26,13 @@ nothing compared to an audio dropout, so the design makes the visual lose.</p>
         uint32_t s2 = mSeq.load(std::memory_order_acquire);
         return s1 == s2;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\DSP\SpectrumFeed.h (struct SpectrumFeed, banner + complete struct, lines 6-49)</summary><pre><code>// ─── SpectrumFeed ────────────────────────────────────────────────────────────
+<details class="fullfn"><summary>Full function &mdash; Source\DSP\SpectrumFeed.h (struct SpectrumFeed, banner + complete struct, lines 6-49)</summary><pre><code>// Source/DSP/SpectrumFeed.h
+#pragma once
+#include &lt;JuceHeader.h&gt;
+#include &lt;atomic&gt;
+#include &lt;algorithm&gt;
+
+// ─── SpectrumFeed ────────────────────────────────────────────────────────────
 // Lock-free, wait-free seqlock ring for moving one block of audio samples from
 // the audio thread to the UI thread for spectrum-analyser display.
 // The audio thread calls push() every block; the UI thread polls at ~30 Hz.

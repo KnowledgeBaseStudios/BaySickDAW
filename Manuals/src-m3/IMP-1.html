@@ -36,7 +36,8 @@ knee variants add an automatic release on top.</p>
                 const float w = juce::jlimit (0.0f, 1.0f, mOptoHistory / 6.0f);
                 rCoef = (1.0f - w) * mOptoFastRelCoef + w * mOptoSlowRelCoef;
             }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source/DSP/CompressorDSP.cpp (mechanism), Source/DSP/CompressorDSP.h (Type enum, state members)</summary><pre><code>// CompressorDSP::computeGainDb -- complete
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/CompressorDSP.cpp (mechanism), Source/DSP/CompressorDSP.h (Type enum, state members)</summary><pre><code>// Source/DSP/CompressorDSP.cpp  -  CompressorDSP::computeGainDb (complete)
+// -----------------------------------------------------------------------------
 float CompressorDSP::computeGainDb (float levelDb) const noexcept
 {
     // Use smoothed values where we snapshot them (levelDb and ratio come in
@@ -44,7 +45,7 @@ float CompressorDSP::computeGainDb (float levelDb) const noexcept
     // public members which are updated each sample by the caller.
     const float overshoot = levelDb - threshold;
 
-    // Opto (LA-2A): level-dependent RISING ratio -- the T4 cell&#x27;s nonlinear,
+    // Opto (LA-2A): level-dependent RISING ratio -- the T4 cell's nonlinear,
     // program-dependent curve, not a fixed ratio.  Comp rises 1.5:1 -&gt; 4:1 (~3:1
     // average, the LA-2A Compress spec); Limit rises 8:1 -&gt; 80:1 -- a SOFT ceiling
     // that holds the output within ~0.25 dB of threshold at the top (actually
@@ -60,6 +61,15 @@ float CompressorDSP::computeGainDb (float levelDb) const noexcept
         return (1.0f / effR - 1.0f) * overshoot;   // negative dB gain reduction
     }
 
+    // Vintage optical model (knee types 2 and 6): above threshold the ratio
+    // relaxes from the user's ratio toward a gentle 2:1 floor over 12 dB,
+    // mimicking electro-optical softening.  QA-EffectsReview Task 6 (a): the
+    // relax target was 1:1, which zeroed gain reduction on peaks &gt; 12 dB over
+    // threshold (GR humped, then collapsed -- the comp stopped compressing
+    // exactly when the signal was loudest).  Flooring at 2:1 keeps the slope
+    // &lt; 1 so output stays monotonic and loud peaks are still caught.  floorRatio
+    // = min(ratio,2): never relax a ratio already &lt;= 2:1 (nothing to soften), so
+    // low ratios + upward expansion keep the user's setting.
     float effectiveRatio = ratio;
 
     // FET (1176) all-buttons-in: a program-dependent RISING ratio -- the bias
@@ -78,7 +88,7 @@ float CompressorDSP::computeGainDb (float levelDb) const noexcept
 
     // Vintage knee is a Modern-algorithm character only (the FET/Opto/CS panels
     // never expose the knee selector; FET forces a hard knee).  Gate on Modern
-    // so a stale mKneeType can&#x27;t apply the optical taper to another Type.
+    // so a stale mKneeType can't apply the optical taper to another Type.
     const bool isVintage = (mType == Type::Modern) &amp;&amp; (mKneeType == 2 || mKneeType == 6);
     if (isVintage &amp;&amp; overshoot &gt; 0.0f)
     {
@@ -113,37 +123,195 @@ float CompressorDSP::computeGainDb (float levelDb) const noexcept
     return threshold + overshoot / effectiveRatio - levelDb;
 }
 
-// CompressorDSP::calcCoefs -- complete (all time constants)
-void CompressorDSP::calcCoefs()
+// Source/DSP/CompressorDSP.cpp  -  CompressorDSP::process (complete)
+// -----------------------------------------------------------------------------
+void CompressorDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 {
-    // One-pole smoothing coefficients: coef = exp(-1 / (time_s * sr))
+    if (bypassed)
+        return;
+
+    juce::ScopedNoDenormals noDenormals;  // A3
+
+    const int numSamples  = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    if (numSamples == 0 || numChannels == 0)
+        return;
+
+    // T18: the visual wants the INPUT the compressor is reacting to, captured
+    // before this function changes the buffer.  Gated: costs one buffer scan
+    // per block, and only while a visual window is watching.
+    const bool  visActive = mVisualFeed.isActive();
+    const float visInPk   = visActive ? buffer.getMagnitude (0, numSamples) : 0.0f;
+
+    // C.4 Phase 1 (2026-04-30): the strip's SC array is the single source of
+    // truth for the detection source -- mScPick is set each block by
+    // EffectRack from slot.scPick.  scPick == -1 (no source selected) leaves
+    // SC off and detection falls back to the input buffer.
+    if (auto* scBuf = getActiveSidechain())
+    {
+        useSidechain     = true;
+        mSidechainBuffer = scBuf;
+    }
+    else
+    {
+        useSidechain     = false;
+        mSidechainBuffer = nullptr;
+    }
+
+    // -- Detection source (sidechain or input) -----------------------------
+    const juce::AudioBuffer&lt;float&gt;* detSrc = &amp;buffer;
+    if (useSidechain &amp;&amp; mSidechainBuffer != nullptr &amp;&amp;
+        mSidechainBuffer-&gt;getNumSamples() &gt;= numSamples &amp;&amp;
+        mSidechainBuffer-&gt;getNumChannels() &gt; 0)
+    {
+        detSrc = mSidechainBuffer;
+    }
+
+    const int    detChans = detSrc-&gt;getNumChannels();
+    const float* detL     = detSrc-&gt;getReadPointer(0);
+    const float* detR     = (detChans &gt; 1) ? detSrc-&gt;getReadPointer(1) : detL;
+
+    // 2c -- Auto-makeup: compute once per block from current params.
+    // Reference formula: makeup = -computeGainDb(threshold + 6 dB). This matches
+    // FL Studio / Ableton behavior - the compressor compensates for the gain
+    // reduction a signal sitting 6 dB above threshold would see. That reference
+    // is closer to typical program level than 0 dBFS, so quiet passages aren't
+    // artificially boosted louder than the uncompressed source, while heavy
+    // transients still get audibly squashed.
+    const float manualMakeupLin = juce::Decibels::decibelsToGain(makeupDb);
+    float makeupLinBlock = manualMakeupLin;
+    if (autoMakeup)
+    {
+        const float referenceDb   = threshold + 6.0f;
+        const float autoMakeupDb  = -computeGainDb(referenceDb);
+        makeupLinBlock = juce::Decibels::decibelsToGain(autoMakeupDb);
+    }
+
+    const bool isTCR = (mKneeType &gt;= 4);
+
+    const float att  = mAttackCoef;
+    const float rel  = mReleaseCoef;
+    const float rmsC = mRmsCoef;
+    const float pAtt = mPeakAttCoef;
+    const float pRel = mPeakRelCoef;
+
     const double sr = (mSampleRate &gt; 0.0) ? mSampleRate : 44100.0;
-    mAttackCoef  = static_cast&lt;float&gt; (std::exp (-1.0 / (attackMs   * 0.001 * sr)));
-    mReleaseCoef = static_cast&lt;float&gt; (std::exp (-1.0 / (releaseMs  * 0.001 * sr)));
-    // C4 -- RMS smoother time constant is now user-controlled (detectionMs).
-    mRmsCoef     = static_cast&lt;float&gt; (std::exp (-1.0 / (detectionMs * 0.001 * sr)));
 
-    // A6 -- TCR coefficients depend only on sample rate; moved here from process().
-    mTcrAttCoef  = static_cast&lt;float&gt;(std::exp(-1.0 / (0.5 * sr)));
-    mTcrRelCoef  = static_cast&lt;float&gt;(std::exp(-1.0 / (1.0 * sr)));
+    float* outL = buffer.getWritePointer(0);
+    float* outR = (numChannels &gt; 1) ? buffer.getWritePointer(1) : nullptr;
 
-    // C3 -- Peak detector: fast attack (~0.1 ms), slow release (= detectionMs).
-    mPeakAttCoef = static_cast&lt;float&gt;(std::exp(-1.0 / (0.0001 * sr)));
-    mPeakRelCoef = static_cast&lt;float&gt;(std::exp(-1.0 / (detectionMs * 0.001 * sr)));
+    // 2a -- Look-ahead delay line (main path only)
+    const int  laSize       = (int)mLookaheadL.size();
+    const int  laSamples    = mLASamples;
+    const bool useLookahead = (laSamples &gt; 0 &amp;&amp; laSize &gt; 0);
 
-    // H-2 -- Opto multi-stage release coefficients.  60 ms fast / 3 s slow,
-    // blended by mOptoHistory which itself averages over ~1 sec.  Mirrors the
-    // LA-2A two-stage release: ~60 ms to half, then a long program-dependent
-    // crawl (real T4 cell is 0.5-5 s).  QA-EffectsReview Task 6: slow stage
-    // lengthened 500 ms -&gt; 3 s for the signature long LA-2A tail.
-    mOptoFastRelCoef   = static_cast&lt;float&gt;(std::exp(-1.0 / (0.060 * sr)));
-    mOptoSlowRelCoef   = static_cast&lt;float&gt;(std::exp(-1.0 / (3.000 * sr)));
-    mOptoHistoryCoef   = static_cast&lt;float&gt;(std::exp(-1.0 / (1.000 * sr)));
-}
+    // C3 -- Detection helpers.
+    auto msToDb = [](float ms) { return 10.0f * std::log10(std::max(ms, 1e-12f)); };
 
-// CompressorDSP::process -- envelope smoothing (TCR + Opto blend) and Opto history
-// tracker, plus the FET/Opto per-sample color stages.  (Detection, lookahead,
-// makeup/mix, CS tilt-EQ and metering sections of process() elided.)
+    // Safety clamp on detected level: physically impossible for audio to exceed
+    // +60 dBFS in any sane signal path, and a -120 dB floor beats the denormal
+    // edge case if a log-domain calculation ever trips a subnormal.
+    auto clampLevelDb = [](float db) {
+        return juce::jlimit(-120.0f, 60.0f, db);
+    };
+
+    // CS-3 Sustain pre-amplification: drive the signal INTO the fixed threshold.
+    // csInputDriveDb (= 24 * sustain) lifts BOTH the detected level and the audio
+    // so the high-ratio comp squashes the driven signal (the "dig in" sustain).
+    // 0 for every non-CS Type -&gt; no-op.
+    const float csDriveDb = (mType == Type::CS) ? csInputDriveDb : 0.0f;
+    const float csDriveGn = juce::Decibels::decibelsToGain (csDriveDb);
+
+    for (int i = 0; i &lt; numSamples; ++i)
+    {
+        // -- Continuous-param smoothers (A2) --------------------------------
+        threshold = mThresholdSmoothed.getNextValue();
+        ratio     = mRatioSmoothed    .getNextValue();
+        const float curMix      = mMixSmoothed   .getNextValue();
+        const float curMakeupDb = mMakeupDbSmoothed.getNextValue();
+
+        // -- 1. Detection from (un-delayed) detection source --------------
+        float dL = detL[i];
+        float dR = detR[i];
+
+        // C2 -- Sidechain HPF on detection source. When cutoff is near the
+        // 20 Hz floor, it's effectively a pass-through; still costs a couple
+        // of multiplies per sample but no audible effect.
+        dL = mScHpfL.processSample(0, dL);
+        dR = mScHpfR.processSample(0, dR);
+
+        float levelDbL, levelDbR;
+
+        if (peakDetection)
+        {
+            // C3 -- Peak detection with fast attack / slow release.
+            const float absL = std::abs(dL);
+            const float absR = std::abs(dR);
+            const float coefL = (absL &gt; mPeakL) ? pAtt : pRel;
+            const float coefR = (absR &gt; mPeakR) ? pAtt : pRel;
+            mPeakL = coefL * mPeakL + (1.0f - coefL) * absL;
+            mPeakR = coefR * mPeakR + (1.0f - coefR) * absR;
+
+            if (stereoLink)
+            {
+                const float pk = std::max(mPeakL, mPeakR);
+                levelDbL = levelDbR = 20.0f * std::log10(std::max(pk, 1e-9f));
+            }
+            else
+            {
+                levelDbL = 20.0f * std::log10(std::max(mPeakL, 1e-9f));
+                levelDbR = 20.0f * std::log10(std::max(mPeakR, 1e-9f));
+            }
+        }
+        else
+        {
+            // 2d -- Per-sample running mean-square (default, classic).
+            mRunningRmsL = rmsC * mRunningRmsL + (1.0f - rmsC) * dL * dL;
+            mRunningRmsR = rmsC * mRunningRmsR + (1.0f - rmsC) * dR * dR;
+
+            if (stereoLink)
+            {
+                const float msLink = std::max(mRunningRmsL, mRunningRmsR);
+                levelDbL = levelDbR = msToDb(msLink);
+            }
+            else
+            {
+                levelDbL = msToDb(mRunningRmsL);
+                levelDbR = msToDb(mRunningRmsR);
+            }
+        }
+
+        // CS-3 Sustain: lift the detected level so more of the signal exceeds the
+        // fixed threshold (harder compression as Sustain rises).  0 for non-CS.
+        levelDbL += csDriveDb;
+        levelDbR += csDriveDb;
+
+        // Safety clamp before gain computer.
+        levelDbL = clampLevelDb(levelDbL);
+        levelDbR = clampLevelDb(levelDbR);
+
+        // Slow TCR tracker (release acceleration). TCR tracks magnitude
+        // regardless of detection mode; use current running RMS level for
+        // comparability with v1 behavior in RMS mode, or peak envelope in peak mode.
+        if (isTCR)
+        {
+            const float curLevel = peakDetection
+                ? std::max(mPeakL, mPeakR)
+                : std::sqrt(std::max(mRunningRmsL, mRunningRmsR));
+            const float coef = (curLevel &gt; mTCRLevel) ? mTcrAttCoef : mTcrRelCoef;
+            mTCRLevel = coef * mTCRLevel + (1.0f - coef) * curLevel;
+        }
+
+        // -- 2. Gain computer ---------------------------------------------
+        const float targetDbL = computeGainDb(levelDbL);
+        const float targetDbR = computeGainDb(levelDbR);
+
+        // -- 3. Per-sample envelope smoothing (attack/release) -----------
+        // H-2 (2026-05-01): Type umbrella character modes alter release path:
+        //   Opto -- blend fast (60ms) + slow (500ms) release coefs based on
+        //           mOptoHistory.  Sustained material -&gt; more slow weight -&gt;
+        //           characteristic LA-2A "memory" recovery.
+        //   FET / Modern -- standard release coef (or TCR dynamic when /R kneeType active).
         auto smoothOne = [&amp;](float&amp; env, float target) -&gt; float
         {
             const bool releasing = (target &gt;= env);
@@ -172,13 +340,46 @@ void CompressorDSP::calcCoefs()
         // H-2 -- Opto memory tracker: one-pole running magnitude of current GR
         // over a ~1 sec window.  Drives the fast/slow release blend on next
         // sample.  Always updated when Type=Opto, even outside release phase,
-        // so sustained material&#x27;s history is always current.
+        // so sustained material's history is always current.
         if (mType == Type::Opto)
         {
             const float curGrMag = -std::min (grL, grR);   // negative GR -&gt; positive magnitude
             mOptoHistory = mOptoHistoryCoef * mOptoHistory
                          + (1.0f - mOptoHistoryCoef) * curGrMag;
         }
+
+        // -- 4. Apply to look-ahead-delayed audio + makeup + mix ---------
+        const float drySrcL = outL[i];
+        const float drySrcR = outR ? outR[i] : drySrcL;
+
+        float audioL = drySrcL;
+        float audioR = drySrcR;
+        if (useLookahead)
+        {
+            const int readPos = (mLAWritePos + laSize - laSamples) % laSize;
+            audioL = mLookaheadL[(size_t)readPos];
+            audioR = mLookaheadR[(size_t)readPos];
+            mLookaheadL[(size_t)mLAWritePos] = drySrcL;
+            mLookaheadR[(size_t)mLAWritePos] = drySrcR;
+            mLAWritePos = (mLAWritePos + 1) % laSize;
+        }
+
+        // Manual makeup uses the smoothed makeup knob; auto-makeup is computed
+        // once per block above and applied uniformly.
+        const float makeupLin = autoMakeup
+            ? makeupLinBlock
+            : juce::Decibels::decibelsToGain(curMakeupDb);
+
+        const float gL = juce::Decibels::decibelsToGain(grL) * makeupLin;
+        const float gR = juce::Decibels::decibelsToGain(grR) * makeupLin;
+
+        // CS-3 Sustain pre-amp: drive the audio into the comp (matches the detector
+        // drive) so the output is the driven-then-compressed signal.  Unity for non-CS.
+        audioL *= csDriveGn;
+        audioR *= csDriveGn;
+
+        float wetL = audioL * gL;
+        float wetR = audioR * gR;
 
         // FET (1176) gain-stage color: always-on tanh harmonic shaping on the WET
         // output (QA-EffectsReview Task 6 moved it here from the GR control signal,
@@ -211,7 +412,48 @@ void CompressorDSP::calcCoefs()
             const float biasR = 0.20f * drvR;
             wetL = (std::tanh (wetL * (1.0f + drvL) + biasL) - std::tanh (biasL)) / (1.0f + drvL);
             wetR = (std::tanh (wetR * (1.0f + drvR) + biasR) - std::tanh (biasR)) / (1.0f + drvR);
-        }</code></pre></details>
+        }
+
+        outL[i] = audioL + curMix * (wetL - audioL);
+        if (outR) outR[i] = audioR + curMix * (wetR - audioR);
+    }
+
+    // I-4 (2026-05-02): CS Style post-comp tilt EQ + output Level trim.
+    // Tilt EQ sits on the compressed signal (BOSS CS-3 Tone-pot semantic);
+    // Level trim runs LAST so it nets the user-visible "how loud is this
+    // pedal" knob.  Both stages active only when mType == CS.
+    if (mType == Type::CS &amp;&amp; numChannels &gt;= 1)
+    {
+        juce::dsp::AudioBlock&lt;float&gt; block (buffer);
+        juce::dsp::ProcessContextReplacing&lt;float&gt; ctx (block);
+        mCsLowShelf .process (ctx);
+        mCsHighShelf.process (ctx);
+        if (csLevelDb != 0.0f)
+            buffer.applyGain (juce::Decibels::decibelsToGain (csLevelDb, -60.0f));
+    }
+
+    // A4 -- GR meter hold + decay (30 dB/sec). max-negative is the deepest GR
+    // seen this block; keep the deepest value but let it decay back toward 0
+    // so the meter both catches transient dips AND returns to rest visibly.
+    const float blockGr   = std::min(mEnvL, mEnvR);
+    const float prevGr    = mGainReductionDb.load(std::memory_order_relaxed);
+    // GR is &lt;=0; "deeper" means more negative; "decay toward rest" = toward 0.
+    const float decayedGr = juce::jmin(0.0f, prevGr + mGrDecayDbPerBlock);
+    mGainReductionDb.store(juce::jmin(blockGr, decayedGr), std::memory_order_relaxed);
+
+    // T18 column: input envelope (linear, so the strip reads as a waveform),
+    // GR as a 0..1 depth from the top of a 20 dB window, threshold as a linear
+    // level the display draws as a line ON that waveform -- which is where
+    // attack and release become VISIBLE: how fast the cyan digs in after the
+    // input crosses the line, and how long it hangs on after it falls back.
+    if (visActive)
+    {
+        const float inLin  = juce::jlimit (0.0f, 1.0f, visInPk);
+        const float gr01   = juce::jlimit (0.0f, 1.0f, -blockGr / 20.0f);
+        const float thrLin = juce::Decibels::decibelsToGain (threshold);
+        mVisualFeed.push (-inLin, inLin, gr01, thrLin);
+    }
+}</code></pre></details>
 <pre class="formulas">- One-pole envelope coefficient (all ballistics): `coef = exp(-1 / (time_ms * 0.001 * sr))`; update is `env = coef*env + (1-coef)*target`. Attack coef from attackMs (0..400 ms), release from releaseMs (1..4000 ms), RMS detector window from detectionMs (1..100 ms, default 10).
 - Peak detector (peakDetection=true): attack time 0.1 ms (`exp(-1/(0.0001*sr))`), release = detectionMs. Level in dB: `20*log10(max(peak, 1e-9))`.
 - Gain computer, hard knee: `gain_dB = threshold + overshoot/ratio - levelDb` for overshoot &gt; 0, else 0. Ratio range 0.4..30 (&lt;1 = upward expansion).

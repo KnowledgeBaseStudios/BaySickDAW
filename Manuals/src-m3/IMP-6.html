@@ -25,12 +25,35 @@ sound like an amplifier rather than a mathematical clip.</p>
                 const float shaped  = driven / (1.0f + std::abs (driven));
                 // Remove the static DC the bias would otherwise inject.
                 upBlock.setSample (ch, upIdx, shaped - biasFloor);</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source/DSP/OverdriveDSP.cpp</summary><pre><code>// OverdriveDSP::process -- Pedal-mode branch (mType == Type::Pedal), complete
-// except the clean-buf resize guard.  Rack-mode Steps 1-3 follow below;
-// serialisation and setters elided.
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/OverdriveDSP.cpp</summary><pre><code>// Source/DSP/OverdriveDSP.cpp  -  OverdriveDSP::process (complete)
+// ─────────────────────────────────────────────────────────────────────────────
+// Process block
+// ─────────────────────────────────────────────────────────────────────────────
+void OverdriveDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    // Ahead of the bypass early-out: a staged oversampler must be adopted even
+    // on a block this effect otherwise does nothing with.
+    drainOversamplerSwap();
+
+    if (bypassed) return;
+
+    juce::ScopedNoDenormals noDenormals;   // A1
+
+    const int bufCh      = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+    const int numCh      = std::min (bufCh, 2);
+    if (numSamples &lt;= 0 || numCh &lt;= 0)    return;
+    if (numSamples &gt; mMaxBlock)           return;   // block-size guard
+    if (mOversampler == nullptr)          return;   // not prepared
+
+    // I-5 (2026-05-02): OD Style Pedal-mode algorithm.  When mType==Pedal,
+    // run the pedal-specific frequency-split + dual cascaded soft-clip path
+    // and return early -- the existing Rack chain stays untouched.
+    //
+    // Algorithm:
     //   1. Split input at 80 Hz: HPF feeds the clipping path, LPF feeds the
     //      clean blend (sub-80 keeps the low end intact, classic OD-3
-    //      character that &quot;doesn&#x27;t get muddy under heavy chords&quot;).
+    //      character that "doesn't get muddy under heavy chords").
     //   2. 4x oversample the HPF path.
     //   3. Dual cascaded tanh soft-clip (two stages, second hits harder).
     //   4. Downsample.
@@ -39,6 +62,13 @@ sound like an amplifier rather than a mathematical clip.</p>
     //   7. PostGain (Level, user knob).
     if (mType == Type::Pedal)
     {
+        // Snapshot HPF input into the clean buf BEFORE we overwrite buffer
+        // with the HPF result.  Then run an LPF copy on the clean buf to get
+        // the sub-80 component.
+        if (mPedalCleanBuf.getNumChannels() &lt; numCh
+         || mPedalCleanBuf.getNumSamples() &lt; numSamples)
+            mPedalCleanBuf.setSize (numCh, numSamples, false, false, true);
+
         for (int ch = 0; ch &lt; numCh; ++ch)
             mPedalCleanBuf.copyFrom (ch, 0, buffer, ch, 0, numSamples);
 
@@ -91,7 +121,7 @@ sound like an amplifier rather than a mathematical clip.</p>
                 const float hy = mPedalHpfR * (mPedalHpfY[hch] + s1 - mPedalHpfX[hch]);
                 mPedalHpfX[hch] = s1;
                 mPedalHpfY[hch] = hy;
-                // Stage 2: harder cascade (the pedal&#x27;s punchy attack).
+                // Stage 2: harder cascade (the pedal's punchy attack).
                 d[i] = std::tanh (hy * 1.6f);
             }
         }
@@ -122,9 +152,47 @@ sound like an amplifier rather than a mathematical clip.</p>
         return;   // Pedal mode is done; skip the Rack chain below.
     }
 
-// OverdriveDSP::process -- Rack-mode Step 2: oversampled soft-clip sigmoid.
-// (Step 1 pre-LP Color/PreBand blend and Step 3 post-LPF + gain + hard clip +
-// 5 Hz DC-blocker + parallel/blend mix are elided.)
+    // C5 -- the factor the LIVE oversampler was built with (adopted together
+    // with it in drainOversamplerSwap), not the user-intent mOsLog2.
+    const int kOsNow = 1 &lt;&lt; mOsLog2Active;
+    const float nyq  = (float) mSampleRate * 0.49f;
+
+    // ── Step 1: in-series pre-LP. The whole signal is driven (no parallel clean ──
+    // band). PreBand is the AMOUNT of low-pass blended into the drive input
+    // (0 = full bandwidth, 1 = fully low-passed at Color). Writes the drive input
+    // into mBandBuf; leaves `buffer` holding the original input for the wet/dry blend.
+    //
+    // A8: if input is mono, duplicate ch0 into mBandBuf ch1 before the 2-channel
+    // oversampler runs so its second-channel state sees valid data.
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        // A9 -- per-sample smoothed cutoff (Color). Pre-LP Q is fixed Butterworth.
+        const float color = juce::jlimit (20.0f, nyq, mColorSmooth.getNextValue());
+        const float amt   = mPreBandSmooth.getNextValue();   // 0..1 low-pass amount
+        mPreLpf.setCutoffFrequency (color);
+
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            const float x  = buffer.getSample (ch, n);
+            const float lp = mPreLpf.processSample (ch, x);
+            // Blend dry -&gt; low-passed by the PreBand amount, then drive in series.
+            mBandBuf.setSample (ch, n, x + amt * (lp - x));
+        }
+        // A8: mono input -- pad ch1 with ch0 so the 2ch oversampler has valid data.
+        if (numCh == 1)
+            mBandBuf.setSample (1, n, mBandBuf.getSample (0, n));
+    }
+
+    // ── Step 2: oversample band -&gt; soft-clip sigmoid -&gt; downsample ──────────
+    // Always present the oversampler with 2 channels (A8); we read back only
+    // the channels we'll write out.
+    juce::dsp::AudioBlock&lt;float&gt; bandBlock (mBandBuf.getArrayOfWritePointers(),
+                                            (size_t) 2, 0, (size_t) numSamples);
+    auto upBlock = mOversampler-&gt;processSamplesUp (bandBlock);
+
+    const int upN = (int) upBlock.getNumSamples();
+    jassert (upN == numSamples * kOsNow);
+
     for (int baseN = 0; baseN &lt; numSamples; ++baseN)
     {
         // Consume ONE smoothed drive + x100-scalar + bias per base sample, reuse
@@ -156,7 +224,58 @@ sound like an amplifier rather than a mathematical clip.</p>
                 upBlock.setSample (ch, upIdx, shaped - biasFloor);
             }
         }
-    }</code></pre></details>
+    }
+
+    mOversampler-&gt;processSamplesDown (bandBlock);   // mBandBuf now holds SHAPED band
+
+    // ── Step 3: recombine + post-LPF + gain + clip + DC-block + wet/dry ─────
+    const float R       = mDcCoef;
+    const bool parallel = mParallel;   // C4
+
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        // A9 -- per-sample LPF coef refresh (same reasoning as BPF above).
+        const float pfilter = juce::jlimit (20.0f, nyq, mPostFilterSmooth.getNextValue());
+        mLPF.setCutoffFrequency (pfilter);
+        // LPF Q constant (Butterworth) -- no need to set per sample, but leave
+        // it on the cheap path. setResonance is trivial.
+        mLPF.setResonance (juce::MathConstants&lt;float&gt;::sqrt2 * 0.5f);
+
+        const float postGain = juce::Decibels::decibelsToGain (mPostGainSmooth.getNextValue());
+        const float wet      = mWetSmooth.getNextValue();   // A4 smoothed
+        const float dry      = 1.0f - wet;
+
+        for (int ch = 0; ch &lt; numCh; ++ch)
+        {
+            const float x   = buffer.getSample (ch, n);
+            // In-series: the shaped band IS the whole driven signal (no clean residual).
+            float out       = mBandBuf.getSample (ch, n);
+
+            out = mLPF.processSample (ch, out);
+            out *= postGain;
+            out = juce::jlimit (-1.0f, 1.0f, out);
+
+            // 5 Hz DC-blocker (R form) -- separate state per channel
+            if (ch == 0)
+            {
+                const float y = out - mDcX_L + R * mDcY_L;
+                mDcX_L = out; mDcY_L = y; out = y;
+            }
+            else
+            {
+                const float y = out - mDcX_R + R * mDcY_R;
+                mDcX_R = out; mDcY_R = y; out = y;
+            }
+
+            // C4 -- Parallel mode: out = x + wet*processed (dry stays full).
+            // Blend mode (default): out = dry*x + wet*processed.
+            const float mixed = parallel
+                ? (x + wet * out)
+                : (dry * x + wet * out);
+            buffer.setSample (ch, n, mixed);
+        }
+    }
+}</code></pre></details>
 <pre class="formulas">Pedal mode (Type::Pedal - the OD-3-style stage cascade / voicing):
 - 80 Hz split: TPT highpass feeds the drive path, TPT lowpass (Q = 0.7071 both) feeds a clean parallel path summed back after clipping - sub-80 Hz never distorts.
 - Voicing pre-clip: 500 Hz peaking notch, Q = 1.0, -4.5 dB, on the drive path at base rate.

@@ -38,33 +38,23 @@ void SynthFilter::calcCoeffs()
     mA2 = mG * mA1;
     mA3 = mG * mA2;
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\SynthFilter.cpp (custom TPT state-variable filter used by BaySickSynth/BaySickBass voices)</summary><pre><code>// SynthFilter (setters) -- Source/SynthFilter.cpp
-void SynthFilter::prepare (double sampleRate)
+<details class="fullfn"><summary>Full function &mdash; Source\SynthFilter.cpp (custom TPT state-variable filter used by BaySickSynth/BaySickBass voices)</summary><pre><code>// Source/SynthFilter.cpp  -  SynthFilter::processSample (complete)
+float SynthFilter::processSample (float in)
 {
-    mSampleRate = sampleRate;
-    calcCoeffs();
-}
+    float v3 = in - mIC2eq;
+    float v1 = mA1 * mIC1eq + mA2 * v3;
+    float v2 = mIC2eq + mA2 * mIC1eq + mA3 * v3;
+    mIC1eq = 2.0f * v1 - mIC1eq;
+    mIC2eq = 2.0f * v2 - mIC2eq;
 
-void SynthFilter::setCutoff (float hz)
-{
-    mCutoff = juce::jlimit (20.0f, static_cast&lt;float&gt;(mSampleRate * 0.499), hz);
-    calcCoeffs();
-}
-
-void SynthFilter::setResonance (float q)
-{
-    mResonance = juce::jlimit (0.1f, 10.0f, q);
-    calcCoeffs();
-}
-
-void SynthFilter::setMode (FilterMode mode)
-{
-    mMode = mode;
-}
-
-void SynthFilter::reset()
-{
-    mIC1eq = mIC2eq = 0.0f;
+    switch (mMode)
+    {
+        case FilterMode::LowPass:  return v2;
+        case FilterMode::HighPass: return in - mK * v1 - v2;
+        case FilterMode::BandPass: return v1;
+        case FilterMode::Notch:    return in - mK * v1;
+        default:                   return v2;
+    }
 }</code></pre></details>
 <pre class="formulas">- TPT SVF coefficients (Zavalishin topology-preserving transform): `g = tan(pi * fc / fs)`, `k = 1/Q`, `a1 = 1 / (1 + g*(g + k))`, `a2 = g * a1`, `a3 = g * a2`.
 - Per-sample update: `v3 = in - ic2; v1 = a1*ic1 + a2*v3; v2 = ic2 + a2*ic1 + a3*v3; ic1 = 2*v1 - ic1; ic2 = 2*v2 - ic2`.

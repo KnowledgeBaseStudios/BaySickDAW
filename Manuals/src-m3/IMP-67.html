@@ -32,7 +32,8 @@ ribbon is showing. The Drum Kit is the same window with a drum tab bound to it
             midi.addEvent (juce::MidiMessage::noteOff (1, holdOnNote),
                            juce::jmax (1, buffer.getNumSamples() - 1));
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (PianoNote — the note model, lines 179-220)</summary><pre><code>// PatternManager.h -- struct PianoNote (the note model, full struct, lines 179-220)
+<details class="fullfn"><summary>Full function &mdash; Source\PatternManager.h (PianoNote — the note model, lines 179-220)</summary><pre><code>// Source/PatternManager.h  -  PianoNote (complete)
+// ── Piano roll note ───────────────────────────────────────────────────────────
 struct PianoNote
 {
     int      midiNote      { 60 };                   // 0–127
@@ -49,6 +50,9 @@ struct PianoNote
     float    resonance     { 0.5f };                 // filter resonance offset, 0.5 = neutral (CC71)
     // §P4.2 Phase C1: drum slot index (0..15) for drumRoll notes.
     //   -1 = not a drum note (used on layerRoll / bassRoll).
+    //   For drum-grid-mode notes created pre-C2 this is redundant with
+    //   (51 - midiNote); C2 full-roll mode will use slotIndex independently
+    //   from midiNote so a slot can play any pitch.
     int      slotIndex     { -1 };
     // QA-Ee Stage 3b: 96 PPQ tick representation, authoritative on disk (serialized as
     // `st`/`dt`).  startBeat/durationBeats remain the in-memory editing values (kept
@@ -65,8 +69,8 @@ struct PianoNote
     // the other note types.  Kept after the tick fields so positional brace-inits
     // (which stop at `type`, field 7) never reach it.
     double      portaLengthBeats { 1.0 };
-    // QA-SlideSampler Task 4: native &quot;Bend&quot; note (Guitars/Basses).  bendSemitones
-    // = signed bend amount, gated to the patch&#x27;s real range at the UI; bendShape =
+    // QA-SlideSampler Task 4: native "Bend" note (Guitars/Basses).  bendSemitones
+    // = signed bend amount, gated to the patch's real range at the UI; bendShape =
     // the pitch contour over the note.  Ignored by other note types + engines.
     // KEEP LAST (same brace-init reasoning as portaLengthBeats above).
     double      bendSemitones { 0.0 };

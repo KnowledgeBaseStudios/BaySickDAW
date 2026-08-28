@@ -56,23 +56,47 @@ void LFO::recalc()
 {
     mDelta = static_cast&lt;float&gt; (mRate / mSampleRate);
 }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\LFO.cpp (per-voice LFO used by BaySickSynth/BaySickBass)</summary><pre><code>// LFO setters -- Source/LFO.cpp
-void LFO::prepare (double sampleRate)
+<details class="fullfn"><summary>Full function &mdash; Source\LFO.cpp (per-voice LFO used by BaySickSynth/BaySickBass)</summary><pre><code>// Source/LFO.cpp  -  LFO::getNextSample (complete)
+float LFO::getNextSample()
 {
-    mSampleRate = sampleRate;
-    recalc();
-}
+    float out = 0.0f;
+    switch (mShape)
+    {
+        case LFOShape::Sine:
+            out = std::sin (juce::MathConstants&lt;float&gt;::twoPi * mPhase);
+            break;
 
-void LFO::setRate (float hz)
-{
-    mRate = hz;
-    recalc();
-}
+        case LFOShape::Triangle:
+            out = (mPhase &lt; 0.5f) ? (4.0f * mPhase - 1.0f) : (3.0f - 4.0f * mPhase);
+            break;
 
-void LFO::setShape (LFOShape shape) { mShape = shape; }
-void LFO::setDepth (float depth)   { mDepth = juce::jlimit (0.0f, 1.0f, depth); }
+        case LFOShape::Square:
+            out = (mPhase &lt; 0.5f) ? 1.0f : -1.0f;
+            break;
 
-void LFO::reset() { mPhase = 0.0f; }</code></pre></details>
+        case LFOShape::SawDown:
+            out = 1.0f - 2.0f * mPhase;   // +1 → -1
+            break;
+
+        case LFOShape::SawUp:
+            out = 2.0f * mPhase - 1.0f;   // -1 → +1
+            break;
+
+        case LFOShape::SampleAndHold:
+        {
+            float prevPhase = mPhase - mDelta;
+            if (prevPhase &lt; 0.0f || mPhase &lt; prevPhase)  // crossed zero
+                mSHValue = mRandom.nextFloat() * 2.0f - 1.0f;
+            out = mSHValue;
+            break;
+        }
+    }
+
+    mPhase += mDelta;
+    if (mPhase &gt;= 1.0f) mPhase -= 1.0f;
+
+    return out * mDepth;
+}</code></pre></details>
 <pre class="formulas">- Phase advance (normalized 0..1 phase): `delta = rateHz / sampleRate`; per sample `phase += delta; if (phase &gt;= 1) phase -= 1`.
 - Shapes on normalized phase p: sine `sin(2*pi*p)`; triangle `p &lt; 0.5 ? 4p - 1 : 3 - 4p`; square `p &lt; 0.5 ? +1 : -1`; saw down `1 - 2p`; saw up `2p - 1`; S&amp;H redraws `rand*2 - 1` on each phase wrap (`prevPhase = p - delta &lt; 0`).
 - Output scaled by depth (0..1); the voice reads depth=1 and applies its own amount.

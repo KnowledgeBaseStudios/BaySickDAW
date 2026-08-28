@@ -33,34 +33,167 @@ bool ComponentPeer::handleKeyPress (const KeyPress&amp; keyInfo)
         if (keyWasUsed || deletionChecker == nullptr)
             break;
     }</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; - juce\modules\juce_gui_basics\windows\juce_ComponentPeer.cpp (vendored JUCE — ComponentPeer::handleKeyPress lines 196-233, handleKeyUpOrDown lines 235-263)</summary><pre><code>bool ComponentPeer::handleKeyUpOrDown (const bool isKeyDown)
+<details class="fullfn"><summary>Full function &mdash; - juce\modules\juce_gui_basics\windows\juce_ComponentPeer.cpp (vendored JUCE — ComponentPeer::handleKeyPress lines 196-233, handleKeyUpOrDown lines 235-263)</summary><pre><code>// Source/Standalone/KeyBindings.h  -  (whole file) (complete)
+#pragma once
+#include &lt;JuceHeader.h&gt;
+
+// ── KeyBindings ──────────────────────────────────────────────────────────────
+// Central catalog of every editable keyboard shortcut in BaySickDAW.
+//
+// Each command has:
+//   - a stable integer ID (the CommandIDs enum below)
+//   - a Category (which tab in the Key Binds popup it lives under)
+//   - a human-readable Name shown in the editor row
+//   - a beginner-friendly Tooltip string shown on hover
+//   - a default KeyPress (the out-of-the-box shortcut)
+//
+// Mouse-modifier interactions (Alt+RClick etc.) are surfaced as MouseRefRow
+// entries - they're documentation-only and not editable through the popup.
+//
+// Phase A scope: only commands whose handlers were already wired before this
+// refactor.  Phase B and beyond extend the catalog as features come online.
+// ─────────────────────────────────────────────────────────────────────────────
+namespace BSCommands
 {
-    bool keyWasUsed = false;
-
-    for (auto* target = getTargetForKeyPress(); target != nullptr; target = target-&gt;getParentComponent())
+    // App-defined IDs start above 0xf000 to stay clear of JUCE's reserved range.
+    enum CommandIDs : int
     {
-        const WeakReference&lt;Component&gt; deletionChecker (target);
+        // ── General - transport ─────────────────────────────────────────────
+        cmdPlayPause       = 0x10001,
+        cmdStopAndDisarm   = 0x10002,
+        cmdToggleRecord    = 0x10003,
 
-        keyWasUsed = target-&gt;keyStateChanged (isKeyDown);
+        // ── General - page switches ─────────────────────────────────────────
+        cmdShowMixer        = 0x10010,
+        cmdShowEffectsRack  = 0x10011,
+        cmdShowBuilder      = 0x10012,
+        cmdShowPianoRoll    = 0x10016,
+        cmdShowPlayer       = 0x10017,
+        cmdShowEffectPanel  = 0x10018,
+        cmdShowDrumKit      = 0x10019,
+        cmdShowEventEditor  = 0x1001a,
+        cmdShowManuals      = 0x1001b,
 
-        if (keyWasUsed || deletionChecker == nullptr)
-            break;
+        // ── General - file operations (Phase B-1) ───────────────────────────
+        cmdFileNew         = 0x10020,
+        cmdFileOpen        = 0x10021,
+        cmdFileSave        = 0x10022,
+        cmdFileSaveAs      = 0x10023,
+        cmdExportAudio     = 0x10024,   // QA-Export (FSW-065)
 
-        if (auto* keyListeners = target-&gt;keyListeners.get())
-        {
-            for (int i = keyListeners-&gt;size(); --i &gt;= 0;)
-            {
-                keyWasUsed = keyListeners-&gt;getUnchecked (i)-&gt;keyStateChanged (isKeyDown, target);
+        // ── General - pattern navigation (Phase B-2, 2026-04-26) ────────────
+        cmdRenameActivePattern = 0x10030,
+        cmdNextEmptyPattern    = 0x10031,
+        cmdNewPattern          = 0x10032,
+        cmdNextPattern         = 0x10033,
+        cmdPrevPattern         = 0x10034,
 
-                if (keyWasUsed || deletionChecker == nullptr)
-                    return keyWasUsed;
+        // ── General - pattern list editing ──────────────────────────────────
+        // No cmdDeletePattern: bare Delete is claimed page-locally by the
+        // Builder grid, Piano Roll, Drum Kit, Event Editor and pitch editor
+        // for their own selections, so pattern delete stays menu-only.
+        cmdInsertPattern       = 0x10035,
+        cmdClonePattern        = 0x10036,
+        cmdMovePatternUp       = 0x10037,
+        cmdMovePatternDown     = 0x10038,
 
-                i = jmin (i, keyListeners-&gt;size());
-            }
-        }
-    }
+        // ── General - transport extensions (Phase B-3, 2026-04-26) ──────────
+        cmdToggleSongMode      = 0x10040,
+        cmdSeekHome            = 0x10041,
+        cmdFastForward         = 0x10042,
+        cmdPrevBarSong         = 0x10043,
+        cmdNextBarSong         = 0x10044,
+        cmdToggleMetronome     = 0x10045,
 
-    return keyWasUsed;
+        // ── General - undo / redo (Phase B-5, 2026-04-26) ───────────────────
+        cmdGlobalUndo          = 0x10050,
+        cmdGlobalRedo          = 0x10051,
+
+        // ── General - recording precount (Phase D-5, 2026-04-26) ────────────
+        cmdToggleRecordingPrecount = 0x10060,
+
+        // ── Builder - Slip / Stretch edit-mode toggle (QA-Ea Task 0c).
+        // Flips the BuilderPage toolbar's Slip/Stretch dropdown between
+        // its two modes.  Slip mode: Audio-clip edge drags slip the
+        // content (reveal pre-roll / trim leading).  Stretch mode: time-
+        // stretch (QA-Ec ships it; left-edge no-op for Task 0c, right-edge
+        // keeps existing length-resize UX).  Default keybind 'S'.
+        cmdToggleSlipStretchMode = 0x10070,
+
+        // ── General - typing-keyboard MIDI (D-4, QA-TransportDisplay) ───────
+        cmdToggleTypingKeyboard = 0x10071,
+
+        // (later phases continue from 0x10072.)
+    };
+
+    enum class Category : int
+    {
+        General        = 0,
+        Builder        = 1,
+        PianoRoll      = 2,
+        DrumKit        = 3,    // 2026-04-26 (D-7 sub-2): drum-kit specifics
+        MouseReference = 4,
+        // 2026-07-11 (QA-Fd): BaySickPitch / BaySickAlign vocal editors.
+        // All entries are page-local hardcoded keys + mouse gestures --
+        // reference rows only, none rebindable (Piano Roll local-key deal).
+        VocalEditors   = 5,
+        // 2026-08-06 (QA-UndoCoverage Task 5, docket 14=a): Event Editor
+        // local keys.  Display-only reference rows, none rebindable.
+        EventEditor    = 6,
+    };
+
+    juce::String categoryName (Category c);
+
+    struct CommandInfo
+    {
+        int            id;
+        Category       category;
+        juce::String   name;
+        juce::String   tooltip;
+        juce::KeyPress defaultKey;
+    };
+
+    // Catalog of editable commands.  Static - initialized on first call.
+    const std::vector&lt;CommandInfo&gt;&amp; getAllCommands();
+
+    // Look up a single command by id.  Returns nullptr if id isn't in the catalog.
+    const CommandInfo* findCommand (int id);
+
+    // Return all commands belonging to a given category.
+    std::vector&lt;const CommandInfo*&gt; getCommandsInCategory (Category c);
+
+    // Mouse-modifier reference rows (documentation only - non-editable).
+    struct MouseRefRow
+    {
+        Category     category;
+        juce::String shortcut;
+        juce::String name;
+        juce::String tooltip;
+    };
+    const std::vector&lt;MouseRefRow&gt;&amp; getMouseRefRows();
+    std::vector&lt;const MouseRefRow*&gt; getMouseRefsInCategory (Category c);
+
+    // Phase B-6 (2026-04-26): scan reference rows for any hardcoded key that
+    // matches the given KeyPress.  Returns rows whose shortcut text parses as
+    // a valid KeyPress and matches `kp`.  Mouse-only rows ("Ctrl + Drag" etc.)
+    // never match because their shortcut text doesn't parse as a key.  Used
+    // by the Set-binding capture flow to warn when the new binding clashes
+    // with a page-local handler (which fires before the command system).
+    std::vector&lt;const MouseRefRow*&gt; findHardcodedConflicts (const juce::KeyPress&amp; kp);
+
+    // ── Persistence ─────────────────────────────────────────────────────────
+    // Keymap XML lives next to audio_settings.xml in &lt;Documents&gt;/BaySickDAW/.
+    juce::File getKeymapFile();
+
+    // Write current mappings to keymap.xml.  Called once per shortcut edit in
+    // the popup.  Raises the family's "Save failed" box itself rather than
+    // returning a result: the rebind is already applied in the mapping set, so
+    // a caller has nothing to roll back - only the persistence is lost.
+    void saveMappings (const juce::KeyPressMappingSet&amp; set);
+
+    // Restore mappings from disk.  Returns false if the file doesn't exist or
+    // failed to parse - caller should leave defaults in place when false.
+    bool loadMappings (juce::KeyPressMappingSet&amp; set);
 }</code></pre></details>
 <pre class="formulas">- The JUCE loop: `for (int i = keyListeners-&gt;size(); --i &gt;= 0;)` — listeners dispatch in REVERSE registration order, so HIGHEST PRIORITY = REGISTERED LAST. For `keyPressed`, listeners run BEFORE the target component&#x27;s own virtual `keyPressed`. The walk then continues UP the parent chain (`target = target-&gt;getParentComponent()`) until something consumes the key.
 - Asymmetry: `handleKeyUpOrDown` runs the component&#x27;s VIRTUAL `keyStateChanged` FIRST, then the listeners (still reversed). `handleKeyPress` is the opposite (listeners first).

@@ -26,39 +26,69 @@ drum as well as a loud one.</p>
             float g = 1.0f + attack * tSq + sustain * sSq;
             return juce::jmax (0.0f, g);
         };</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source/DSP/TransientShaperDSP.cpp</summary><pre><code>// Envelope time-constant tables + coefficient helper (file-scope namespace)
-    // Envelope coefficient from time constant: coef = exp(-1 / (ms * sr / 1000))
-    inline float envCoef (float ms, double sr) noexcept
+<details class="fullfn"><summary>Full function &mdash; Source/DSP/TransientShaperDSP.cpp</summary><pre><code>// Source/DSP/TransientShaperDSP.cpp  -  TransientShaperDSP::process (complete)
+void TransientShaperDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
+{
+    // Ahead of the bypass early-out: a staged oversampler must be adopted even
+    // on a block this effect otherwise does nothing with.
+    drainOversamplerSwap();
+
+    if (bypassed) return;
+
+    juce::ScopedNoDenormals noDenormals;   // A1
+
+    const int numSamples = buffer.getNumSamples();
+    if (numSamples &lt;= 0) return;
+    if (numSamples &gt; mMaxBlock) return;
+    if (mOversampler == nullptr) return;
+    if (mBandBuf.getNumSamples() &lt; numSamples) return;
+
+    const float visIn = visualCaptureIn (buffer);   // T18
+
+    const int numCh = std::min (buffer.getNumChannels(), 2);
+
+    // C.4: external sidechain override for detector path. Audio path (band-split,
+    // gain application, drive) still operates on `buffer`; only the level used
+    // to drive the fast+slow envelopes comes from SC when present.
+    const juce::AudioBuffer&lt;float&gt;* extSc = getActiveSidechain();
+    const float* extScL = nullptr;
+    const float* extScR = nullptr;
+    if (extSc != nullptr &amp;&amp; extSc-&gt;getNumSamples() &gt;= numSamples &amp;&amp; extSc-&gt;getNumChannels() &gt; 0)
     {
-        if (ms &lt;= 0.0f || sr &lt;= 0.0) return 0.0f;
-        return std::exp (-1.0f / (float)(ms * 0.001 * sr));
+        extScL = extSc-&gt;getReadPointer (0);
+        extScR = (extSc-&gt;getNumChannels() &gt; 1) ? extSc-&gt;getReadPointer (1) : extScL;
     }
 
-    constexpr float kFastAttMs[3] = { 0.05f, 0.5f, 2.0f };    // per AttackShape (Sharp/Med/Soft)
-    constexpr float kSlowRelMs[3] = { 5.0f,  20.0f, 80.0f };  // per ReleaseShape
+    const float fastAtt = mFastAttCoef;
+    const float fastRel = mFastRelCoef;
+    const float slowAtt = mSlowAttCoef;
+    const float slowRel = mSlowRelCoef;
 
-// TransientShaperDSP::recalcEnvelopeCoefs -- complete
-void TransientShaperDSP::recalcEnvelopeCoefs()
-{
-    const double sr = mSampleRate &gt; 0.0 ? mSampleRate : 44100.0;
-    const int atkShape = juce::jlimit (0, 2, mAttackShape);
-    const int relShape = juce::jlimit (0, 2, mReleaseShape);
+    // ---- Phase 0: consume smoothers for values needed in Phase 3 ------------
+    // Attack/Sustain/Sensitivity/Balance are consumed per sample in Phase 1.
+    // Wet/OutGain are consumed per sample in Phase 3; stash into scratch.
+    for (int n = 0; n &lt; numSamples; ++n)
+    {
+        mWetScr    [(size_t) n] = mWetSmooth    .getNextValue();
+        mOutGainScr[(size_t) n] = mOutGainSmooth.getNextValue();
+    }
 
-    mFastAttCoef = envCoef (kFastAttMs[atkShape], sr);
-    mFastRelCoef = envCoef (mFastRelMs,            sr);    // C4 user-settable
-    mSlowAttCoef = envCoef (mSlowAttMs,            sr);    // C4 user-settable
-    mSlowRelCoef = envCoef (kSlowRelMs[relShape], sr);
-}
+    // SplitFreq smooths via the filter setter (per-block, cheap).
+    mLR_LP.setCutoffFrequency (mSplitFreqSmooth.getNextValue());
+    mLR_HP.setCutoffFrequency (mSplitFreqSmooth.getCurrentValue());
 
-// TransientShaperDSP::process -- Phase 1: detection + band-split + gain
-// (Phase 0 smoother scratch fill, Phase 2 oversampled tanh drive, and Phase 3
-// wet/dry + output gain are elided.)
+    // ---- Phase 1: detection + band-split + gain -&gt; mBandBuf -----------------
     for (int n = 0; n &lt; numSamples; ++n)
     {
         const float attack    = mAttackSmooth     .getNextValue();
         const float sustain   = mReleaseSmooth    .getNextValue();
         const float sensScale = 1.0f + mSensitivitySmooth.getNextValue() * 9.0f;
         const float highW     = juce::jlimit (0.0f, 1.0f, mBalanceSmooth.getNextValue());
+
+        // Detection - level per channel or mono sum (C2)
+        // We need PER-CHANNEL gain computation anyway (so stereo material can have
+        // asymmetric transients when C2 is on). When C2 is off, we apply the same
+        // mono gain to both channels.
 
         auto computeGain = [&amp;](float level, float&amp; fastState, float&amp; slowMsState) -&gt; float
         {
@@ -139,7 +169,33 @@ void TransientShaperDSP::recalcEnvelopeCoefs()
             mBandBuf.setSample (1, n, mBandBuf.getSample (0, n));
     }
 
-// TransientShaperDSP::process -- Phase 2 drive core (inside the oversampled loop)
+    // ---- Phase 2: oversampled drive saturation (11c) ------------------------
+    // Always runs the oversampler for constant-latency PDC. Drive=0 is a near-no-op
+    // (oversampler + identity shaper); still goes through up/down sample chain.
+    juce::dsp::AudioBlock&lt;float&gt; bandBlock (mBandBuf.getArrayOfWritePointers(),
+                                             (size_t) 2, 0, (size_t) numSamples);
+    auto upBlock = mOversampler-&gt;processSamplesUp (bandBlock);
+    const int upN = (int) upBlock.getNumSamples();
+
+    // Drive smoothing at the OS rate: advance base-rate smoother per base sample
+    // and hold the value constant across the OS inner loop.
+    // We snapshot one drive value per base sample into a small scratch read.
+    for (int ch = 0; ch &lt; 2; ++ch)
+    {
+        float* up = upBlock.getChannelPointer ((size_t) ch);
+        // Reset smoother read cursor via getCurrentValue for ch 0 only; ch 1 should use
+        // the same drive value as ch 0, so we walk once and reuse. Easiest: do both
+        // channels inside a single outer loop over base samples. Restructure:
+        juce::ignoreUnused (up);
+    }
+
+    // Restructured Phase 2: walk base samples outside, OS samples inside.
+    {
+        float* L = upBlock.getChannelPointer (0);
+        float* R = upBlock.getChannelPointer (1);
+        const int kOsNow = (int) upBlock.getNumSamples() / juce::jmax (1, numSamples);
+
+        // Use a fresh smoother read per base sample so Drive still rides the 15 ms ramp.
         for (int n = 0; n &lt; numSamples; ++n)
         {
             const float drive = mDriveSmooth.getNextValue();
@@ -156,7 +212,31 @@ void TransientShaperDSP::recalcEnvelopeCoefs()
                     R[baseOff + k] = std::tanh (d * R[baseOff + k]) * invD;
                 }
             }
-        }</code></pre></details>
+            // When drive == 0, samples pass through unchanged; up/down sample chain still
+            // runs, so latency is constant.
+        }
+        juce::ignoreUnused (upN);
+    }
+
+    mOversampler-&gt;processSamplesDown (bandBlock);   // mBandBuf now holds shaped+driven signal
+
+    // ---- Phase 3: wet/dry mix + output gain ---------------------------------
+    for (int ch = 0; ch &lt; numCh; ++ch)
+    {
+        float*       out     = buffer.getWritePointer (ch);
+        const float* shaped  = mBandBuf.getReadPointer (ch);
+
+        for (int n = 0; n &lt; numSamples; ++n)
+        {
+            const float dry    = out[n];
+            const float wet    = juce::jlimit (0.0f, 1.0f, mWetScr[(size_t) n]);
+            const float outLin = mOutGainScr[(size_t) n];
+            out[n] = (dry * (1.0f - wet) + shaped[n] * wet) * outLin;
+        }
+    }
+
+    visualPushInOut (buffer, visIn);   // T18
+}</code></pre></details>
 <pre class="formulas">- Envelope coefficient: `coef = exp(-1/(ms * 0.001 * sr))`; update `env = coef*env + (1-coef)*level`.
 - Fast envelope (peak follower on |x|): attack time by AttackShape - Sharp 0.05 ms, Medium 0.5 ms, Soft 2.0 ms; release = user fastRelMs (1..50 ms, default from header).
 - Slow envelope (RMS follower on x^2): attack = user slowAttMs (1..50 ms); release by ReleaseShape - 5 / 20 / 80 ms; `slowRms = sqrt(max(meanSq, 1e-12))`.
