@@ -241,6 +241,74 @@ for code, n, label, imp in re.findall(
     call.setdefault(code, []).append((int(n), label, imp))
 for k in call: call[k].sort()
 
+# QA-ManualPress (Jeff, 2026-08-28): a callout dot must never sit ON the
+# control or its caption - it points AT the thing, so it must not cover the
+# thing the reader is trying to read.  No fixed offset can guarantee that, so
+# the dot goes into MEASURED whitespace: candidates around the anchor are
+# scored by how much ink the marker would cover, and the emptiest nearby spot
+# wins.  Dots also repel each other so two never stack.
+try:
+    from PIL import Image as _PILImage
+except Exception:
+    _PILImage = None
+
+_FIGIM = {}
+def _fig_gray(png):
+    if png not in _FIGIM:
+        fp = os.path.join(FIGD, png)
+        try:
+            _FIGIM[png] = _PILImage.open(fp).convert("L") if (_PILImage and os.path.exists(fp)) else None
+        except Exception:
+            _FIGIM[png] = None
+    return _FIGIM[png]
+
+def _ink(img, cx, cy, r, W, H):
+    x0, y0 = max(0, int(cx - r)), max(0, int(cy - r))
+    x1, y1 = min(W, int(cx + r)), min(H, int(cy + r))
+    if x1 - x0 < 3 or y1 - y0 < 3:
+        return 1e9
+    px = list(img.crop((x0, y0, x1, y1)).getdata())
+    n = len(px)
+    mean = sum(px) / float(n)
+    var = sum((v - mean) ** 2 for v in px) / float(n)
+    return var ** 0.5
+
+def _place_dot(png, b, placed):
+    img = _fig_gray(png)
+    if img is None:
+        return (b[0] + b[2] / 2.0, min(b[1] + b[3] + 1.6, 97.6))
+    W, H = img.size
+    bx, by = b[0] / 100.0 * W, b[1] / 100.0 * H
+    bw, bh = b[2] / 100.0 * W, b[3] / 100.0 * H
+    R = 9
+    gap = R + 3
+
+    cands = []
+    for f in (0.5, 0.25, 0.75):
+        cands += [(bx + bw * f, by - gap),
+                  (bx + bw * f, by + bh + gap),
+                  (bx - gap, by + bh * f),
+                  (bx + bw + gap, by + bh * f)]
+    cands += [(bx - gap, by - gap), (bx + bw + gap, by - gap),
+              (bx - gap, by + bh + gap), (bx + bw + gap, by + bh + gap)]
+
+    best, bestscore = None, None
+    for (cx, cy) in cands:
+        if not (R + 1 <= cx <= W - R - 1 and R + 1 <= cy <= H - R - 1):
+            continue
+        score = _ink(img, cx, cy, R, W, H)
+        for (px_, py_) in placed:
+            if ((cx - px_) ** 2 + (cy - py_) ** 2) ** 0.5 < R * 2.4:
+                score += 400.0
+        score += (abs(cx - (bx + bw / 2.0)) + abs(cy - (by + bh / 2.0))) * 0.03
+        if bestscore is None or score < bestscore:
+            best, bestscore = (cx, cy), score
+
+    if best is None:
+        best = (bx + bw / 2.0, min(by + bh + gap, H - R - 1))
+    placed.append(best)
+    return (best[0] / W * 100.0, best[1] / H * 100.0)
+
 # QA-ManualPress M-4 option C (Jeff's ruling, 2026-08-28): control-figure
 # dots anchor themselves too.  App components declare the callout they are
 # the target of (kDotAnchor in SharedUI.h) and the harness dumps their live
@@ -265,6 +333,8 @@ for _code in sorted(set(list(C.keys()) + list(call.keys()))):
     if not _by:
         continue
     _want = [t[0] for t in call.get(_code, [])] or sorted(C.get(_code, {}))
+    _figpng = os.path.basename(_files[0])
+    _placed = []
     _cur = dict(C.get(_code, {}))
     _hit = 0
     for _n in _want:
@@ -278,16 +348,7 @@ for _code in sorted(set(list(C.keys()) + list(call.keys()))):
         _cy = _b[1] + _b[3] / 2.0
         if not (0.0 <= _cx <= 100.0 and 0.0 <= _cy <= 100.0):
             continue
-        # Placement follows the hand convention (Jeff, verified against his
-        # coords by rendering them): a CONTROL takes its dot just below,
-        # in the caption whitespace, so the knob face stays readable; a
-        # large REGION takes its top edge, centred, so it labels the block
-        # without covering what is inside it.
-        if _b[3] <= 20.0:
-            _dx, _dy = _b[0] + _b[2] / 2.0, _b[1] + _b[3] + 1.6
-        else:
-            _dx, _dy = _b[0] + _b[2] / 2.0, _b[1] + 2.6
-        # keep the whole marker inside the crop, not just its centre
+        _dx, _dy = _place_dot(_figpng, _b, _placed)
         _cur[_n] = (round(min(max(_dx, 1.4), 98.6), 2),
                     round(min(max(_dy, 2.0), 97.6), 2))
         _hit += 1
