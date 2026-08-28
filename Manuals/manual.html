@@ -184,7 +184,7 @@ this one covers the frame itself.</p>
 <p id="FRAME-1"><b>The title</b> reads
 <code>BaySickDAW - &lt;project&gt;</code> - with
 <span id="FRAME-2"></span><b>a trailing <code>*</code></b> whenever there
-are unsaved changes: the one-glance answer to "did I save."</p>
+are unsaved changes.</p>
 
 <p id="FRAME-3"><b>The menu bar</b>: <b>File</b> (projects and export),
 <span id="FRAME-4"></span><b>Edit</b> (undo and new tabs),
@@ -385,7 +385,7 @@ void StandaloneEditor::loadTemplate (const juce::File&amp; templateXml)
 <tr id="row-EXP-10"><td><button type="button" class="n" data-back="EXP-10" title="Show it on the picture">10</button></td><td><code>Export stems (one file per mixer strip)</code>. On, it reveals one checkbox per mixer strip in a scrolling list - tick the stems you want</td></tr>
 <tr id="row-EXP-11"><td><button type="button" class="n" data-back="EXP-11" title="Show it on the picture">11</button></td><td><code>Export</code> / <code>Cancel</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Export Audio dialog - your song out of the app and into a file.</p>
+  <div class="l2"><p>The Export Audio dialog - renders the song to a file.</p>
 
 
 
@@ -399,7 +399,7 @@ at the last bar.</p>
 <span id="EXP-4"></span><b>Quality</b> (24-bit is the safe modern default)
 and <span id="EXP-5"></span><b>Sample rate</b> - renders run at the
 session's rate unless you change it; rates above 48 kHz grey for MP3 and
-drop to 48000. <span id="EXP-6"></span><b>Dither</b> applies proper noise
+drop to 48000. <span id="EXP-6"></span><b>Dither</b> applies noise
 shaping when reducing bit depth - <code>Off</code> unless you are exporting
 below the session depth.</p>
 
@@ -424,7 +424,7 @@ stems you want.</p>
 <b>the progress bar</b> tracks a running render or
 measure along the bottom.</p>
 
-<p>Worth knowing: an export is a true offline render - the
+<p>An export is a true offline render - the
 engine suspends, switches everything to offline mode, and renders faster
 than real time. It is a calculation, not a recording, which is why it is
 sample-accurate every time.</p>
@@ -540,16 +540,15 @@ bool BaySickDAWProcessor::beginOfflineRender (double renderSampleRate, int rende
 <tr id="row-BUNDLE-2"><td><button type="button" class="n" data-back="BUNDLE-2" title="Show it on the picture">2</button></td><td><code>Contents</code> - <code>Include my samples + outside files</code> and the narrower choices. This decides whether the bundle opens on a machine that has none of your library</td></tr>
 <tr id="row-BUNDLE-3"><td><button type="button" class="n" data-back="BUNDLE-3" title="Show it on the picture">3</button></td><td><code>Export</code> / <code>Cancel</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Export Project Bundle dialog - the whole project packed to travel:
-open it on another machine, or archive it knowing every file it needs came
-along.</p>
+  <div class="l2"><p>The Export Project Bundle dialog - the whole project and every file it
+references in one export, for opening on another machine or archiving.</p>
 
 
 
 <p id="BUNDLE-1"><b>Bundle as</b> - one <code>.zip</code> for sending, or
 a plain folder for archiving.</p>
 
-<p id="BUNDLE-2"><b>Contents</b> is the decision that matters:
+<p id="BUNDLE-2"><b>Contents</b> picks what gets packed:
 <code>Include my samples + outside files</code> makes the bundle
 self-contained - it opens on a machine that has none of your libraries.
 The narrower choices make smaller bundles that depend on the destination
@@ -741,7 +740,7 @@ the whole stack as a clickable list.</p>
 bar too.</p>
 
 <p id="EMENU-5"><b>New Automation Clip</b> starts a fresh automation clip -
-the Event Editor's raw material.</p>
+what the Event Editor edits.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-69">Undo</a>, <a data-level="weeds" href="#IMP-57">EngineRig</a>, <a data-level="weeds" href="#IMP-63">Automation</a>.</p></div>
 </section>
@@ -764,16 +763,15 @@ the Event Editor's raw material.</p>
 where you are: everything above it is done, everything below is redoable.</p>
 
 <p id="UNDO-2"><b>Click any entry</b> and the whole app jumps to that
-state - ten steps back in one click, or forward again. Nothing is lost by
-looking; the redo entries stay until you edit from an earlier point.</p>
+state - ten steps back in one click, or forward again. The redo entries stay
+until you edit from an earlier point.</p>
 
-<p><b>Depth</b> is yours to set - 100, 250, 500 or 1000
+<p><b>Depth</b> is a setting - 100, 250, 500 or 1000
 transactions, under <code>Options &gt; Undo History Size</code>. The list
-holds that many and quietly drops the oldest.</p>
+holds that many and drops the oldest.</p>
 
 <p>Big structural edits - arrangement rearrangements, track
-operations - undo as ONE step each, however much they touched. One action,
-one entry, one click back.</p>
+operations - undo as ONE step each, however much they touched.</p>
 </div>
   <div class="l3"><div class="tp" id="IMP-69"><h4 class="topichead">Undo</h4>
 <p><b>One undo manager for the whole application</b>, and it lives on the
@@ -874,8 +872,7 @@ re-pointing the editor at a different control and
 a curve.</p>
 
 <p id="EVT-7"><b>The target label</b> names what you are editing in plain
-words - <code>mixer master fader</code> - so there is never a question of
-whose curve this is.</p>
+words - <code>mixer master fader</code>.</p>
 
 <p id="EVT-8"><b>Auto / LFO.</b> Two kinds of source: a drawn curve, or a
 generated wobble. In LFO mode the top row gains
@@ -885,7 +882,7 @@ instead of hand-drawn points.</p>
 <p id="EVT-9"><b>New Automation Clip</b> starts a fresh clip on this
 target; <span id="EVT-16"></span><b>the Automation Clips list</b> shows
 every clip the target has, click to load one into the canvas.
-A clip whose target control was deleted washes
+A clip whose target control was deleted turns
 red with a <code>[stale]</code> prefix - it still holds its data, but
 nothing consumes it.</p>
 
@@ -1175,12 +1172,11 @@ pattern - color carries into the Builder, so a colored pattern list makes
 a readable arrangement.</p>
 
 <p id="PMENU-2"><b>Find Next Empty Pattern</b> (F3) jumps to the next
-blank one - the fast way to start the next part without hunting.</p>
+blank one.</p>
 
 <p id="PMENU-3"><b>Insert One</b> (Shift+Ctrl+Ins) adds a pattern at the
 current position; <span id="PMENU-4"></span><b>Clone</b> (Alt+C)
-duplicates the current one, notes and all - the start-from-variation
-move.</p>
+duplicates the current one, notes and all.</p>
 
 <p id="PMENU-5"><b>Delete</b> removes the current pattern - deliberately
 no shortcut, since the bare Delete key belongs to whichever editing
@@ -1208,8 +1204,7 @@ Down</b> (Shift+Ctrl+Up/Down) reorder the pattern list.</p>
 <tr id="row-VMENU-7"><td><button type="button" class="n" data-back="VMENU-7" title="Show it on the picture">7</button></td><td><code>Show Drum Kit (Most Recent)  (F11)</code> - <em>see <a href="#DKIT">Drum Kit</a></em></td></tr>
 <tr id="row-VMENU-8"><td><button type="button" class="n" data-back="VMENU-8" title="Show it on the picture">8</button></td><td><code>Show Event Editor (Most Recent)  (F12)</code> - <em>see <a href="#EVT">Event Editor</a></em></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The View menu - one row per F-key navigation command. Learn the keys and
-this menu becomes a reference card you never open.</p>
+  <div class="l2"><p>The View menu - one row per F-key navigation command.</p>
 
 
 
@@ -1296,11 +1291,11 @@ one always stays checked, and your Builder Grid Default pick is always
 written regardless.</p>
 
 <p id="FILE-2"><b>De-noise strength</b> is what "Cleaned" means -
-<code>Strong</code> scrubs harder, at more risk of touching the voice.</p>
+<code>Strong</code> removes more noise, at more risk of affecting the voice.</p>
 
 <p id="FILE-3"><b>Auto-freeze above</b> - the DSP load at which tabs start
 freezing themselves (<code>80 %</code> default). When the meter runs hot,
-the app quietly renders the heaviest tabs instead of letting audio break
+the app renders the heaviest tabs instead of letting audio break
 up. <span id="FILE-6"></span><b>Enable Instrument Level Freeze</b> lets
 that mechanism work per
 instrument.<span id="FILE-4"></span><span id="FILE-5"></span></p>
@@ -1328,7 +1323,7 @@ instrument.<span id="FILE-4"></span><span id="FILE-5"></span></p>
 
 
 <p id="AUD-1"><b>Audio Mode</b> - <code>Windows Audio</code> for
-plug-and-play, <code>ASIO</code> for serious low-latency work with an
+plug-and-play, <code>ASIO</code> for low-latency work with an
 audio interface. <span id="AUD-2"></span><b>Audio Device</b> picks the
 hardware within that mode. ASIO note: recording needs the input and output
 on the SAME ASIO device name.</p>
@@ -1590,9 +1585,8 @@ and the record-quantize. The dot records; the chevron configures.</p>
 <p id="TRAN-6"><b>The BPM field</b> - the amber display - is the song's
 tempo in beats per minute. Click it and type. Right-click offers
 <code>Automate tempo</code>, for songs whose speed changes as they go.
-<span id="TRAN-7"></span><b>TAP</b> sets tempo by feel: tap the button
-along with anything - a song, your foot - and the field locks onto your
-tapping.</p>
+<span id="TRAN-7"></span><b>TAP</b> sets the tempo from your tapping: tap
+the button in time and the field locks onto the rate.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">Mode and loop</div>
@@ -1602,7 +1596,7 @@ tapping.</p>
 <p id="TRAN-8"><b>PATTERN / SONG</b> is what the play button plays: the
 current pattern looping around (where you build parts), or the whole
 arrangement from the Builder (where you hear the song). Most writing
-happens in pattern mode; press this to zoom out to the song.
+happens in pattern mode.
 <span id="TRAN-9"></span><b>The loop toggle</b> decides whether the song
 repeats at its end or plays through and stops.</p>
 
@@ -1612,7 +1606,7 @@ repeats at its end or plays through and stops.</p>
 
 
 <p id="TRAN-10"><b>The metronome</b> toggles the click track - the steady
-tick that keeps a performance honest - and
+click that marks the beat - and
 <span id="TRAN-11"></span><b>its chevron</b> opens the metronome's
 settings: the click sound, its volume, and the one-bar count-in before a
 recording.</p>
@@ -1628,10 +1622,9 @@ play notes in.</p>
 
 
 <p id="TRAN-13"><b>The Swing knob</b> pushes every second sixteenth-note
-late, across the whole app - the difference between a rigid grid and a
-groove. Each player has its own Swing Mix knob deciding how much of this
-global amount it feels, so drums can swing hard while a pad stays
-straight.</p>
+late, across the whole app. Each player has its own Swing Mix knob
+deciding how much of this global amount it applies, so drums can swing
+hard while a pad stays straight.</p>
 
 <p id="TRAN-14"><b>The pattern dropdown</b> picks which pattern you are
 working in, and <span id="TRAN-15"></span><b>the position readout</b> -
@@ -1759,8 +1752,7 @@ on/off toggle is the transport button itself.</p>
 
 
 <p id="TRANMM-1"><b>Sound</b> - <code>Sine</code>, <code>Click</code>,
-<code>Wood</code> or <code>Bell</code>: pick the click you can hear over
-your track without hating it.</p>
+<code>Wood</code> or <code>Bell</code>: the click's tone.</p>
 
 <p id="TRANMM-2"><b>Volume</b> - the click's level, up to twice unity for
 loud sessions.</p>
@@ -1828,10 +1820,9 @@ chevron - there is only one mixer),
 
 <p id="TABBAR-10"><b>The instance slots</b> - Clips gold, Vox teal, Inst
 navy, Layers orange, Bass green, Drums red, Plugins purple - exist only
-while at least one tab of their type does, and vanish at zero. Do not
-panic when one disappears; it means the last tab of that kind was
-deleted. <span id="TABBAR-11"></span><b>The <code>+</code> slot</b> is
-where every tab is born, and the only road back to a type whose slot has
+while at least one tab of their type does, and vanish at zero.
+<span id="TABBAR-11"></span><b>The <code>+</code> slot</b> is
+where every tab is created, and the only way back to a type whose slot has
 vanished.</p>
 
 </div>
@@ -1931,8 +1922,8 @@ already exists, one kit at a time.</p>
 <tr id="row-BLD-21"><td><button type="button" class="n" data-back="BLD-21" title="Show it on the picture">21</button></td><td>Ruler markers - yellow time-marker pennant, blue time-signature pill (<code>4/4</code>; outline = pattern-linked, solid = manual), amber tempo pill</td></tr>
 <tr id="row-BLD-22"><td><button type="button" class="n" data-back="BLD-22" title="Show it on the picture">22</button></td><td>Playhead - the green flag in the ruler with its line down the grid</td></tr>
 </tbody></table></div>
-  <div class="l2">﻿<p>The Builder is where patterns become a song. Left side: the browser with
-your raw material. Right side: the grid - time running left to right, one
+  <div class="l2">﻿<p>The Builder is where patterns become a song. Left side: the browser. Right
+side: the grid - time running left to right, one
 row per track - where you place blocks. The toolbar between them decides
 what your mouse does.</p>
 
@@ -1947,7 +1938,7 @@ your patterns, your audio files, or automation clips.
 <span id="BLD-4"></span><b>+ Add</b> makes a new empty pattern,
 <span id="BLD-5"></span><b>Delete</b> removes the selected one (its time
 markers go with it), and <span id="BLD-6"></span><b>each row</b> in the
-list is a block waiting to happen - drag it onto the grid to place it.
+list can be dragged onto the grid to place it as a block.
 <b>Sort</b> appears on the Files tab to order
 its lists.</p>
 
@@ -2092,7 +2083,7 @@ ready to place on the grid.</p>
 
 <p id="BLDM-2"><b>Rename Pattern</b> (F2) and <span id="BLDM-3"></span>
 <b>Find Next Empty</b> (F3) - the same pattern housekeeping as the app's
-Patterns menu, here where the patterns live.</p>
+Patterns menu.</p>
 
 <p id="BLDM-4"><b>New Automation Clip...</b> starts an automation clip for
 the picker's Auto list.</p>
@@ -2120,7 +2111,7 @@ export.</p>
 <tr id="row-BLDE-8"><td><button type="button" class="n" data-back="BLDE-8" title="Show it on the picture">8</button></td><td><code>Duplicate</code>  (<code>Ctrl+B</code>)</td></tr>
 </tbody></table></div>
   <div class="l2"><p>The Builder's Edit menu - everything routes to the arrangement grid, and
-every entry mirrors a key worth learning.</p>
+every entry mirrors a key.</p>
 
 
 
@@ -2133,8 +2124,7 @@ the grid's history - greyed until there is something to step.</p>
 <span id="BLDE-6"></span><b>Paste</b> (Ctrl+V),
 <span id="BLDE-7"></span><b>Delete</b> (Del) and
 <span id="BLDE-8"></span><b>Duplicate</b> (Ctrl+B) act on it - Duplicate
-being the one to learn: copy-and-place in a single stroke, the fastest way
-to extend an arrangement.</p>
+copies and places in a single stroke.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-69">Undo</a>, <a data-level="weeds" href="#IMP-65">Patterns and arrangement</a>.</p></div>
 </section>
@@ -2247,7 +2237,7 @@ list.</p>
 
 <p id="PR-14"><b>The ruler</b> counts bars,
 <span id="PR-15"></span><b>the playhead</b> is the green marker riding
-playback, and <span id="PR-18"></span><b>the grid</b> is the paper: one
+playback, and <span id="PR-18"></span><b>the grid</b> has one
 row per semitone, with every C row banded lighter so you always know
 which octave you are in.</p>
 
@@ -2258,7 +2248,7 @@ which octave you are in.</p>
 
 <p id="PR-16"><b>The keyboard is playable</b>: click any key and the
 aimed tab's instrument sounds that note - hosted plugins included -
-so you can find your note before you draw it. Silence just means the tab
+so you can find your note before you draw it. Silence means the tab
 has no instrument loaded. <span id="PR-17"></span><b>The C labels</b>
 (<code>C6</code>, <code>C7</code>...) anchor the octaves.
 On instruments that use them, <b>amber
@@ -2277,8 +2267,7 @@ chooses what the strip below the grid edits - a clean click picks the
 mode, and dragging the header vertically resizes the lane.
 <span id="PR-20"></span><b>The lane</b> shows one bar per note, with
 25/50/75% guide lines. Velocity - how hard each note is played - is the
-default mode and the important one: sculpt these bars and a flat
-programmed part starts breathing.</p>
+default mode: varying these bars gives a programmed part its dynamics.</p>
 
 <p>Every Piano Roll shortcut - the tool keys, <code>S</code> for note
 types, and the rest - is listed on the Key Binds window's
@@ -2393,8 +2382,7 @@ struct PianoNote
 <p id="PRE-3"><b>Copy</b> (Ctrl+C), <span id="PRE-4"></span><b>Paste</b>
 (Ctrl+V), <span id="PRE-5"></span><b>Delete</b> and
 <span id="PRE-6"></span><b>Duplicate</b> (Ctrl+B) act on selected notes -
-Duplicate places the copy right after the original, the fastest way to
-repeat a phrase.</p>
+Duplicate places the copy right after the original.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-67">Piano Roll</a>.</p></div>
 </section>
@@ -2427,18 +2415,17 @@ on the selection (or everything, with nothing selected).</p>
 
 
 <p id="PRT-1"><b>Quantize</b> (Alt+Q) snaps notes to the Quantize Settings
-grid - the timing fix. <span id="PRT-2"></span><b>Strum</b> (Alt+S)
+grid. <span id="PRT-2"></span><b>Strum</b> (Alt+S)
 staggers a chord's notes like a strummed guitar, and
 <span id="PRT-3"></span><b>Arpeggiate</b> (Alt+A) breaks the chord into a
 pattern of single notes.</p>
 
 <p id="PRT-4"><b>Chop...</b> cuts notes into equal pieces - halves,
-thirds, quarters, sixths or eighths - long notes into rhythm in one
-move.</p>
+thirds, quarters, sixths or eighths.</p>
 
 <p id="PRT-5"><b>Glue</b> (Ctrl+G) joins adjacent same-pitch notes back
 into one; <span id="PRT-6"></span><b>Articulate</b> (Alt+L) shapes note
-lengths; <span id="PRT-7"></span><b>Randomize</b> (Alt+R) rolls new
+lengths; <span id="PRT-7"></span><b>Randomize</b> (Alt+R) generates new
 material and <span id="PRT-8"></span><b>Humanize...</b> nudges timing and
 velocity off the grid just enough to feel played.</p>
 
@@ -2452,8 +2439,7 @@ Chords</b> (Alt+P) builds chords under a melody.</p>
 
 <p id="PRT-12"><b>Transpose Up / Down</b> (Shift+Up/Down) move the
 selection a semitone; <span id="PRT-14"></span><b>the Octave pair</b>
-(Ctrl+Up/Down) move it an octave. <span id="PRT-13"></span>All four are
-worth learning as keys - transposition is constant work.</p>
+(Ctrl+Up/Down) move it an octave. <span id="PRT-13"></span></p>
 
 <p id="PRT-15">Everything here lands on the undo stack as one step per
 use.</p>
@@ -2471,13 +2457,12 @@ use.</p>
 <tr id="row-PRS-2"><td><button type="button" class="n" data-back="PRS-2" title="Show it on the picture">2</button></td><td><code>Root</code> submenu - <code>C</code> through <code>B</code>, tick on the current root</td></tr>
 <tr id="row-PRS-3"><td><button type="button" class="n" data-back="PRS-3" title="Show it on the picture">3</button></td><td><code>Scale</code> submenu - the scale list, tick on the current one</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Piano Roll's Scale menu - stay in key without knowing the theory.</p>
+  <div class="l2"><p>The Piano Roll's Scale menu.</p>
 
 
 
 <p id="PRS-1"><b>Snap to Scale</b> - the tick shows a scale is active.
-With it on, drawn and dragged notes land on legal pitches; the wrong notes
-simply stop being reachable.</p>
+With it on, drawn and dragged notes land on legal pitches.</p>
 
 <p id="PRS-2"><b>Root</b> picks the key's home note - <code>C</code>
 through <code>B</code> - and <span id="PRS-3"></span><b>Scale</b> picks
@@ -2502,10 +2487,9 @@ C + Minor means every note you place belongs to C minor.</p>
 <p id="PRC-1"><b>The chord list</b> - <code>Major</code> through
 <code>Add 9</code>, one tick at a time. With a chord ticked, the Draw tool
 places that whole chord instead of single notes: click once, get three or
-four notes voiced under your click. From simple triads at the top to
-sevenths and ninths further down - pick <code>Major</code> or
-<code>Minor</code> and click a progression into existence, then come back
-for the fancier voicings when the part wants color.</p>
+four notes voiced under your click. The list runs from simple triads
+(<code>Major</code>, <code>Minor</code>) at the top to sevenths and
+ninths further down.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-67">Piano Roll</a>.</p></div>
 </section>
@@ -2575,7 +2559,7 @@ Piano Roll.</p>
 
 <p id="DKIT-3"><b>A row.</b> Sixteen per kit, and each carries, left to
 right: <span id="DKIT-4"></span><b>the sound picker</b> (reads <code>Pick a
-sound</code> until you choose - picking is what gives the row a voice),
+sound</code> until you choose - a row is silent until it has a sound),
 <span id="DKIT-5"></span><b>M</b>ute and
 <span id="DKIT-6"></span><b>S</b>olo, and at the right end
 <span id="DKIT-10"></span><b>an audition key</b> - the white piano key
@@ -2590,15 +2574,14 @@ that plays the row's sound so you can check it without writing a note
 
 <p id="DKIT-7"><b>1-16 / 17-32.</b> Two INDEPENDENT kits, not two halves
 of one: each has its own drum bus in the mixer, its own kit file, its own
-lock, and a drum never moves between them. Think of them as two drum
-machines in the same window. <span id="DKIT-8"></span><b>Kit</b> saves
+lock, and a drum never moves between them.
+<span id="DKIT-8"></span><b>Kit</b> saves
 and loads the sixteen drums of whichever kit you are on;
 <span id="DKIT-2"></span><b>Lock/Unlock 1-16</b> locks the visible kit's
 rows against accidental edits.</p>
 
 <p id="DKIT-1"><b>The tab picker</b> works as on the roll;
-<span id="DKIT-9"></span><b>Sel</b> is the roll's Select tool wearing
-its drum-kit label.</p>
+<span id="DKIT-9"></span><b>Sel</b> is the roll's Select tool.</p>
 
 <p>The kit's mouse moves - dragging a row's grip to reorder, the wheel
 stepping one row at a time, right-click + wheel scrolling through time -
@@ -2630,8 +2613,8 @@ are listed with every other shortcut on the Key Binds window's
 <span id="DKITE-4"></span><b>Paste</b> (Ctrl+V),
 <span id="DKITE-5"></span><b>Delete</b> and
 <span id="DKITE-6"></span><b>Duplicate</b> (Ctrl+B) - selection and
-clipboard over drum hits, exactly as on the roll. Duplicate is the
-beat-builder: select a bar of groove, Ctrl+B, and it repeats.</p>
+clipboard over drum hits, exactly as on the roll. Select a bar, press
+Ctrl+B, and Duplicate repeats it.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-67">Piano Roll</a>.</p></div>
 </section>
@@ -2656,15 +2639,14 @@ to work.</p>
 
 
 
-<p id="DKITT-1"><b>Quantize</b> (Alt+Q) snaps hits to the grid -
-tightening a played-in beat is its whole job here.
+<p id="DKITT-1"><b>Quantize</b> (Alt+Q) snaps hits to the grid.
 <span id="DKITT-2"></span><b>Strum</b> (Alt+S) staggers simultaneous hits
-by a hair - flams and humanized layers.</p>
+slightly - flams and humanized layers.</p>
 
 <p id="DKITT-3"><b>Chop...</b> cuts long hits into evens;
 <span id="DKITT-4"></span><b>Glue</b> (Ctrl+G) rejoins them;
 <span id="DKITT-5"></span><b>Articulate</b> (Alt+L) shapes lengths;
-<span id="DKITT-6"></span><b>Randomize</b> (Alt+R) rolls variation.</p>
+<span id="DKITT-6"></span><b>Randomize</b> (Alt+R) generates variation.</p>
 
 <p id="DKITT-7"><b>Quantize Settings</b> - the grid Quantize uses,
 <code>1/4</code> to <code>1/32</code>, tick on the current.</p>
@@ -2694,7 +2676,7 @@ Out</b> scale time.</p>
 <p id="DKITV-3"><b>Scroll to Playhead</b> jumps the view to playback.</p>
 
 <p id="DKITV-4"><b>Velocity Lane</b> - tick when shown - the per-hit
-velocity bars at the bottom, where a beat gets its dynamics.</p>
+velocity bars at the bottom.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-67">Piano Roll</a>.</p></div>
 </section>
@@ -2710,7 +2692,7 @@ velocity bars at the bottom, where a beat gets its dynamics.</p>
 <tr id="row-PRMMNU-3"><td><button type="button" class="n" data-back="PRMMNU-3" title="Show it on the picture">3</button></td><td><code>MIDI Learn</code> - arms the control; the next controller move binds to it. Reads <code>MIDI Learn (no MIDI input devices)</code> and greys when nothing is plugged in - plug a device in and reopen the menu, hot-plug is not watched</td></tr>
 </tbody></table></div>
   <div class="l2"><p>The parameter menu - right-click any knob, slider or selector in the app
-and this is what appears. Small, and load-bearing: it is the whole entry
+and this is what appears. It is the whole entry
 point for automation and MIDI Learn. The picture shows the everyday shape;
 three of the rows appear only in the situations they name.</p>
 
@@ -3778,7 +3760,7 @@ effect; this is also how you keep a natural take and just reinforce it.</p>
 
 <p id="BSV-2"><b>A/B</b> holds two complete snapshots of this page's
 settings so you can set the corrector up two different ways and flip
-between them on the same voice - the honest way to decide. This pair
+between them on the same voice. This pair
 belongs to the Vox page alone; the amp window and the EQ have their own,
 separate A/Bs.</p>
 
@@ -3796,8 +3778,8 @@ the corrector which notes are legal. A scale is the set of notes a song
 uses; the root is its home note. <code>Chromatic</code> means "every
 semitone is legal" - the corrector just nudges to the nearest note, the
 transparent setting. Pick a real key (root C, scale Minor, say) and the
-corrector snaps only to that key's notes - which is where the deliberate,
-hard-tuned pop vocal sound lives.</p>
+corrector snaps only to that key's notes - which produces the deliberate,
+hard-tuned pop vocal sound.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">How the correction behaves</div>
@@ -3808,8 +3790,7 @@ hard-tuned pop vocal sound lives.</p>
 milliseconds. Slow (high numbers): drift gets corrected without anyone
 hearing the correction happen - natural. Near zero: the voice arrives on
 the note already perfect, with that robotic snap between notes. This one
-knob is most of the difference between "tuned" and "auto-tuned"; both are
-legitimate sounds, and this chooses.</p>
+knob is most of the difference between "tuned" and "auto-tuned".</p>
 
 <p id="BSV-7"><b>Strength</b> is how far off-pitch material gets pulled
 toward the target. 100% lands dead on the note; less leaves some of the
@@ -3825,7 +3806,7 @@ notes do not freeze into a flat line.</p>
 <p id="BSV-9"><b>Throat</b> resizes the modeled vocal tract - the physical
 shape the voice resonates in. Bigger reads deeper and darker; smaller,
 brighter and thinner. A subtle character control at small moves, a
-creature-maker at big ones.</p>
+drastic voice-changing effect at big ones.</p>
 
 <p id="BSV-10"><b>Formant Preserve.</b> Formants are the resonances that
 make a voice sound like a PERSON rather than a pitch. When correction
@@ -3838,7 +3819,7 @@ artifact is the effect you are chasing.</p>
 <div class="shot cropview m2c" data-screen="BSV" data-m2key="BSV:4" data-file="BaySickVocals.png" data-rect="28.29,90.53,43.3,9.47" data-dims="647,442" style="width:280px;aspect-ratio:6.6930"><img src="figures/BaySickVocals.png" alt="" style="position:absolute;width:230.947%;left:-65.335%;top:-955.966%" loading="lazy"><button type="button" class="marker" data-goto="BSV-11" style="left:8.57%;top:26.93%">11</button></div>
 
 
-<p id="BSV-11"><b>The readout</b> shows the corrector's live thinking:
+<p id="BSV-11"><b>The readout</b> shows the corrector's live analysis:
 <code>Detected</code> (the note you actually sang), <code>Target</code>
 (the note the scale says you meant), <code>Shift</code> (the distance
 between them, in cents - hundredths of a semitone). Dashes mean it has no
@@ -4038,7 +4019,7 @@ recorded take, then drag notes to repair or restyle the melody.</p>
 double to a lead, a harmony to the main - so stacked vocals land together.</p>
 
 <p id="BSVCM-4"><b>NAM/IR.</b> The amp-and-cabinet window shared with the
-guitar side; on a vocal it is a color box - run the voice through an amp
+guitar side; on a vocal it is a coloring effect - run the voice through an amp
 capture or an impulse response for character.</p>
 
 <p id="BSVCM-5"><b>FX Rack.</b> This channel's six-slot effects rack, after
@@ -4179,7 +4160,7 @@ loud moments.</p>
 readout in dBFS (decibels below digital full scale, where 0 is the
 ceiling). Use them to keep the level matched from stage to stage, so
 clicking a stage's bypass compares the SOUND and not just the volume -
-louder always sounds "better," which fools everyone.</p>
+louder always sounds "better."</p>
 
 <p>The chain also embeds a <b>NAM/IR stage</b> - the amp and
 cabinet window - with an A/B pair of its own, so a vocal can take amp
@@ -4292,7 +4273,7 @@ so a double does not just land with the lead but bends with it.
 each are (<code>Leader Type</code> / <code>Follower Type</code>), then
 <code>Blend</code> / <code>Variation</code> / <code>Transpose</code> /
 <code>Formant Shift</code> for how much of the leader's pitch contour the
-follower takes and how its character survives the ride.</p>
+follower takes and how its vocal character is preserved.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">Views and zoom</div>
@@ -4482,8 +4463,8 @@ not a grid.</p>
   <div class="l2"><p>BaySickPitch is the offline pitch editor: it studies a recorded take,
 draws every note the singer actually sang as a block on a canvas, and lets
 you drag those blocks to repair or rewrite the melody. Offline means it
-works on the recording, not the live signal - so it can be surgical in a
-way the realtime corrector cannot.</p>
+works on the recording, not the live signal - so it can make precise
+per-note edits the realtime corrector cannot.</p>
 
 
 <div class="cl"><div class="viewlabel">Tools and analysis</div>
@@ -4501,7 +4482,7 @@ notes in time.</p>
 
 <p id="BSPIT-4"><b>Send Notes to...</b> exports the detected melody as
 NOTES - sing a line, send it to a synth tab, and the synth plays your
-melody. The lazy and excellent way to write instrument parts.</p>
+melody.</p>
 
 <p id="BSPIT-5"><b>ON</b> enables the pitch stage in the channel's signal
 path; <span id="BSPIT-22"></span>the <b>selection readout</b> beside it
@@ -4518,8 +4499,8 @@ tracked (too noisy, too quiet, no clear pitch).</p>
 
 <p id="BSPIT-7"><b>Root</b> and <span id="BSPIT-8"></span><b>Scale</b>
 define the song's key - the set of legal notes -
-and <span id="BSPIT-9"></span><b>Snap</b> makes dragged notes land on it.
-Drag roughly; land perfectly.</p>
+and <span id="BSPIT-9"></span><b>Snap</b> makes dragged notes land on
+it.</p>
 
 <p id="BSPIT-10"><b>The engine picker</b> chooses which pitch-shifting
 algorithm does the audio surgery. <code>Rubber Band - Balanced</code> is
@@ -4763,7 +4744,7 @@ to decide before it has heard the end of the word.</p>
 <tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
 </tbody></table>
 <p>The pedalboard works like the floor in front of a guitarist: eight
-stompboxes in a row, the signal walking through them left to right on its
+stompboxes in a row, the signal passing through them left to right on its
 way to the amp. Slot 1 is always the tuner, slot 8 is always an EQ, and the
 six between are yours to fill.</p>
 
@@ -4804,12 +4785,12 @@ its name at the top; right-click the pedal's face to swap it for a
 different one.</p>
 
 <p id="BSPDL-7"><b>The ON footswitch</b> at each pedal's foot engages it -
-green when on, silent pass-through when off. Exactly like stepping on the
-real thing, and the fastest way to hear what a pedal is adding.</p>
+green when on, silent pass-through when off. It is the fastest way to
+hear what a pedal is adding.</p>
 
 <p id="BSPDL-11"><b>The X</b> removes a pedal from its slot, and
 <span id="BSPDL-12"></span><b>the reorder arrows</b> move it along the
-chain. Order genuinely matters: distortion INTO delay means your echoes
+chain. Order matters: distortion INTO delay means your echoes
 are copies of a distorted note; delay INTO distortion means the echoes
 themselves get crushed - same two pedals, different sound. The arrows grey
 out at the chain's ends.</p>
@@ -5015,7 +4996,7 @@ a pedal to swap it. Grouped by what the pedal does to the signal.</p>
 compressors squeeze loud and quiet closer together (the bass version tuned
 for low end), and the noise gate mutes the hiss between phrases.</p>
 
-<p id="BSPDLP-3"><b>Harmonics</b> - the dirt section, mild to wild: from
+<p id="BSPDLP-3"><b>Harmonics</b> - the dirt section: from
 bass-friendly drivers through blues drive, overdrive and saturation up to
 distortion, fuzz and high-gain. Also the octave pedal, which adds a note an
 octave away.</p>
@@ -5087,9 +5068,9 @@ sampled equivalent of a guitarist recording the part twice, once left,
 once right. Small amounts double-track; large amounts wall-of-guitars.</p>
 
 <p id="BSGTR-6"><b>Releases</b> sets how much of the recorded
-release noise plays - the sound of fingers leaving strings. It seems like
-a detail; it is a surprising amount of what makes a sampled guitar read
-as real. Too low sounds airbrushed, too high sounds squeaky.</p>
+release noise plays - the sound of fingers leaving strings. It is a
+large part of what makes a sampled guitar read
+as real. Too low sounds unnaturally clean, too high sounds squeaky.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">Vibrato</div>
@@ -5147,8 +5128,8 @@ error, just the load in progress.</p>
 <tr id="row-BSBAS-11"><td><button type="button" class="n" data-back="BSBAS-11" title="Show it on the picture">11</button></td><td><code>Swing Mix</code> knob on the title bar, right of <code>Menu</code> - scales the global Swing for this player; right-click offers <code>Truncate Swing Notes</code></td></tr>
 </tbody></table></div>
   <div class="l2"><p>BaySickBasses is the sampled bass - and a different instrument from
-BaySickGuitars, not a setting on it: its own recordings, its own surface,
-its own personality. The panel is drawn from the loaded instrument.</p>
+BaySickGuitars, not a setting on it: its own recordings and its own
+control surface. The panel is drawn from the loaded instrument.</p>
 
 
 <div class="cl"><div class="viewlabel">The instrument</div>
@@ -5197,7 +5178,7 @@ of the stereo picture - but it is here for the parts that want size.</p>
 wobbles), <code>Tremolo</code> (a volume wobble layered with it),
 <code>Rate</code> (how fast) - <span id="BSBAS-7"></span>with
 <b>Delay / Fade / Humanize</b> deciding when it arrives after the note
-starts, how gradually it blooms, and how much natural irregularity keeps
+starts, how gradually it fades in, and how much natural irregularity keeps
 it from sounding mechanical.</p>
 
 </div>
@@ -5354,7 +5335,7 @@ comparison.</p>
 <code>Load .wav IR...</code>, the field with the same empty and missing
 states, <span id="BSNAM-4"></span>and its own <b>bypass</b>. Amp without
 cab is raw and fizzy (the sound of an amp with no speaker); cab without
-amp is a natural tone-shaper. Both are legitimate moves, not mistakes.</p>
+amp is a natural tone-shaper.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The signal chain knobs</div>
@@ -5381,8 +5362,8 @@ distorted settings, at more CPU cost.</p>
 
 
 <p id="BSNAM-11"><b>A / B.</b> Two complete rig memories. Set up one
-sound on A, another on B, and flip between them while playing - the only
-honest way to compare amps. This pair belongs to this window alone.</p>
+sound on A, another on B, and flip between them while playing.
+This pair belongs to this window alone.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The mic simulators</div>
@@ -5390,9 +5371,9 @@ honest way to compare amps. This pair belongs to this window alone.</p>
 
 
 <p id="BSNAM-12"><b>MIC SIM A and B</b> - two identical microphone
-columns, because real cabs are usually miked twice and the blend IS the
-tone. <span id="BSNAM-13"></span>Each column's <b>Active switch</b> ships
-OFF - the mic sim adds nothing until you ask. Flipping it crossfades over
+columns, because real cabs are usually miked twice and the blend shapes
+the tone. <span id="BSNAM-13"></span>Each column's <b>Active switch</b> ships
+OFF - the mic sim adds nothing until you turn it on. Flipping it crossfades over
 a few milliseconds instead of clicking, so it is safe to automate
 mid-song. <span id="BSNAM-14"></span><b>Mode</b> chooses where the mic's
 character comes from: <code>Built-in</code> -
@@ -5418,9 +5399,9 @@ everything equally, <code>Card</code>ioid rejects what is behind it (the
 standard stage mic), <code>Sup</code>er and <code>Hyp</code>ercardioid
 reject harder, figure-<code>8</code> hears front and back but not the
 sides. <span id="BSNAM-21"></span><b>Distance</b> (1-150 cm): close is
-thick, bass-heavy, in-your-face; far is roomier and thinner.
+thick and bass-heavy; far is roomier and thinner.
 <span id="BSNAM-22"></span><b>Angle</b> swings the mic off the speaker's
-center axis - further off-axis is darker, exactly like the real thing.
+center axis - further off-axis is darker.
 <span id="BSNAM-23"></span><b>Height</b> raises or lowers it off the
 cone's center; height adds to the true off-axis angle AND lengthens the
 path, so raising a mic both darkens and slightly distances it.
@@ -5445,8 +5426,7 @@ the mic backs away, because proximity follows TRUE distance, not just
 height. <span id="BSNAM-29"></span><b>The readout</b> prints the numbers
 (<code>30 cm   0 deg</code>, plus height in SIDE view).
 When a mic's switch is off, <b>its whole
-column dims</b> to 40% and ignores the mouse, picture included - the look
-IS the state.</p>
+column dims</b> to 40% and ignores the mouse, picture included.</p>
 
 
 <p><b>The full-rig hint.</b> Some captures are
@@ -5936,9 +5916,8 @@ window says so, and the cabinet stage should be bypassed for those.</p>
 </tbody></table>
 <p>Harmless builds sound the opposite way from the other synth: instead of
 starting with a bright wave and filtering it down, it adds the sound up out
-of individual harmonics - the pure tones that stack to make any note. That
-lets it do things a filter never could, and it is why its panel has controls
-no other engine carries. Two sound layers - Part A and Part B - always play
+of individual harmonics - the pure tones that stack to make any note. Two
+sound layers - Part A and Part B - always play
 together, blended by one knob, and a modulation editor on the right can put
 almost any knob in motion on every note.</p>
 
@@ -5963,7 +5942,7 @@ hand off when they end.</p>
 <p id="BSHARM-2"><b>TREMOLO</b> is a volume wobble. <code>WAVE</code>
 picks the wobble's shape, <code>DEPTH</code> how deep the dips go,
 <code>SPEED</code> how fast, and <code>GAP</code> inserts silence between
-pulses - push GAP far enough and smooth tremolo becomes outright rhythmic
+pulses - push GAP far enough and smooth tremolo becomes rhythmic
 chopping.</p>
 
 </div>
@@ -5985,8 +5964,7 @@ whether loudness follows the envelope directly or its own path.</p>
 
 <p id="BSHARM-4"><b>VIBRATO / LEGATO.</b> Vibrato is a pitch wobble on
 held notes: <code>WAVE</code>, <code>DEPTH</code> and <code>SPEED</code>
-shape it, and <code>ENV</code> makes it fade in late the way a singer
-adds it - a note that starts still and starts to shimmer.
+shape it, and <code>ENV</code> makes it fade in late.
 <code>GLIDE</code> is slide time between notes, <code>LIMIT</code> caps
 how far a slide may travel, and <code>LEGATO</code> makes overlapped
 notes connect without restarting their envelopes.</p>
@@ -6001,11 +5979,11 @@ notes connect without restarting their envelopes.</p>
 pattern), <code>PAN</code> fans them across the stereo field,
 <code>PITCH</code> tunes them apart, <code>PHASE</code> offsets their
 wave cycles. The stack is gain-compensated - adding voices adds width and
-thickness, never loudness, so your mix balance survives.
+thickness, not loudness.
 <span id="BSHARM-26"></span><b>TYPE</b> picks how the copies disagree:
 <code>Pure</code> tidy offsets, <code>Random</code> scatter,
 <code>Drifting</code> slow wander, <code>Alt-only</code> alternating
-signs - from polished to loose.</p>
+signs.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The two filters</div>
@@ -6016,10 +5994,10 @@ signs - from polished to loose.</p>
 2</b> - two complete tone-shapers in a row, each with a type picker, an
 <code>ENV</code> depth, frequency, <code>RES</code>onance, keyboard
 tracking (<code>KB</code>) and its own ATK/DEC/SUS/REL envelope. A filter
-holds back part of the sound's frequency range; two in series can do
-what one cannot - one darkening the whole sound while the other notches a
-moving hole in it is a classic Harmless texture. These envelopes are
-recalculated every sample, so even the fastest sweeps stay silky.</p>
+holds back part of the sound's frequency range; in series, one can
+darken the whole sound while the other notches a
+moving hole in it. These envelopes are
+recalculated every sample.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The two parts</div>
@@ -6040,9 +6018,8 @@ selector above only changes what you are editing.</p>
 <code>VOICE B</code> set each part's level; <code>BROWN</code> adds
 brownian per-harmonic roughness; <code>F1 OFS</code> /
 <code>F2 OFS</code> offset each part differently into the two filters;
-<code>A MASK</code> / <code>B MASK</code> thin each part's harmonics -
-carving teeth out of the overtone stack, which no ordinary filter can
-do.</p>
+<code>A MASK</code> / <code>B MASK</code> thin each part's
+harmonics.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">Pitch</div>
@@ -6083,7 +6060,7 @@ strummed guitar - <code>DIR</code> up or down the chord,
 
 <p id="BSHARM-15"><b>FX - PLUCK / PHASER / EQ.</b> The built-in color
 block. <code>PLUCK</code> shortens every note toward a plucked decay
-(<code>BLU</code> switches its blur flavor). The phaser - a swirling
+(<code>BLU</code> switches its blur flavor). The phaser - a
 comb of moving notches - runs off <code>MIX</code>, <code>DEPTH</code>,
 <code>RATE</code>, <code>WIDTH</code>, <code>OFS</code> and
 <code>MASK</code>. <code>EQ</code> is the block's tone trim.</p>
@@ -6105,12 +6082,13 @@ attacks, randomized for organic variety.</p>
 <div class="shot cropview m2c" data-screen="BSHARM" data-m2key="BSHARM:12" data-file="Harmless.png" data-rect="0.84,87,21.04,13" data-dims="1306,566" style="width:275px;aspect-ratio:3.7345"><img src="figures/Harmless.png" alt="" style="position:absolute;width:475.285%;left:-3.992%;top:-669.231%" loading="lazy"><button type="button" class="marker" data-goto="BSHARM-17" style="left:32.84%;top:20.92%">17</button></div>
 
 
-<p id="BSHARM-17"><b>BLUR / PRISM</b> - the spectral tools, the ones that
-sound like nothing else in the app. <code>BLUR</code> and
-<code>TIME</code> smear the harmonics' energy in time, turning attacks
-into washes. <code>HARM</code> weights which harmonics smear.
+<p id="BSHARM-17"><b>BLUR / PRISM</b> - the spectral tools.
+<code>BLUR</code> and
+<code>TIME</code> smear the harmonics' energy in time.
+<code>HARM</code> weights which harmonics smear.
 <code>PRISM</code> slides the harmonics off their exact musical
-multiples - a little is shimmer, a lot is glassy clangor - and
+multiples - small amounts detune the partials slightly, large amounts
+turn the tone inharmonic - and
 <code>MODE</code> picks the algorithm's flavor.</p>
 
 </div>
@@ -6122,8 +6100,8 @@ multiples - a little is shimmer, a lot is glassy clangor - and
 <code>X</code> / <code>Y</code> / <code>Z</code> knobs beneath it: three
 free values you can play live, automate, or route anywhere via the mod
 editor. <span id="BSHARM-19"></span><b>SPECTROGRAM</b> draws the
-harmonics as they sound, live - watch BLUR smear them and the masks carve
-them in real time.</p>
+harmonics as they sound - the display updates live as BLUR and the
+masks change.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The modulation editor</div>
@@ -6136,8 +6114,8 @@ the curve drives, and <span id="BSHARM-21"></span><b>the source
 picker</b> chooses what plays the curve: <code>Envelope</code> (each
 note's own timeline), <code>LFO</code> (a repeating wobble),
 <code>Velocity</code> / <code>Keyboard</code> (how hard / how high you
-play), or the pad's <code>Mod X/Y/Z</code>. Shortcut worth knowing:
-right-click any Harmless knob and <code>Modulate envelope...</code> jumps
+play), or the pad's <code>Mod X/Y/Z</code>.
+Right-click any Harmless knob and <code>Modulate envelope...</code> jumps
 this editor straight to it.</p>
 
 <p id="BSHARM-22"><b>The toolbar</b> - <code>ENV</code> /
@@ -6333,8 +6311,8 @@ a Harmless layer.</p>
 <span id="BSHARMM-3"></span><b>FX Rack</b> opens this channel's rack;
 <span id="BSHARMM-4"></span><b>Freeze</b> renders the tab and plays the
 render (cyan = frozen, orange = stale, greyed with the reason in the
-tooltip). Harmless is the heaviest of the built-in engines, so Freeze earns
-its keep here.</p>
+tooltip). Harmless is the heaviest of the built-in engines, so Freeze is
+especially useful here.</p>
 
 <p id="BSHARMM-5"><b>Lock Layer</b>, <span id="BSHARMM-7"></span><b>Rename...</b>,
 <span id="BSHARMM-9"></span><b>Duplicate Layer (new tab)</b> and
@@ -6348,7 +6326,7 @@ toggle.</p>
 <p id="BSHARMM-8"><b>Replace Engine</b> swaps which engine this tab runs
 while the notes, mixer settings, effects and window all stay put - the full
 story (what survives, what resets, automation, freeze, undo) is on the
-BaySickSynth Menu page. Worth knowing here: a Harmless patch cannot ride
+BaySickSynth Menu page. A Harmless patch cannot ride
 along, so swapping away and back lands you on Harmless's default patch
 unless you undo.</p>
 
@@ -6480,8 +6458,8 @@ housekeeping.</p>
 
 
 
-<p id="BSSBM-1"><b>Player.</b> The engine view - the synth panels you are
-probably looking at right now. The tick marks it while it is showing.</p>
+<p id="BSSBM-1"><b>Player.</b> The engine view - the synth panels.
+The tick marks it while it is showing.</p>
 
 <p id="BSSBM-2"><b>Piano Roll.</b> Jumps to the Piano Roll already pointed at
 this tab, so the notes you draw land on this synth. Same result as pressing
@@ -6533,8 +6511,8 @@ no separate copy/paste for tabs. Greys out until the tab has an engine.</p>
 
 <p id="BSSBM-10"><b>Choke Group.</b> Puts the tab in one of sixteen cut groups.
 Tabs sharing a group cut each other off - the classic use is an open and a
-closed hi-hat silencing one another. <code>None</code> keeps it out of the
-game.</p>
+closed hi-hat silencing one another. <code>None</code> keeps it out of
+any group.</p>
 
 <p id="BSSBM-11"><b>Save Current Patch As...</b> Saves the engine's current
 sound - just the sound, not the tab - so you can load it on any other
@@ -6588,7 +6566,7 @@ but the live instrument is gone.</p>
 <tr><td>Out Vol</td><td>Sets this engine&#x27;s output level.</td><td>0.8</td><td>0 to 1</td></tr>
 <tr><td>Mod Wheel Amount</td><td>Scales how far the mod wheel reaches.</td><td>0</td><td>0 to 1</td></tr>
 </tbody></table>
-<p>The Oscillator panel is where the sound is born. An oscillator is the part
+<p>The Oscillator panel is where the sound starts. An oscillator is the part
 of a synth that actually vibrates - everything else in the instrument only
 shapes what this panel generates. It is also where the synth decides how it
 behaves when you play more than one note.</p>
@@ -6629,16 +6607,15 @@ sets what the two knobs beside it mean. In Musical mode
 semitones - the steps between piano keys - so +12 is exactly one octave
 up. <span id="BSSBOSC-6"></span><b>MODIFIER</b> reshapes the chosen
 waveform continuously: small turns shift its harmonic balance, big turns
-can push one shape most of the way toward another. It is the "same wave,
-different flavor" knob.</p>
+can push one shape most of the way toward another.</p>
 
 <p id="BSSBOSC-7"><b>NOISE</b> mixes plain noise - the sound of static -
 in with the wave. A touch adds breath and grit to the attack; a lot buries
 the pitch entirely, which is what snares and hats are made of.</p>
 
 <p id="BSSBOSC-8"><b>SYNC</b> and <span id="BSSBOSC-9"></span><b>RING</b>
-are the two classic second-oscillator tricks, both OFF in most patches and
-both worth trying deliberately rather than discovering by accident. SYNC
+are the two classic second-oscillator tricks, both OFF in most
+patches. SYNC
 forces a hidden second wave to restart in lockstep with the first,
 producing the tearing, aggressive lead sound. RING multiplies the two
 waves instead of adding them, producing bell-like, metallic tones that do
@@ -6666,8 +6643,8 @@ instead of smearing into mud.</p>
 
 <p id="BSSBOSC-13"><b>SLIDE</b> is glide: in the mono modes, how long the
 pitch takes to travel from the last note to the new one. Zero snaps
-instantly. Raise it and every note slews into the next - THE synth-bass
-move. The bass ships with a little already on.</p>
+instantly. Raise it and every note slews into the next.
+The bass ships with a little already on.</p>
 
 <p id="BSSBOSC-14"><b>OUT VOL</b> is the engine's own output level, before
 the mixer strip ever sees it. If a patch distorts the channel no matter
@@ -6683,7 +6660,7 @@ left-hand wheel can drive this synth. The switch picks the target -
 <code>Filter</code> (brightness under your thumb) or <code>LFO</code>
 (wobble depth under your thumb) - and
 <span id="BSSBOSC-16"></span><b>AMOUNT</b> sets how hard the wheel pushes
-it. No hardware plugged in? These simply sit idle.</p>
+it. With no hardware plugged in, these sit idle.</p>
 
 <p><b>The readouts.</b> Every knob on every panel prints
 its exact value beneath it. When a drag will not land on the number you
@@ -7127,7 +7104,7 @@ defaults and its own accent color; every control exists on both.</p>
 </tbody></table>
 <p>Press a piano key and the sound is not a flat block: it jumps out, settles,
 holds while your finger stays down, and rings away when you let go. An
-<b>envelope</b> is the tool that gives a synth note that same life story. It
+<b>envelope</b> is the tool that gives a synth note that same behavior. It
 is a shape - drawn by four controls - that the synth follows automatically on
 every single note you play. This panel has two of them: one shaping each
 note's <em>volume</em>, one shaping its <em>pitch</em>.</p>
@@ -7143,7 +7120,7 @@ one per stage of the note's life, read left to right:</p>
 <p><b>ATTACK</b> is how long the note takes to go from silence to full
 volume after you press the key. All the way down it is instant - the note
 starts with a click, like hitting a drum. Push it up and the note fades in
-instead, like a bowed violin or a wave rolling in; at the top it takes a
+instead, like a bowed violin; at the top it takes a
 couple of seconds to arrive. If your notes feel like they "pop" too hard,
 raise this a hair. If a bass feels mushy and late, lower it.</p>
 
@@ -7172,12 +7149,12 @@ short, sustain low, release short. <em>Pad</em> = attack up, sustain high,
 release long. <em>Organ</em> = everything instant, sustain full.
 <em>Percussion</em> = attack down, decay short, sustain zero. The bass
 version of this engine ships snappier than the synth on every stage,
-because basslines live and die on definition.</p>
+because basslines need tight definition.</p>
 
 <p id="BSSBOENV-2"><b>VEL</b> is short for velocity - how hard you hit the
 key (or how hard the note in the Piano Roll is set, its velocity bar). At
 zero, every note comes out equally loud no matter what. Turn it up and
-playing soft actually sounds soft, playing hard actually barks. This one
+playing soft sounds soft, playing hard sounds hard. This one
 knob is most of the difference between a part that sounds programmed and
 one that sounds played. If you write notes by mouse, pair it with the
 velocity lane at the bottom of the Piano Roll.</p>
@@ -7191,7 +7168,7 @@ velocity lane at the bottom of the Piano Roll.</p>
 at a different target: instead of shaping how LOUD the note is over its
 life, it shapes what PITCH the note is at. Each note starts off-pitch,
 travels to its true note along the attack, and can drift again on release.
-Why would anyone want that? Because tiny, fast pitch movement at the start
+Tiny, fast pitch movement at the start
 of a note is what "punch" is made of - drums do it naturally, and the
 classic synth kick or pluck fakes it with exactly this: a quick downward
 blip that lasts a few milliseconds.</p>
@@ -7304,9 +7281,8 @@ float AdsrEnvelope::calcCoef (float timeSec, double sampleRate)
 <p>A filter is a tone control: it lets some of a sound's frequencies through
 and holds others back. Every sound is a stack of frequencies - lows that you
 feel, highs that give edge and air - and the raw waves this synth makes come
-out with a LOT of highs. The filter is how you tame that into something
-musical, and moving it while a note plays is the single most recognizable
-synth sound there is.</p>
+out with a LOT of highs. The filter is how you tame that, and moving it
+while a note plays is the classic synth filter sweep.</p>
 
 
 <div class="cl"><div class="viewlabel">The filter pad</div>
@@ -7330,7 +7306,7 @@ right AT the cutoff point, a peak that rings at that exact frequency. A
 little (dot slightly raised) adds focus and presence, the "squelchy"
 quality. A lot makes the filter sing its own note on top of yours -
 aggressive, whistling, acid-style. Down at the bottom the filter is
-transparent and polite. This pad is the ONLY resonance control the synth
+transparent. This pad is the ONLY resonance control the synth
 has; there is no RES knob hiding on another panel.</p>
 
 <p>Where it starts: the synth ships wide open with no resonance - filter
@@ -7361,8 +7337,8 @@ stays evenly bright across the whole keyboard.</p>
 <p id="BSSBFLT-4"><b>TRACKING - VELOCITY.</b> The same idea for how hard
 you play: hit harder, the filter opens more, so hard notes are brighter as
 well as louder - exactly what real instruments do. This plus the volume
-envelope's VEL control is the recipe for a synth that responds like an
-instrument instead of a doorbell.</p>
+envelope's VEL control is what makes the synth respond like a played
+instrument.</p>
 </div></div>
   <div class="l3"><div class="tp" id="IMP-82"><h4 class="topichead">The subtractive filter</h4>
 <p>The synth-family filter is a state-variable design: one engine offers
@@ -7468,7 +7444,7 @@ void SynthFilter::reset()
 shape the synth follows automatically over the life of every note - four
 controls draw it - and this one steers the filter's cutoff instead of the
 volume, so the note's tone changes as it plays: bright at the start, darker
-as it settles, closed down as it fades. That journey is where almost all
+as it settles, closed down as it fades. That is where almost all
 classic synth movement comes from.</p>
 
 
@@ -7477,9 +7453,9 @@ classic synth movement comes from.</p>
 
 
 <p id="BSSBFENV-1"><b>ATTACK / DECAY / SUSTAIN / RELEASE</b> - the note's
-brightness story, stage by stage. <b>ATTACK</b>: how long the filter takes
+brightness over time, stage by stage. <b>ATTACK</b>: how long the filter takes
 to open after the key goes down - zero means the note starts already
-bright; raised, the note blooms open, a wah-like swell into brightness.
+bright; raised, the note opens gradually - a wah-like swell into brightness.
 <b>DECAY</b>: how fast that opening falls back down. <b>SUSTAIN</b>: the
 brightness the note holds at while the key is down - a level, not a time.
 <b>RELEASE</b>: how the brightness closes after you let go. The classic
@@ -7490,8 +7466,8 @@ basslines and keys are built on.</p>
 <p id="BSSBFENV-2"><b>AMOUNT</b> is how far the envelope is allowed to push
 the cutoff - its throw. It ships at ZERO on the synth, so the four sliders
 above do nothing until you raise it; that is deliberate, and it is the
-first thing to check when this panel seems dead. The trick that makes it
-sing: set the cutoff LOW on the Filter panel first, then let this envelope
+first thing to check when this panel seems dead. To make the sweep
+audible: set the cutoff LOW on the Filter panel first, then let this envelope
 do the opening. The bigger the gap between where the filter rests and
 where the envelope throws it, the more dramatic every note's sweep. (The
 bass ships with some amount already dialed in - part of its out-of-the-box
@@ -7537,8 +7513,8 @@ values with nothing in between - aimed at pitch that is a trill, aimed at
 the filter it is a rhythmic chop.</p>
 
 <p id="BSSBLFO-2"><b>RATE</b> is the speed, in cycles per second (Hz),
-when the LFO runs free. Below 1 Hz it breathes; a few Hz is vibrato
-territory; push it up and the wobble tightens toward a buzz.</p>
+when the LFO runs free. Below 1 Hz the movement is a slow drift; a few Hz
+is vibrato territory; push it up and the wobble tightens toward a buzz.</p>
 
 <p id="BSSBLFO-3"><b>The division picker</b> (<code>1/4</code>) is the
 other way to set speed: in note lengths instead of Hz. A <code>1/4</code>
@@ -7546,7 +7522,7 @@ wobble completes once per beat, whatever the song's tempo - speed the song
 up and the wobble keeps time. This is how dubstep-style rhythmic wobble
 stays locked to the groove.</p>
 
-<p id="BSSBLFO-4"><b>SYNC</b> switches between those two worlds. Off: the
+<p id="BSSBLFO-4"><b>SYNC</b> switches between those two modes. Off: the
 RATE knob rules, in Hz. On: the knob greys, the division picker takes
 over, and the LFO rides the transport's tempo. Both controls stay visible
 the whole time so the state is always readable at a glance.</p>
@@ -7564,7 +7540,7 @@ tone color itself, slowly mutating the waveform.</p>
 
 <p id="BSSBLFO-6"><b>AMOUNT</b> is how far the hand turns - the depth of
 the wobble. At zero the LFO is effectively off, however fast it runs. A
-touch is subtle life; full is unmistakably an effect. If you set up shape,
+touch is subtle movement; full is unmistakably an effect. If you set up shape,
 rate and destination and hear nothing at all, this knob is why.</p>
 </div></div>
   <div class="l3"><div class="tp" id="IMP-83"><h4 class="topichead">LFOs</h4>
@@ -7677,8 +7653,8 @@ void LFO::reset() { mPhase = 0.0f; }</code></pre></details>
 <tr><td>Burst Count</td><td>Fires this many retriggers per note.</td><td>4</td><td>1 to 8</td></tr>
 <tr><td>Burst Spacing</td><td>Sets the gap between burst retriggers.</td><td>20</td><td>1 to 100</td></tr>
 </tbody></table>
-<p>The Mod panel is the character drawer - five independent machines that
-each add one kind of personality to the sound. Most patches use one or two
+<p>The Mod panel is five independent machines that
+each add one kind of character to the sound. Most patches use one or two
 of them, not all five; each is off or neutral until you reach for it.</p>
 
 
@@ -7701,13 +7677,13 @@ or wind from scratch.</p>
 
 <p id="BSSBMOD-2"><b>TRANSIENT.</b> A transient is the tiny burst of
 attack at the front of a sound - the click of a pick, the snap of a stick.
-This machine staples one onto every note: <code>AMT</code> is how loud the
+This machine adds one to every note: <code>AMT</code> is how loud the
 click is, <code>DUR</code> how long it lasts, <code>COLOUR</code> how
 bright. A little of it makes a soft, slow patch still speak clearly - the
 attack you can hear even when the envelope fades in slowly.</p>
 
 <p id="BSSBMOD-3"><b>BURST ENV.</b> With <code>BURST</code> on, one
-key-press fires a rapid machine-gun of retriggers instead of a single
+key-press fires a rapid series of retriggers instead of a single
 note. <span id="BSSBMOD-4"></span><b>COUNT</b> sets how many hits,
 <b>SPACING</b> how far apart they land. Instant stutters, rolls and edm
 fills without writing the individual notes.</p>
@@ -7718,17 +7694,16 @@ fills without writing the individual notes.</p>
 
 
 <p id="BSSBMOD-5"><b>DRIFT</b> lets the tuning wander, slowly and
-randomly, the way old analog hardware never quite sits still. A touch is
-warmth - the "expensive vintage" quality. Too much is seasick.</p>
+randomly, the way old analog hardware never quite sits still. A touch
+adds warmth; too much makes the tuning audibly unstable.</p>
 
-<p id="BSSBMOD-6"><b>UNISON</b> is the "make it huge" section. It plays
+<p id="BSSBMOD-6"><b>UNISON</b> plays
 several copies of every note at once: <code>VOICES</code> how many copies,
 <code>DETUNE</code> how far apart their tunings sit,
-<code>SPREAD</code> how wide they fan across the stereo field. The copies
-disagreeing slightly is what thickness IS. One thing it deliberately does
+<code>SPREAD</code> how wide they fan across the stereo field. The slight
+disagreement between copies creates the thickness. One thing it deliberately does
 not change: the volume - the engine trims the copies' gain as the count
-climbs, so what grows is width and density, never loudness. That is why
-stacking voices does not wreck your mix balance.</p>
+climbs, so what grows is width and density, not loudness.</p>
 </div></div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-86">The BaySickSynth / BaySickBass voice</a>.</p>
 <div class="tp" id="IMP-84"><h4 class="topichead">Unison and voice stacking</h4>
@@ -7899,16 +7874,15 @@ put force to work on the TONE, not just the volume:
 darkens soft hits - play gently and the sound rounds off, like a softly
 struck drum; <b>VEL&gt;HARD</b> with
 <b>HARDNESS</b> brightens hard hits. The arrows painted on the panel show
-the routing. Set together, one sample stops being a trigger and starts
-being an instrument.</p>
+the routing.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">Envelope and vibrato</div>
 <div class="shot cropview m2c" data-screen="BSP" data-m2key="BSP:4" data-file="BaySickPlayer.png" data-rect="4.77,53.24,43.63,28.62" data-dims="609,568" style="width:266px;aspect-ratio:1.6345"><img src="figures/BaySickPlayer.png" alt="" style="position:absolute;width:229.200%;left:-10.933%;top:-186.024%" loading="lazy"><button type="button" class="marker" data-goto="BSP-5" style="left:50.01%;top:50.00%">5</button></div>
 
 
-<p id="BSP-5"><b>AMP ENVELOPE</b> - the note's volume life-story, four
-stages: <b>ATTACK</b> is the fade-in time (zero = instant, raised = the
+<p id="BSP-5"><b>AMP ENVELOPE</b> - the note's volume shape over time, in
+four stages: <b>ATTACK</b> is the fade-in time (zero = instant, raised = the
 sample swells in), <b>DECAY</b> the fall from that first peak,
 <b>SUSTAIN</b> the level held while the key is down (a level, not a
 time), <b>RELEASE</b> the fade after you let go. It runs on top of
@@ -7934,7 +7908,7 @@ crunch of old samplers.</p>
 <code>OVERDRIVE</code> for saturation, a <code>TREBLE</code> tilt, and
 the <code>MASTER</code> level.</p>
 
-<p>One rule worth knowing: on a Drums tab, this player pins
+<p>On a Drums tab, this player pins
 every sample's root so each drum plays at its recorded pitch on its own
 key - which is why a kit folder sounds right on a Drums tab, and the same
 folder can be played melodically on a Layers tab.</p>
@@ -8139,8 +8113,7 @@ real hat does.</p>
   </div>
   <div class="l2"><p>Where drums come from. Two choices happen every time you pick a drum, and
 they are independent of each other: <b>where</b> you pick it, and <b>what
-kind</b> of sound it is. Get these two straight and the menu below reads
-itself.</p>
+kind</b> of sound it is.</p>
 
 
 
@@ -8341,9 +8314,8 @@ whole kit setup - every section panel's settings - as one preset.</p>
 </tbody></table></div>
   <div class="l2"><p>The Main section is the whole drum kit mixed from one panel. Every drum
 appears here with its essential controls; the other section tabs zoom into
-one instrument each with the deeper set. The one idea that unlocks the whole
-panel: almost every drum has two faders, and their balance is the kit's
-sound.</p>
+one instrument each with the deeper set. Almost every drum has two faders,
+and their balance sets the kit's sound.</p>
 
 <p id="BSRDMAIN-1"><b>Presets</b> saves and loads a Player Preset - the
 kit's SOUND: every control value on every section, plus the engine's output
@@ -8359,13 +8331,12 @@ tab.</p>
 <b>Crush</b> appear on every section: a filter that removes rumble below
 the useful range, and a crusher that adds grit on top of it.</p>
 
-<p><b>Close / OH - the pair that IS the kit's sound.</b>
+<p><b>Close / OH - the per-drum fader pair.</b>
 Every drum was recorded two ways at once: a <em>close</em> microphone
 right on the drum (tight, dry, direct) and the <em>overheads</em> - the
 stereo pair above the kit that hears everything with the room around it.
 The two faders balance them per drum: close-heavy is punchy and modern,
-overhead-heavy is roomy and live. Get this balance right and the kit
-mixes itself. <b>Pan</b> (left-right
+overhead-heavy is roomy and live. <b>Pan</b> (left-right
 position) and <b>Tune</b> (pitch) repeat per
 drum the same way.</p>
 
@@ -8499,7 +8470,7 @@ bool BaySickGuitarsProcessor::loadKit (const juce::File&amp; sfzPath)
 <tr id="row-BSRDKICK-2"><td><button type="button" class="n" data-back="BSRDKICK-2" title="Show it on the picture">2</button></td><td><code>TRANSPOSED</code> - <code>Punch</code></td></tr>
 <tr id="row-BSRDKICK-3"><td><button type="button" class="n" data-back="BSRDKICK-3" title="Show it on the picture">3</button></td><td><code>Tune</code> / <code>Deaden</code> / <code>Snare tune</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Kick section - the kit's heartbeat, zoomed in. Two ideas to hold:
+  <div class="l2"><p>The Kick section, zoomed in. Two things to know:
 the drum was recorded from several places at once, and extra layers can be
 stacked under it for weight.</p>
 
@@ -8507,10 +8478,10 @@ stacked under it for weight.</p>
 close microphone - the tight, direct thump. <code>Overhead</code> is how
 much of the kick bleeds through the mics above the kit - the room's view
 of it, glue rather than punch. <code>Dirt</code> is a grit layer under
-the clean hit, for kicks that need teeth.</p>
+the clean hit.</p>
 
 <p id="BSRDKICK-2"><b>TRANSPOSED - Punch.</b> A pitched-down copy layered
-under the fundamental. More of it is more chest - the subwoofer part of
+under the fundamental. More of it adds low-end weight - the subwoofer part of
 the kick - without changing the attack.</p>
 
 <p id="BSRDKICK-3"><b>Tune / Deaden / Snare tune.</b> <code>Tune</code>
@@ -8519,7 +8490,7 @@ locks in. <code>Deaden</code> shortens the ring toward a dry thud, the
 knob-version of stuffing a pillow in the drum. <code>Snare tune</code>
 sets how much the snare's wires buzz in sympathy when the kick hits -
 the quiet rattle a real kit always has; zero is cleaner, some is
-realer.</p>
+more realistic.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-89">The sampled instruments</a>.</p></div>
 </section>
@@ -8544,7 +8515,7 @@ set, stackable layers, and the brush-stir machine.</p>
 under the drum, pointed at the wires - the rattle and sizzle.
 <code>Top</code> is the mic above - the stick's crack and the drum's
 body. <code>Overhead</code> is the room's view. The bottom/top balance
-alone walks the snare from crisp to fat.</p>
+alone moves the snare from crisp to fat.</p>
 
 <p id="BSRDSNARE-2"><b>TRANSPOSED</b> - reinforcement layers stacked
 under the real drum: <code>Snap</code> sharpens the attack,
@@ -8581,7 +8552,7 @@ each hit.</p>
 <tr id="row-BSRDTOM-4"><td><button type="button" class="n" data-back="BSRDTOM-4" title="Show it on the picture">4</button></td><td><code>Sn pan</code> / <code>Sn tune</code> / <code>Deaden</code></td></tr>
 <tr id="row-BSRDTOM-5"><td><button type="button" class="n" data-back="BSRDTOM-5" title="Show it on the picture">5</button></td><td>Stir-style picker under <code>BRUSH STIRS</code> - <code>Smooth Stir</code> / <code>Regular Stir</code> / <code>Peaky Stir</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Toms section - four drums, one control language, learned once.</p>
+  <div class="l2"><p>The Toms section - four drums, one shared control set.</p>
 
 <p id="BSRDTOM-1"><b>The tom columns.</b> <code>22 IN</code> down to
 <code>14 IN</code> - biggest and deepest to smallest and highest, named by
@@ -8638,7 +8609,7 @@ playing.</p>
 
 <p id="BSRDHAT-4"><b>Pan / Tune / Dryness</b> - where the hats sit in the
 stereo picture, their pitch, and how much room stays around them
-(dryness up = closer, tighter, more in-your-face).</p>
+(dryness up = closer and tighter).</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-89">The sampled instruments</a>.</p></div>
 </section>
@@ -8659,8 +8630,8 @@ stereo picture, their pitch, and how much room stays around them
 <code>RIDE</code> / <code>CHINA</code> / <code>SIZ RIDE</code> /
 <code>SIZ CRASH</code> / <code>STACK</code> - each with its own close-mic
 level (<code>Close</code>), overhead level (<code>OH</code>) and
-<code>Pan</code>. Spread them the way a drummer's cymbals actually
-surround the kit and the whole picture opens up; overheads carry most of
+<code>Pan</code>. Spread them the way a drummer's cymbals
+surround the kit to widen the stereo image; overheads carry most of
 the cymbal sound naturally, with the close mics for emphasis.</p>
 
 <p id="BSRDCYMB-2"><b>Select</b> chooses the implement
@@ -8668,7 +8639,7 @@ the cymbal sound naturally, with the close mics for emphasis.</p>
 alternate recordings, not a filter.</p>
 
 <p id="BSRDCYMB-3"><b>Tune / Dryness</b> - one pair for the whole cymbal
-block: the overall shimmer pitch, and how much room breathes around it.</p>
+block: the overall shimmer pitch, and how much room stays around it.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-89">The sampled instruments</a>.</p></div>
 </section>
@@ -8685,7 +8656,7 @@ block: the overall shimmer pitch, and how much room breathes around it.</p>
 </tbody></table></div>
   <div class="l2"><p>The Noises and Clicks section - the kit's incidental sounds: pedal
 squeaks, stand rattles, percussion extras. Quiet on their own, they are a
-surprising amount of why a programmed kit reads as a person playing in a
+large part of why a programmed kit reads as a person playing in a
 room.</p>
 
 <p id="BSRDNOISE-1"><b>MECH NOISES</b> - the hardware's own sounds
@@ -8733,7 +8704,7 @@ open and close - and clicking the pedal works it by hand.</p>
 
 <p id="BSRDKIT-3"><b>Pick a program to begin.</b> The overlay you see before
 a kit program is loaded. Pick one from the kit dropdown on the title bar and
-the photo comes alive.</p>
+the photo becomes playable.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-89">The sampled instruments</a>.</p></div>
 </section>
@@ -8788,7 +8759,7 @@ hosted plugin, so there is no frame worth dragging.</p>
 
 <p><b>The safety net:</b> the plugin runs out of process, in
 a sandbox helper. If it crashes, the helper dies and BaySickDAW keeps
-playing - your project never goes down with someone else's code.</p>
+playing.</p>
 
 <p><b>Automation</b> goes through the window Menu's
 <code>Automate</code> submenu - <code>Last Touched</code> plus the full
@@ -11378,8 +11349,8 @@ void BassGraphicEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 </tbody></table>
 <p>The Mixer is where everything meets: every tab and bus in the project as
 a vertical strip, the Master pinned at the left, and the routing between
-them drawn as actual cables underneath. Every strip has the same anatomy,
-so learn one and you have learned them all.</p>
+them drawn as actual cables underneath. Every strip has the same
+anatomy.</p>
 
 
 <div class="cl"><div class="viewlabel">Headers and buses</div>
@@ -11407,10 +11378,9 @@ stackable: solo two strips and you hear just those two.</p>
 
 <p id="MIX-6"><b>FX Rack</b> opens this channel's six-slot effects rack,
 and <span id="MIX-7"></span><b>FX Bypass</b> switches the whole rack out
-while keeping every slot's settings - the honest before/after of "what
-are my effects actually doing." <span id="MIX-8"></span>The Master strip
-has its own <b>Master FX Bypass</b> for the master rack - the whole-mix
-version of the same question.</p>
+while keeping every slot's settings, for a before/after comparison.
+<span id="MIX-8"></span>The Master strip
+has its own <b>Master FX Bypass</b> for the master rack.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">Pan, width, polarity</div>
@@ -11620,7 +11590,7 @@ meter bounces line up with the beat.</p>
 
 <p id="MIXMNU-4"><b>Multi-core Rendering</b> - spreads the mixer's
 processing across CPU cores; ticked when on. Leave it on unless you are
-chasing a specific performance oddity.</p>
+diagnosing a specific performance problem.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-60">Routing graph and the mixer strip pattern</a>, <a data-level="weeds" href="#IMP-61">Sends, main-out routing and sidechain edges</a>, <a data-level="weeds" href="#IMP-48">LUFS metering</a>.</p></div>
 </section>
@@ -11639,8 +11609,8 @@ chasing a specific performance oddity.</p>
 
 
 <p id="MIXADD-1"><b>Aux Strip.</b> A free strip with no channel of its own -
-the destination for sends. One reverb on an aux, every vocal sending to it,
-is the pattern this exists for.</p>
+the destination for sends. The typical pattern: one reverb on an aux, with
+every vocal sending to it.</p>
 
 <p id="MIXADD-2"><b>The group buses</b> - <code>Vox Bus</code> through
 <code>Plugins Bus</code>, one per tab family. Adding one gives that whole
@@ -11919,8 +11889,8 @@ bool RoutingGraph::rebuildFromApvts(juce::AudioProcessorValueTreeState&amp; apvt
   <div class="l2">﻿<p>The Master Analyzer measures how loud your song really is - not how loud
 it feels in your room, but the number streaming services measure it by. That
 number is called LUFS (loudness units relative to full scale): a scale built
-to match human hearing, where a typical streaming target is around -14. This
-window is how you stop guessing.</p>
+to match human hearing, where a typical streaming target is around
+-14.</p>
 
 
 <div class="cl"><div class="viewlabel">Source and takes</div>
@@ -11973,10 +11943,10 @@ that cancels when someone plays the mix in mono.</p>
 <div class="shot cropview m2c" data-screen="ANLZ" data-m2key="ANLZ:3" data-file="Analyzer.png" data-rect="38,56,14,12" data-dims="1307,569" style="width:260px;aspect-ratio:2.6798"><img src="figures/Analyzer.png" alt="" style="position:absolute;width:714.286%;left:-271.429%;top:-466.667%" loading="lazy"><button type="button" class="marker" data-goto="ANLZ-7" style="left:50.00%;top:50.00%">7</button></div>
 
 
-<p id="ANLZ-7"><b>Loudness</b> is the story over time: short-term loudness
+<p id="ANLZ-7"><b>Loudness</b> graphs loudness over time: short-term loudness
 as a filled area with the momentary line over it, a dashed green target
-line, the loudness-range band shaded amber (where the song lives between
-its quiet and loud parts), and a time axis. The history is the whole
+line, the loudness-range band shaded amber (the span between the song's
+quiet and loud parts), and a time axis. The history is the whole
 session or the whole take: the mouse wheel zooms, dragging pans,
 double-click shows everything, and hovering reads the time and the S / M
 values under the pointer. The side cells carry <b>INTEGRATED</b>,
@@ -11994,7 +11964,7 @@ one.</p>
 log grid: a filled cyan averaged trace under a grey peak-hold trace, <b>MAX
 TP L / R</b> in the corner and two dBFS level bars at the side. Loudness
 tells you how much; spectrum tells you WHERE - too much low end and a dull
-top read instantly here. <span id="ANLZ-9"></span><b>Tilt</b> slopes the
+top show up here. <span id="ANLZ-9"></span><b>Tilt</b> slopes the
 display by 0, 3 or 4.5 dB per octave (at 3, pink noise reads flat, which is
 how most finished mixes are judged), and <span id="ANLZ-10"></span><b>1/3
 oct</b> shows third-octave bars instead of the line.</p>
@@ -12306,7 +12276,7 @@ tick.</p>
 
 <p id="ANLZM-5"><b>Reset history</b> - clears the graph and restarts the
 integrated measurement. Do it before a final full-song pass: integrated
-loudness counts everything it has heard, including your noodling.</p>
+loudness counts everything it has heard.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-48">LUFS metering</a>, <a data-level="weeds" href="#IMP-34">Bass Graphic EQ</a>.</p></div>
 </section>
@@ -12329,7 +12299,7 @@ loudness counts everything it has heard, including your noodling.</p>
 <tr id="row-FXI-10"><td><button type="button" class="n" data-back="FXI-10" title="Show it on the picture">10</button></td><td>Per-slot remove <code>x</code> - red cross at the row&#x27;s right end, loaded rows only</td></tr>
 </tbody></table></div>
   <div class="l2"><p>The Effects Rack is every channel's effects chain: six slots in a row
-that the channel's sound walks through in order, with an EQ on either side
+that the channel's sound passes through in order, with an EQ on either side
 of them. One window serves every channel - the picker at the top re-aims
 it.</p>
 
@@ -12339,12 +12309,11 @@ it.</p>
 
 
 <p id="FXI-1"><b>The Channel picker</b> chooses whose rack you are
-looking at. It is one window that re-points, not a window per channel -
-so "where did my rack go" is always answered here.</p>
+looking at. It is one window that re-points, not a window per channel.</p>
 
 <p id="FXI-2"><b>FX Bypass</b> switches all six slots out at once for the
 selected channel, keeping every setting - the same control the mixer
-strip carries, the honest before/after.</p>
+strip carries.</p>
 
 <p id="FXI-3"><b>Pre EQ</b> and <span id="FXI-4"></span><b>Post EQ</b>
 open the channel's two equalizers - one BEFORE the rack (shape what the
@@ -12529,7 +12498,7 @@ void EffectRack::loadEffect(int slot, EffectType type, const juce::String&amp; u
 <p id="FXRM-1"><b>Save FX Rack Preset...</b> captures the whole rack - all
 six slots plus both EQs - for the selected channel, and
 <span id="FXRM-2"></span><b>Load FX Rack Preset</b> recalls one (greyed
-until something is saved). A full mixing chain as one preset.</p>
+until something is saved).</p>
 
 <p id="FXRM-3"><b>Open Presets Folder</b> shows the files themselves, for
 backing up or sharing.</p>
@@ -12566,7 +12535,7 @@ slot's chevron. Grouped by what the effect does.</p>
 <code>Transient Shaper</code>.</p>
 
 <p id="FXPICK-2"><b>Harmonics</b> - <code>Overdrive</code> and
-<code>Saturation</code>, the studio dirt.</p>
+<code>Saturation</code>, the distortion effects.</p>
 
 <p id="FXPICK-3"><b>Modulation</b> - <code>Chorus</code>,
 <code>Flanger</code>, <code>Phaser</code>.</p>
@@ -12610,15 +12579,15 @@ are added it shows the header with a greyed
 <tr><td>Mode</td><td>Morphs from wide ducking to split-band.</td><td>50</td><td>0 to 100</td></tr>
 </tbody></table>
 <p>An effect panel - the window a rack slot opens. Every effect in the app
-shares this frame; the knobs in the middle change per effect, the furniture
-around them does not. Learn the furniture once.</p>
+shares this frame; the knobs in the middle change per effect, the controls
+around them do not.</p>
 
 
 <div class="cl"><div class="viewlabel">Title and bypass</div>
 <div class="shot cropview m2c" data-screen="FX" data-m2key="FX:0" data-file="Effects Panel.png" data-rect="39.4,0,53,12" data-dims="857,329" style="width:454px;aspect-ratio:11.5048"><img src="figures/Effects Panel.png" alt="" style="position:absolute;width:188.679%;left:-74.340%;top:-0.000%" loading="lazy"><button type="button" class="marker" data-goto="FX-1" style="left:1.42%;top:25.42%">1</button><button type="button" class="marker" data-goto="FX-2" style="left:93.21%;top:54.50%">2</button></div>
 
 
-<p id="FX-1"><b>The title</b> names both halves of the story -
+<p id="FX-1"><b>The title</b> names both the channel and the effect -
 <code>&lt;channel&gt; - &lt;effect&gt;</code>, like
 <code>Master - De-esser</code> - so a screen full of effect windows stays
 readable.</p>
@@ -12626,8 +12595,8 @@ readable.</p>
 <p id="FX-2"><b>The bypass light</b> in the title strip: green means the
 effect is working, RED means it is switched out, and clicking toggles it.
 It is the same switch as the rack slot's light - one state, two places to
-flip it. Toggling while music plays is how you learn what any effect is
-actually contributing.</p>
+flip it. Toggle while music plays to hear what the effect is
+contributing.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The controls</div>
@@ -12647,14 +12616,14 @@ two-state choice rather than a range - flick, not turn.</p>
 
 
 <p id="FX-6"><b>Vol</b> trims the slot's output level on most panels.
-Its real job is fairness: effects often make things louder, and louder
+Effects often make things louder, and louder
 always sounds "better" - match the level here so bypassing compares the
 SOUND, not the volume. (The pedal-native panels and the CS Style
 Compressor carry their own <code>Level</code> knob instead.)</p>
 
 <p id="FX-7"><b>The meter</b> on the right shows what actually leaves the
 slot, in dBFS - decibels below the digital ceiling, where 0 at the top
-means clipping. It is a peak meter, a spike-catcher; the app's one true
+means clipping. It is a peak meter; the app's single
 VU - the slow loudness needle - is its own window.</p>
 </div></div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-62">Effect racks</a>, <a data-level="weeds" href="#IMP-63">Automation</a>, <a data-level="weeds" href="#IMP-48">LUFS metering</a>.</p></div>
@@ -12699,12 +12668,12 @@ visual, the menu entry simply is not there.</p>
 
 <p>The Visual window is its own window, titled
 <code>&lt;channel&gt; - &lt;effect&gt; Visual</code>, so it can sit
-wherever you can see it while your hands work the panel. Its one menu
+wherever you can see it while you work the panel. Its one menu
 item, <code>Lock to Effect Window</code>, makes it travel with the panel;
 unlock to park it. The caption line under the title says what the drawing
 means, and the canvas is the drawing itself - fed straight from the audio
-engine, so what you see is what is happening, at most a frame behind, and
-a dropped frame is only ever a dropped frame.</p>
+engine, so what you see is what is happening, at most a frame behind; a
+dropped frame never affects the audio.</p>
 </div>
   
 </section>
@@ -12728,7 +12697,7 @@ a dropped frame is only ever a dropped frame.</p>
 <p id="FXM-1"><b>Show Advanced Controls.</b> Advanced is a mode, not a
 tab - the panel re-lays itself with the full control set, and the entry
 flips to <code>Show Basic Controls</code> for the way back. Basic is the
-short menu of what matters most; nothing is lost either way.</p>
+short set of the most-used controls; nothing is lost either way.</p>
 
 <p id="FXM-2"><b>Mode:</b> the effect's character menu, on effects that
 have more than one algorithm - same knobs, different engine underneath.</p>
@@ -12818,7 +12787,7 @@ view you are in decides what a band works on: make a band in the SIDE
 view and it shapes only the edges of the stereo picture (where the width
 lives); the MID view shapes only the center (where voices and bass live);
 ST is the everyday view where bands work the whole signal. No routing
-menus - the view is the decision. Whichever view you are in, the other
+menus - the view itself decides. Whichever view you are in, the other
 views' curves stay faintly visible as a ghost, so you always see what the
 other half is doing.</p>
 
@@ -12848,7 +12817,7 @@ menu - the small scales make mastering-size moves draggable) over
 hear it.</p>
 
 <p id="EQ-6"><b>The band handles</b> - numbered, colored - are the
-instrument: drag one to set its frequency (left-right) and its boost or
+main controls: drag one to set its frequency (left-right) and its boost or
 cut (up-down) in one gesture. Hold Shift for fine moves, Ctrl for gain
 only, Ctrl+Shift for frequency only; the wheel over a handle sets its
 width (Q); Alt-click resets it; double-click MUTES it (delete lives in
@@ -12858,10 +12827,10 @@ Ctrl+click dots into the set): dragging any selected dot then moves them
 all as one shape, and starting that drag with Alt scales their gains
 proportionally instead. The small glyph above each dot is its shape, and
 a dynamic band wears a thin second ring plus a tiny meter showing how far
-it has moved right now. Prefer drawing to dragging? The menu's
+it has moved right now. The menu's
 <b>Sketch a Curve</b> turns your next stroke across the graph into real
-bands - bumps become bells, edges become shelves - and one Ctrl+Z erases
-the lot.</p>
+bands - bumps become bells, edges become shelves - and one Ctrl+Z removes
+them all.</p>
 
 <p id="EQ-7"><b>The live spectrum</b> draws behind the curve whenever
 sound flows, so your moves land on the actual music - you can SEE the
@@ -12877,13 +12846,13 @@ sweep around and find the ugly resonance by ear, at the music's own
 loudness (the solo rides itself up to match, so a narrow band is never a
 sudden level drop). Isolate (in the band menu) is the other audition:
 mute every band but this one. And <em>Delta Listen</em> (the window menu,
-or per band) flips the question - you hear only what the EQ is CHANGING,
+or per band) is the reverse - you hear only what the EQ is CHANGING,
 so a flat EQ goes silent and every move becomes audible on its own.</p>
 
 <p id="EQ-9"><b>The crosshair</b> arms the <em>spectrum grab</em>: the
-analyser holds its peaks steady, the nearest found resonance offers
-itself under your pointer, and one click drops a ready-aimed cut on it.
-One grab per arming, so playing music never steals a click.</p>
+analyser holds its peaks steady, the nearest found resonance is targeted
+under your pointer, and one click drops a ready-aimed cut on it.
+One grab per arming.</p>
 
 </div>
 <div class="cl"><div class="viewlabel">The rail</div>
@@ -12899,7 +12868,7 @@ not your audio, and the drawn curve deliberately stays put.</p>
 <p id="EQ-11"><b>FREQ and Q</b> - drag the numbers up and down, or
 double-click to type. Q is width: higher is narrower. On a Low Pass or
 High Pass, Q is resonance instead: a peak right at the cutoff, at any
-slope - the filter sweep sound lives on this number.</p>
+slope - the filter sweep sound comes from this number.</p>
 
 <p id="EQ-12"><b>The shape grid, channel and the two numbers</b> - the
 band's type (Bell, the passes, the shelves, Notch, Band Pass, Tilt, and
@@ -12924,14 +12893,14 @@ transients: at 100% the band reacts to the attack of a drum and ignores
 its ring. And in the linear-phase modes, <em>Spectral</em> (the band
 menu) sharpens a dynamic band to surgical: only the exact frequencies
 poking out over their own neighborhood get moved, the notes beside them
-pass untouched - DENSE sets how picky that is. The meter shows the
+pass untouched - DENSE sets how selective that is. The meter shows the
 movement live.</p>
 
 <p id="EQ-14"><b>MOD</b> - every band carries a slow LFO (RATE, LFO
 depth) and an envelope follower (ENV, push up to follow the music, pull
 down to duck against it), each aimable at the band's Frequency, Gain or
 Q. A gentle LFO on a filter's frequency is instant movement; a negative
-envelope on a boost is tone that politely gets out of the way when things
+envelope on a boost pulls the boost back when things
 get loud. These live in the zero-latency modes, where filters can move
 freely.</p>
 
@@ -12943,7 +12912,7 @@ freely.</p>
 <p id="EQ-15"><b>The menu</b> holds the processing modes - Zero Latency,
 Natural Phase (analog-shaped highs at no cost), five Linear Phase
 precisions with their real delays listed, and Mixed Phase (natural lows,
-linear highs, the mastering favorite) - plus oversampling, proportional
+linear highs, a common mastering choice) - plus oversampling, proportional
 Q, <b>Color</b> (three saturation characters: Smooth, Warm, and Changed,
 which colors only what the EQ altered), measured auto-gain, output trim
 and polarity, the gain scale, all the analyser and view options,
@@ -13172,31 +13141,31 @@ the menu: Bell, Low Pass, High Pass, Low Shelf, High Shelf, Notch, Band
 Pass, Tilt, All Pass (phase only - the alignment tool).</p>
 
 <p id="EQB-2"><b>Slope</b> - filter shapes only - sets how steeply a cut
-falls away past its point: 6 dB per octave sounds natural and invisible;
+falls away past its point: 6 dB per octave sounds natural and transparent;
 96 removes a region almost surgically; <code>Brickwall</code> is the
 absolute version and belongs to the linear-phase modes (elsewhere it
-plays as 96). These are the classic landings - the rail's SLOPE number
+plays as 96). These are the standard values - the rail's SLOPE number
 dials ANY steepness in between, 17 included.</p>
 
 <p id="EQB-3"><b>Channel</b> appears only in the Stereo view:
 <code>Stereo</code> (both sides, the default), <code>Left</code> or
 <code>Right</code> for a one-sided band (the dot wears an L or R badge).
-Mid and Side are not here - they are the VIEWS, and a band's view is
-already its answer.</p>
+Mid and Side are not here - they are the VIEWS, and the view a band
+lives in already decides that.</p>
 
 <p id="EQB-4"><b>Move to</b> sends the band to another view - Stereo, Mid
 or Side - keeping every one of its settings. This is how a band changes
-what half of the picture it works on.</p>
+which part of the signal it works on.</p>
 
 <p id="EQB-5"><b>Dynamic</b> - <code>Make Dynamic</code> turns the band
 into one that moves with the music, cutting (or boosting) only when its
-region crosses the threshold - an EQ that works only when needed, which
-is the polite way to tame a harsh frequency. <code>Auto Release</code>
+region crosses the threshold - an EQ that works only when needed, suited
+to taming a harsh frequency. <code>Auto Release</code>
 lets its recovery time follow the material: quick on transients,
 unobtrusive on sustained sound. <code>Spectral</code> (linear-phase
 modes) sharpens the band further: instead of one moving gain, only the
 exact frequencies standing out over their own neighborhood get pulled
-down - the note next door never flinches.</p>
+down - neighboring frequencies are untouched.</p>
 
 <p id="EQB-6"><b>Listen</b> latches the band's own audition (the
 headphone button does the same); <b>Isolate</b> mutes every band but this
@@ -13205,15 +13174,15 @@ effect alone, nothing else; <b>Mute</b> silences this band's work while
 keeping its settings.</p>
 
 <p id="EQB-7"><b>Split to Left + Right</b> turns one stereo band into two
-identical twins, one per side, ready to diverge - the fast route to an
-asymmetric fix. <b>Link Selected Bands</b> welds a multi-selection into a
+identical bands, one per side, which can then be adjusted separately for
+an asymmetric fix. <b>Link Selected Bands</b> turns a multi-selection into a
 permanent group that always moves together (saved with the project);
 <b>Unlink</b> frees a band from its group.</p>
 
 <p id="EQB-8"><b>Reset Band</b> returns the band to its defaults - the
 first eight also return to their home frequencies. <b>Delete Band</b>
 removes it entirely (also the Delete key); re-enabling later starts
-fresh, never a ghost of the old settings.</p>
+fresh.</p>
 </div>
   <div class="l3"><p class="howworks"><b>How this works:</b> <a data-level="weeds" href="#IMP-14">The kbs EQ engine</a>, <a data-level="weeds" href="#IMP-16">Linear phase</a>, <a data-level="weeds" href="#IMP-15">Domain views + per-band routing + the StripEq wrapper</a>.</p></div>
 </section>
@@ -13237,17 +13206,16 @@ is much closer to how loud something feels than any peak reading.</p>
 
 <p id="VUMTR-1"><b>The face.</b> Real VU ballistics: the needle takes a
 moment to rise and fall, gliding over transients instead of chasing them.
-That sluggishness is the feature. Mix so the needle rides around 0 on the
-loud sections and the peaks breathe past it - the oldest level-setting
-advice in recording, and it still works.</p>
+Mix so the needle rides around 0 on the
+loud sections and the peaks pass above it.</p>
 
 <p id="VUMTR-2"><b>CURRENT and MAX</b> print the number under the needle
 and the highest it has reached since you looked.</p>
 
 <p id="VUMTR-3"><b>VU Calibration</b> on this window's menu decides what
 0 VU means in digital terms (dBFS) - the app-wide reference, settable
-from -18 to -14. It is the same single value the Effects Rack menu sets;
-two doors, one setting.</p>
+from -18 to -14. It is the same single value the Effects Rack menu
+sets.</p>
 
 <p><b>Resizing</b> works diagonally only, with the ratio
 locked - a drawn instrument face stretched on one axis would misread its

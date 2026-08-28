@@ -15,7 +15,7 @@ view you are in decides what a band works on: make a band in the SIDE
 view and it shapes only the edges of the stereo picture (where the width
 lives); the MID view shapes only the center (where voices and bass live);
 ST is the everyday view where bands work the whole signal. No routing
-menus - the view is the decision. Whichever view you are in, the other
+menus - the view itself decides. Whichever view you are in, the other
 views' curves stay faintly visible as a ghost, so you always see what the
 other half is doing.</p>
 
@@ -42,7 +42,7 @@ menu - the small scales make mastering-size moves draggable) over
 hear it.</p>
 
 <p id="EQ-6"><b>The band handles</b> - numbered, colored - are the
-instrument: drag one to set its frequency (left-right) and its boost or
+main controls: drag one to set its frequency (left-right) and its boost or
 cut (up-down) in one gesture. Hold Shift for fine moves, Ctrl for gain
 only, Ctrl+Shift for frequency only; the wheel over a handle sets its
 width (Q); Alt-click resets it; double-click MUTES it (delete lives in
@@ -52,10 +52,10 @@ Ctrl+click dots into the set): dragging any selected dot then moves them
 all as one shape, and starting that drag with Alt scales their gains
 proportionally instead. The small glyph above each dot is its shape, and
 a dynamic band wears a thin second ring plus a tiny meter showing how far
-it has moved right now. Prefer drawing to dragging? The menu's
+it has moved right now. The menu's
 <b>Sketch a Curve</b> turns your next stroke across the graph into real
-bands - bumps become bells, edges become shelves - and one Ctrl+Z erases
-the lot.</p>
+bands - bumps become bells, edges become shelves - and one Ctrl+Z removes
+them all.</p>
 
 <p id="EQ-7"><b>The live spectrum</b> draws behind the curve whenever
 sound flows, so your moves land on the actual music - you can SEE the
@@ -71,13 +71,13 @@ sweep around and find the ugly resonance by ear, at the music's own
 loudness (the solo rides itself up to match, so a narrow band is never a
 sudden level drop). Isolate (in the band menu) is the other audition:
 mute every band but this one. And <em>Delta Listen</em> (the window menu,
-or per band) flips the question - you hear only what the EQ is CHANGING,
+or per band) is the reverse - you hear only what the EQ is CHANGING,
 so a flat EQ goes silent and every move becomes audible on its own.</p>
 
 <p id="EQ-9"><b>The crosshair</b> arms the <em>spectrum grab</em>: the
-analyser holds its peaks steady, the nearest found resonance offers
-itself under your pointer, and one click drops a ready-aimed cut on it.
-One grab per arming, so playing music never steals a click.</p>
+analyser holds its peaks steady, the nearest found resonance is targeted
+under your pointer, and one click drops a ready-aimed cut on it.
+One grab per arming.</p>
 
 <figure data-cluster="The rail|10,11,12,13,14">
 
@@ -90,7 +90,7 @@ not your audio, and the drawn curve deliberately stays put.</p>
 <p id="EQ-11"><b>FREQ and Q</b> - drag the numbers up and down, or
 double-click to type. Q is width: higher is narrower. On a Low Pass or
 High Pass, Q is resonance instead: a peak right at the cutoff, at any
-slope - the filter sweep sound lives on this number.</p>
+slope - the filter sweep sound comes from this number.</p>
 
 <p id="EQ-12"><b>The shape grid, channel and the two numbers</b> - the
 band's type (Bell, the passes, the shelves, Notch, Band Pass, Tilt, and
@@ -115,14 +115,14 @@ transients: at 100% the band reacts to the attack of a drum and ignores
 its ring. And in the linear-phase modes, <em>Spectral</em> (the band
 menu) sharpens a dynamic band to surgical: only the exact frequencies
 poking out over their own neighborhood get moved, the notes beside them
-pass untouched - DENSE sets how picky that is. The meter shows the
+pass untouched - DENSE sets how selective that is. The meter shows the
 movement live.</p>
 
 <p id="EQ-14"><b>MOD</b> - every band carries a slow LFO (RATE, LFO
 depth) and an envelope follower (ENV, push up to follow the music, pull
 down to duck against it), each aimable at the band's Frequency, Gain or
 Q. A gentle LFO on a filter's frequency is instant movement; a negative
-envelope on a boost is tone that politely gets out of the way when things
+envelope on a boost pulls the boost back when things
 get loud. These live in the zero-latency modes, where filters can move
 freely.</p>
 
@@ -131,7 +131,7 @@ freely.</p>
 <p id="EQ-15"><b>The menu</b> holds the processing modes - Zero Latency,
 Natural Phase (analog-shaped highs at no cost), five Linear Phase
 precisions with their real delays listed, and Mixed Phase (natural lows,
-linear highs, the mastering favorite) - plus oversampling, proportional
+linear highs, a common mastering choice) - plus oversampling, proportional
 Q, <b>Color</b> (three saturation characters: Smooth, Warm, and Changed,
 which colors only what the EQ altered), measured auto-gain, output trim
 and polarity, the gain scale, all the analyser and view options,

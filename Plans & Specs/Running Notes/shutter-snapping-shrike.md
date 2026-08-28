@@ -258,3 +258,29 @@ into the first stage's row, and identical clone rows (six identical
 stage Vols, per-strip Pan) still document once. The blurb lookup keys
 on the suffixed key, and the stage order note lives in the blurbs file
 so the ordinals stay legible.
+
+## 2026-08-28 - Tasks 8-10 - the In Depth rewrite (Shell / Instrument / M&E)
+
+All 91 chapters flattened to the register as a REMOVAL pass: the
+callout skeleton (every id anchor, every data-cluster figure, every
+code/b tag) is byte-identical to before, and the diffs are phrase-level
+deletions of the banned register - taglines ("do things a filter never
+could"), epigram closers ("Drag roughly; land perfectly", "One action,
+one entry, one click back"), aphorisms ("learn one and you have learned
+them all"), rhetorical setups ("Why would anyone want that?"), sensory
+metaphor standing in for spec ("sweeps stay silky", "a little is
+shimmer, a lot is glassy clangor" - restated flat), and the
+editorial garnish class ("the honest before/after", "worth learning",
+"earns its keep"). Net minus ~120 lines across the three groups.
+
+Executed by three parallel agents (one per group, disjoint
+directories), then EVERY diff line reviewed here against the register
+before commit - one leftover fixed by hand (a tagline living inside a
+b-tag heading the agents' tag invariant protected). Deliberately KEPT:
+definition asides ("an LFO is a below-hearing-range wave"), teaching
+similes that convey the sound to a first-time musician ("hollow like a
+clarinet", "stuffing a pillow in the drum"), compact factual parallels
+("The dot records; the chevron configures"), and every gesture,
+shortcut, range, and tradeoff. Manual regenerated after each group;
+89 topics still place, all spot-checked callout ids present. Three
+commits, one per group, per the plan.
