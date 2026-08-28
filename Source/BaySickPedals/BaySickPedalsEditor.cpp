@@ -1,4 +1,5 @@
 #include "BaySickPedalsEditor.h"
+#include "../Standalone/ShotMenuHook.h"
 #include "../Standalone/EffectEditorPanels.h"
 #include "../Standalone/SlotComponent.h"   // SlotComponent::effectTypeName
 #include "../Standalone/EffectPresetIO.h"
@@ -66,6 +67,8 @@ namespace
 class PedalSlotComponent : public juce::Component
 {
 public:
+    void showSwapMenuForShot() { showChangePedalMenu(); }
+
     PedalSlotComponent (BaySickPedalsProcessor& proc, int slot, BaySickPedalsEditor& parentEditor)
         : mProc (proc), mSlot (slot), mParent (parentEditor)
     {
@@ -430,6 +433,7 @@ private:
             m.addItem (kClearId, "Clear", mProc.getSlotType (mSlot) != EffectType::None);
         }
 
+        if (shots::maybeCapture (m)) return;
         m.showMenuAsync (juce::PopupMenu::Options(),
             [this] (int r)
             {
@@ -752,6 +756,13 @@ void BaySickPedalsEditor::setAutomationPrefix (const juce::String& prefix)
     for (auto& t : mTiles)
         if (t != nullptr)
             t->applyAutomationContext();
+}
+
+void BaySickPedalsEditor::showSwapMenuForShot (int slot)
+{
+    if (slot >= 0 && slot < BaySickPedalsProcessor::kNumSlots
+        && mTiles[(size_t) slot] != nullptr)
+        mTiles[(size_t) slot]->showSwapMenuForShot();
 }
 
 void BaySickPedalsEditor::paint (juce::Graphics& g)

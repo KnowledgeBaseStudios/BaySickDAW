@@ -1,4 +1,5 @@
 #include "DrumPage.h"
+#include "ShotMenuHook.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "UndoBracket.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage Task 7: sound-swap snapshots
@@ -1289,6 +1290,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
     menu.addSeparator();
     menu.addItem (kIdDelete, "Delete Drum", ! mLocked);   // locked drums can't be deleted
 
+    if (shots::maybeCapture (menu)) return;
     juce::Component::SafePointer<DrumPage> safeThis (this);
     juce::Component::SafePointer<juce::Component> anchorSafe (anchor);
     menu.showMenuAsync (

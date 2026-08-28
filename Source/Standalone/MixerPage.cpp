@@ -1,4 +1,5 @@
 #include "MixerPage.h"
+#include "ShotMenuHook.h"
 #include "UndoBracket.h"
 #include <set>   // D.3: setStripOrder uses std::set for dedup
 
@@ -654,6 +655,32 @@ int MixerPage::CableOverlay::findAvailableScRecvSlot(const juce::String& targetP
 // enforced (isValidBusSendTarget / isRouteAllowed / wouldCreateCycle);
 // picking writes the same params those paths wrote.  Illegal targets render
 // as disabled rows.  Items are action-lambdas (itemID -1, self-dispatching).
+juce::PopupMenu MixerPage::buildAddMenu()
+{
+    juce::Component::SafePointer<MixerPage> safeMx (this);
+    juce::PopupMenu m;
+    m.addItem ("Aux Strip", [safeMx] { if (auto* p = safeMx.getComponent()) p->addAuxChannel(); });
+    m.addSeparator();
+    m.addItem ("Vox Bus", ! isVoxBus2Active(), false,
+               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateVoxBus2(); });
+    m.addItem ("Inst Bus", ! (isInstBus2Active() && isInstBus3Active()), false,
+               [safeMx]
+               {
+                   auto* p = safeMx.getComponent();
+                   if (p == nullptr) return;
+                   if (! p->activateInstBus2()) p->activateInstBus3();
+               });
+    m.addItem ("Layers Bus", ! isLayersBus2Active(), false,
+               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateLayersBus2(); });
+    m.addItem ("Bass Bus", ! isBassBus2Active(), false,
+               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateBassBus2(); });
+    m.addItem ("Clips Bus", ! isClipsBus2Active(), false,
+               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateClipsBus2(); });
+    m.addItem ("Plugins Bus", ! isPluginsBus2Active(), false,
+               [safeMx] { if (auto* p = safeMx.getComponent()) p->activatePluginsBus2(); });
+    return m;
+}
+
 void MixerPage::onAddCableRequestedFor(int srcChannelId)
 {
     using namespace MixerChannelIds;
@@ -839,6 +866,7 @@ void MixerPage::onAddCableRequestedFor(int srcChannelId)
         }
     }
 
+    if (shots::maybeCapture (m)) return;
     m.showMenuAsync (juce::PopupMenu::Options{});
 }
 

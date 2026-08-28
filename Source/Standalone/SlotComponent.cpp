@@ -1,4 +1,5 @@
 #include "SlotComponent.h"
+#include "ShotMenuHook.h"
 #include "EffectEditorPanels.h"
 #include "../DSP/CompressorDSP.h"
 #include "../DSP/SaturationDSP.h"
@@ -837,6 +838,7 @@ void SlotComponent::showEffectPickerMenu (juce::Point<int> screenPos,
     auto opts = juce::PopupMenu::Options()
         .withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 });
 
+    if (shots::maybeCapture (m, opts)) return;
     m.showMenuAsync (opts,
         [pick = std::move (onPick), pickPlugin = std::move (onPickPlugin), pluginEffects] (int result)
         {

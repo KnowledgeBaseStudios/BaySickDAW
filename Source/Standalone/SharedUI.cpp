@@ -1,4 +1,5 @@
 #include "SharedUI.h"
+#include "ShotMenuHook.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "UndoBracket.h"
 #include "../ProjectManager.h"   // QA-RustyMeter Task 3: getSettingsFile (LUFS mode persistence)
@@ -1352,6 +1353,7 @@ void PageMenuBar::setViewMenu (const juce::StringArray& modeNames,
             for (int i = 0; i < modeNames.size(); ++i)
                 m.addItem (modeNames[i], true, i == cur,
                            [setMode, i] { if (setMode) setMode (i); });
+            if (shots::maybeCapture (m)) return;
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
         });
 }

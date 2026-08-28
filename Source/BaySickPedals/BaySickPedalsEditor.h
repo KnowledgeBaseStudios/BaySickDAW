@@ -44,6 +44,10 @@ public:
     void paint   (juce::Graphics&) override;
     void resized ()                  override;
 
+    // --shot only: runs the given slot's real Change-Pedal menu path so the
+    // harness's capture hook (ShotMenuHook.h) can take the menu headless.
+    void showSwapMenuForShot (int slot);
+
     // Called by per-tile components when the user picks a new effect type
     // (Change Pedal menu, EQ picker dropdown).
     void onSlotTypeChanged (int slot);

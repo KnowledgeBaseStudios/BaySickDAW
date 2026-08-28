@@ -114,3 +114,84 @@ tracks + placed blocks per the plan's brief); EQ Instances.png is NEW
 enumerates the live machine's devices, same as any hand shot. Gate six
 zeros + four links x3 to green (two compile fixes, then the fix pass +
 glyph respins).
+
+## 2026-08-28 - Task 3 - the menu engine
+
+39 menu figures; the suite now runs all 88, 0 failed. Recon first (five
+agents): the manual references 40 menu figures and four on-disk menu
+PNGs are orphans (BaySickSynth/BaySickPlayer/BaySickBass/Hosted Plugin
+Menu - all superseded; the live pair is the shared
+BaySickSynth-BaySickPlayer-Harmless image + BaySickBass Menu Updated).
+Premise corrections that shaped the build: there is no Recording
+menubar menu (the six are File/Edit/Patterns/View/Options/Help;
+Recording Menu is the transport record chevron, Ribbon + Menu is the
+add-tab popup); showing a real menu headless is impossible by
+construction (JUCE_MODAL_LOOPS_PERMITTED=0 removes show(), MenuWindow
+is module-private, showMenuAsync needs the desktop) - so show-and-scrape
+was never on the table and the composer is the only path.
+
+THE COMPOSER (MenuCanvas in ShotHarness.cpp): reproduces MenuWindow's
+single-column layout and paints through the SAME LookAndFeel virtuals
+the real window calls. Metrics copied from juce_PopupMenu.cpp: measured
+text carries the "   " + shortcut suffix, item height clamps 1..600,
+the trailing separator drops, the border (2) pads only vertically,
+section headers size through the header virtual, custom components
+(TooltipMenuItem, HeaderSubMenuItem) mount as real children and paint
+themselves. BaySickLAF overrides nothing menu-side (stock V4 recolored
+Panel/Text/Highlight), so the default LAF is the right brush for every
+app menu.
+
+THE CAPTURE HOOK (NEW ShotMenuHook.h): one arm-and-return global -
+build+show sites call shots::maybeCapture(m) one line before their
+showMenuAsync and hand the BUILT menu over headless. 13 sites hooked
+(six page-action menus, EQ band, send, effect picker, pedals swap,
+slot-window title, record chevron, view-menu lambda). Public triggers
+where the entry was private: PageMenuBar::triggerMenuForShot /
+triggerExtraHeadingForShot, MixerPage::showSendMenuForShot,
+GlobalTransportBar::showRecordMenuForShot,
+BaySickPedalsEditor::showSwapMenuForShot. Build-only splits where
+cleaner: GlobalAutoRightClick::buildControlMenu (static, shared with
+mouseDown), MixerPage::buildAddMenu (hoisted from the editor lambda),
+shots::buildMixerTitleMenu + shots::buildAnalyzerMenu (hoisted from
+editor-resident lambdas into StandaloneEditor.cpp free functions via
+ShotFactories.h; the editor's builders now call them then show - one
+source, no drift). Already build-only, zero seams needed: BuilderPage's
+three menus, EffectsPage::buildTitleMenu, RibbonTabBar::buildAddMenu,
+PianoRollMenuBar/DrumKitMenuBar (public model classes the harness
+instantiates directly), StandaloneEditor::getMenuForIndex.
+
+THE EDITOR GROUP: the six menubar figures need getMenuForIndex, a
+non-static member whose state (recents, template walks, the ribbon's
+New Tab submenu, pattern count) is the editor's own - so the LAST
+figure group constructs a full StandaloneEditor headless (ctor makes no
+peer; its deferred callAsyncs are SafePointer-guarded; it re-points the
+processor's PatternManager and sets process statics, hence last-by-
+contract, documented in the registry). RightClick Knob or Slider rides
+the same group - the label resolver is an editor-installed static.
+BaySickRustyDrums Menu is the ONE replica (its builder lives inline in
+an editor lambda whose items need editor actions); replicated
+row-for-row with a freeze-dressed bar, drift risk documented.
+
+Metronome Menu is not a menu - MetroPanel in a PARENTED juce::CallOutBox
+(parent non-null skips addToDesktop entirely, real frame + up arrow).
+
+Verified: size sweep across all 39 vs masters lands within 1-2px
+essentially everywhere - File Menu is pixel-identical, Effects Panel
+List (custom section headers + submenu arrows) matches at 1px, the
+shared engine menu, Rusty replica, Mixer/Send/Add, Analyzer, Plugins
+(matches its master exactly with no hosted plugin), Recording, Ribbon +,
+Builder x3, Roll x5, Kit x3, Pedals x3 all parity. Deliberate
+new-truth deviations for the diff sheet: Help Menu gains the View
+Projects MidiMap row the stale master lacks; Analyzer Menu gains the
+Levels view row; EQ Band Menu is the QA-EqFlagship rebuild (old master
+shows a menu that no longer exists; shot on the dynamic bell - Slope
+appears only on pass-type bands, callout text reconciles at Tasks
+8-10); RightClick matches content but the old master was captured at
+100% desktop scale (ours is 125% like every other master); Metronome
+keeps the real CallOutBox border the hand shot cropped.
+
+Fix pass: DrumPage null-guards its anchor (dummy anchor passed), and
+the BaySickDrum Menu master documents the KIT PAD right-click shape
+(fromKit=true, per-drum MIDI Note/MIDI Learn rows) - not the window
+Menu dropdown; switched, parity 290x330 vs 289x330. Gate six zeros +
+four links x4 (seams interim, figures, anchor fix, fromKit fix).

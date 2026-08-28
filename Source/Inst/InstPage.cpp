@@ -1,4 +1,5 @@
 #include "InstPage.h"
+#include "../Standalone/ShotMenuHook.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../BaySickNAMIR/BaySickNAMIRProcessor.h"
 #include "../BaySickNAMIR/BaySickNAMIREditor.h"   // QA-ApvtsAutomation: setAutomationPrefix
@@ -640,6 +641,7 @@ void InstPage::showPageActionsMenu (juce::Component* anchor)
     menu.addSeparator();
     menu.addItem (kIdDeleteTab, "Delete Inst", ! mLocked);
 
+    if (shots::maybeCapture (menu)) return;
     juce::Component::SafePointer<InstPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)

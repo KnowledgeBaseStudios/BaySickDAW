@@ -1,4 +1,5 @@
 #include "VoxPage.h"
+#include "../Standalone/ShotMenuHook.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "../BaySickVocal/BaySickVocalProcessor.h"
 #include "../BaySickVocal/BaySickVocalEditor.h"
@@ -306,6 +307,7 @@ void VoxPage::showPageActionsMenu (juce::Component* anchor)
     menu.addSeparator();
     menu.addItem (kIdDelete, "Delete Vox", ! mLocked);
 
+    if (shots::maybeCapture (menu)) return;
     juce::Component::SafePointer<VoxPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls), kIdLoadBase] (int r)

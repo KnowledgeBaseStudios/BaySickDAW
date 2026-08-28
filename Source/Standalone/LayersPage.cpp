@@ -1,4 +1,5 @@
 #include "LayersPage.h"
+#include "ShotMenuHook.h"
 #include "SafeXml.h"   // XXE + depth-guarded XML parse (QA-Cleanup)
 #include "UndoBracket.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage: chain-swap snapshots
@@ -510,6 +511,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
     menu.addSeparator();
     menu.addItem (kIdDelete, "Delete Layer", ! mLocked);   // locked layers can't be deleted
 
+    if (shots::maybeCapture (menu)) return;
     juce::Component::SafePointer<LayersPage> safeThis (this);
     menu.showMenuAsync (
         juce::PopupMenu::Options().withTargetComponent (anchor),

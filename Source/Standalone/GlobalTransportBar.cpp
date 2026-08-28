@@ -1,4 +1,5 @@
 #include "GlobalTransportBar.h"
+#include "ShotMenuHook.h"
 #include "../TsMapRead.h"   // QA-G Task 6: marker-map readout in song mode
 #include "../DSP/AudioClipStreamer.h"   // CL-282: streaming telemetry readout
 #include "SharedUI.h"
@@ -499,6 +500,7 @@ GlobalTransportBar::GlobalTransportBar(StandalonePlayHead& ph)
             m.addSeparator();
             m.addSubMenu ("Global Record-Quantize", qSub);
 
+            if (shots::maybeCapture (m)) return;
             m.showMenuAsync (
                 juce::PopupMenu::Options().withTargetComponent (mRecBtn.get()),
                 [this](int r) {
@@ -622,6 +624,12 @@ void GlobalTransportBar::setPlayState(bool playing, bool paused)
 {
     mIsPlaying = playing;
     mIsPaused  = paused;
+}
+
+void GlobalTransportBar::showRecordMenuForShot()
+{
+    if (auto* rb = dynamic_cast<RecordButton*> (mRecBtn.get()))
+        if (rb->onArrowClicked) rb->onArrowClicked();
 }
 
 void GlobalTransportBar::setRecordArmed(bool armed)

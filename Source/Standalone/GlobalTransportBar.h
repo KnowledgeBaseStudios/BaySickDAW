@@ -111,6 +111,10 @@ public:
     void toggleMetronome();   // Ctrl+M default
     void toggleSongMode();    // L default
 
+    // --shot only: runs the record chevron's real click path so the harness's
+    // capture hook (ShotMenuHook.h) can take the menu headless.
+    void showRecordMenuForShot();
+
     // Callbacks set by StandaloneEditor
     std::function<void()>       onPlay;
     std::function<void()>       onPause;

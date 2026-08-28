@@ -36,6 +36,7 @@
 #include "../../PluginProcessor.h"
 #include "../UndoBracket.h"
 #include "../SharedUI.h"
+#include "../ShotMenuHook.h"
 #include <array>
 #include <vector>
 
@@ -1064,6 +1065,7 @@ public:
         // the menu at the graph's corner (the same trap as the browser trees).
         const auto at = juce::Rectangle<int> (1, 1)
                             .withPosition (juce::Desktop::getMousePosition());
+        if (shots::maybeCapture (m)) return;
         m.showMenuAsync (juce::PopupMenu::Options()
                              .withTargetComponent (this)
                              .withTargetScreenArea (at),

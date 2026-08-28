@@ -7,6 +7,7 @@
 // LookAndFeel must be installed by hand or every widget renders stock JUCE.
 #include "ShotHarness.h"
 #include "ShotFactories.h"
+#include "ShotMenuHook.h"
 
 #include "../PluginProcessor.h"
 #include "../EngineRig.h"
@@ -22,6 +23,15 @@
 #include "RustyDrumsMapWindow.h"
 #include "BuilderPage.h"
 #include "MixerPage.h"
+#include "LayersPage.h"
+#include "BassPage.h"
+#include "DrumPage.h"
+#include "PluginsPage.h"
+#include "../Vox/VoxPage.h"
+#include "MetroPanel.h"
+#include "PagePresetIO.h"
+#include "SlotComponent.h"
+#include "StandaloneEditor.h"
 #include "EffectsPage.h"
 #include "TrackSelectionManager.h"
 #include "EffectWindows.h"
@@ -52,6 +62,16 @@
 
 namespace shots
 {
+
+std::function<void (const juce::PopupMenu&,
+                    const juce::PopupMenu::Options&)> gMenuCapture;
+
+bool maybeCapture (const juce::PopupMenu& m, const juce::PopupMenu::Options& o)
+{
+    if (gMenuCapture) { gMenuCapture (m, o); return true; }
+    return false;
+}
+
 namespace
 {
 
@@ -113,6 +133,151 @@ void dressSwingKnob (PageMenuBar& bar)
 {
     bar.setSwingKnobSlot ([] { return 0.0f; }, [] (float) {},
                           [] { return false; }, [] (bool) {});
+}
+
+// ── the menu composer ─────────────────────────────────────────────────────
+// A PopupMenu cannot be shown here (JUCE_MODAL_LOOPS_PERMITTED=0 removes
+// show(), MenuWindow is private, and a real menu would need the desktop),
+// so this reproduces MenuWindow's single-column layout and paints through
+// the SAME LookAndFeel virtuals the real window calls - the metrics below
+// (measured text carries the shortcut suffix, heights clamp at 600, a
+// trailing separator is dropped, the border pads only vertically) are
+// copied from juce_PopupMenu.cpp so drawn == shown.
+struct MenuCanvas : public juce::Component
+{
+    struct Row { juce::PopupMenu::Item* item; int h = 0; };
+
+    MenuCanvas (juce::PopupMenu& m, const juce::PopupMenu::Options& o,
+                juce::LookAndFeel& laf)
+        : opts (o)
+    {
+        setLookAndFeel (&laf);
+        for (juce::PopupMenu::MenuItemIterator it (m); it.next();)
+            rows.push_back ({ &it.getItem(), 0 });
+        while (! rows.empty() && rows.back().item->isSeparator)
+            rows.pop_back();
+
+        const int border = laf.getPopupMenuBorderSizeWithOptions (opts);
+        int colW = opts.getStandardItemHeight();
+        int totalH = border;
+        for (auto& r : rows)
+        {
+            auto& it = *r.item;
+            fillShortcutFromCommandManager (it);
+            int iw = 80, ih = 16;
+            if (it.customComponent != nullptr)
+                it.customComponent->getIdealSize (iw, ih);
+            else if (it.isSectionHeader)
+                laf.getIdealPopupMenuSectionHeaderSizeWithOptions (it.text, -1,
+                                                                   iw, ih, opts);
+            else
+            {
+                const auto txt = it.shortcutKeyDescription.isNotEmpty()
+                                   ? it.text + "   " + it.shortcutKeyDescription
+                                   : it.text;
+                laf.getIdealPopupMenuItemSizeWithOptions (txt, it.isSeparator,
+                                                          opts.getStandardItemHeight(),
+                                                          iw, ih, opts);
+            }
+            r.h = juce::jlimit (1, 600, ih);
+            colW = juce::jmax (colW, iw);
+            totalH += r.h;
+        }
+        const int w = juce::jmax (opts.getMinimumWidth(), colW + border * 2);
+        setSize (w, totalH + border);
+
+        int cy = border;
+        for (auto& r : rows)
+        {
+            if (auto* cc = r.item->customComponent.get())
+            {
+                addAndMakeVisible (cc);
+                cc->setBounds (0, cy, w, r.h);
+            }
+            cy += r.h;
+        }
+    }
+
+    ~MenuCanvas() override { setLookAndFeel (nullptr); }
+
+    static void fillShortcutFromCommandManager (juce::PopupMenu::Item& it)
+    {
+        if (it.commandManager == nullptr || it.itemID == 0
+            || it.shortcutKeyDescription.isNotEmpty())
+            return;
+        juce::String s;
+        for (auto& kp : it.commandManager->getKeyMappings()
+                          ->getKeyPressesAssignedToCommand (it.itemID))
+        {
+            const auto key = kp.getTextDescriptionWithIcons();
+            if (s.isNotEmpty()) s << ", ";
+            if (key.length() == 1 && key[0] < 128)
+                s << "shortcut: '" << key << '\'';
+            else
+                s << key;
+        }
+        it.shortcutKeyDescription = s.trim();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto& laf = getLookAndFeel();
+        laf.drawPopupMenuBackgroundWithOptions (g, getWidth(), getHeight(), opts);
+        int y = laf.getPopupMenuBorderSizeWithOptions (opts);
+        for (auto& r : rows)
+        {
+            const juce::Rectangle<int> area (0, y, getWidth(), r.h);
+            if (r.item->customComponent == nullptr)
+            {
+                if (r.item->isSectionHeader)
+                    laf.drawPopupMenuSectionHeaderWithOptions (g, area,
+                                                               r.item->text, opts);
+                else
+                    laf.drawPopupMenuItemWithOptions (g, area, false,
+                                                      *r.item, opts);
+            }
+            y += r.h;
+        }
+    }
+
+    juce::PopupMenu::Options opts;
+    std::vector<Row> rows;
+};
+
+void saveMenu (juce::PopupMenu menu, const juce::String& name,
+               juce::LookAndFeel* laf = nullptr,
+               const juce::PopupMenu::Options& opts = {})
+{
+    MenuCanvas canvas (menu, opts,
+                       laf != nullptr ? *laf
+                                      : juce::LookAndFeel::getDefaultLookAndFeel());
+    save (canvas, name, 1.25f);
+}
+
+// Arms the capture hook, runs the gesture that would have shown a menu, and
+// saves what the site built - the site's own code assembles the items, so a
+// figure can never drift from the app.
+bool captureMenu (const std::function<void()>& trigger, const juce::String& name,
+                  juce::LookAndFeel* laf = nullptr)
+{
+    std::unique_ptr<juce::PopupMenu> got;
+    juce::PopupMenu::Options gotOpts;
+    gMenuCapture = [&got, &gotOpts] (const juce::PopupMenu& m,
+                                     const juce::PopupMenu::Options& o)
+    {
+        got = std::make_unique<juce::PopupMenu> (m);
+        gotOpts = o;
+    };
+    trigger();
+    gMenuCapture = nullptr;
+    if (got == nullptr)
+    {
+        ++gFailed;
+        std::cout << "  FAILED " << name << " (menu never built)" << std::endl;
+        return false;
+    }
+    saveMenu (*got, name, laf, gotOpts);
+    return true;
 }
 
 // ── engine windows: BaySickSynth (6 tabs), BaySickBass, Harmless ──────────
@@ -810,7 +975,8 @@ void shootEqCluster (World& w)
 {
     const bool wantEq = want ("EQ");
     const bool wantInst = want ("EQ Instances");
-    if (! wantEq && ! wantInst) return;
+    const bool wantBandMenu = want ("EQ Band Menu");
+    if (! wantEq && ! wantInst && ! wantBandMenu) return;
 
     auto nameFor = [] (int id)
     {
@@ -873,6 +1039,8 @@ void shootEqCluster (World& w)
     if (graph != nullptr) { graph->selectBand (1); graph->pollNow(); }
     if (auto* rail = content.railForShot()) { rail->pollNow(); rail->pollNow(); }
     if (wantEq) save (win, "EQ", 1.25f);
+    if (wantBandMenu && graph != nullptr)
+        captureMenu ([&] { graph->showBandMenu (1); }, "EQ Band Menu");
 
     if (wantInst)
     {
@@ -947,6 +1115,416 @@ void shootAudioSettings (World& w)
     save (*c, "Audio & Midi Settings", 1.25f);
 }
 
+
+// ── menu figures (Task 3) ─────────────────────────────────────────────────
+// Every figure below runs the app's own builder - through a public build
+// method where one exists, else through the site's real click path with the
+// capture hook armed - so the imaged items can never drift from the app.
+
+void shootPianoRollMenus (World& w)
+{
+    static const struct { const char* fig; int idx; const char* name; } kMenus[] = {
+        { "Piano Roll Edit",   0, "Edit"   }, { "Piano Roll Tools", 1, "Tools" },
+        { "Piano Roll Scale",  2, "Scale"  }, { "Piano Roll Chords", 3, "Chords" },
+        { "Piano Roll View",   4, "View"   },
+    };
+    bool any = false;
+    for (const auto& m : kMenus) any = any || want (m.fig);
+    if (! any) return;
+
+    auto& pm = *w.patterns;
+    PianoRollPage page;
+    PianoRollConnection conn;
+    conn.dataAccessor = [&pm] { return &pm.currentPattern().bassRoll[0]; };
+    conn.patternTimeSigProvider = [] (int& n, int& d) { n = 4; d = 4; };
+    conn.noteColor = VC::BassCol[0];
+    conn.displayName = "Bass 1";
+    conn.engineType = "BaySickBass";
+    page.registerEngine ({ EngineKind::Bass, 0 }, conn);
+    page.selectEngine ({ EngineKind::Bass, 0 });
+
+    auto* roll = page.getActivePianoRoll();
+    if (roll == nullptr)
+    { ++gFailed; std::cout << "  FAILED Piano Roll menus (no roll)" << std::endl; return; }
+
+    PianoRollMenuBar model (*roll);
+    for (const auto& m : kMenus)
+        if (want (m.fig))
+            saveMenu (model.getMenuForIndex (m.idx, m.name), m.fig);
+}
+
+void shootDrumKitMenus (World& w)
+{
+    static const struct { const char* fig; int idx; const char* name; } kMenus[] = {
+        { "Drum Kit Edit", 0, "Edit" }, { "Drum Kit Tools", 1, "Tools" },
+        { "Drum Kit View", 2, "View" },
+    };
+    bool any = false;
+    for (const auto& m : kMenus) any = any || want (m.fig);
+    if (! any) return;
+
+    DrumKitContainer kit;
+    kit.setPatternManager (w.patterns.get());
+    DrumKitMenuBar model (kit);
+    for (const auto& m : kMenus)
+        if (want (m.fig))
+            saveMenu (model.getMenuForIndex (m.idx, m.name), m.fig);
+}
+
+void shootEffectPickerMenu (World&)
+{
+    if (! want ("Effects Panel List")) return;
+    captureMenu ([]
+    {
+        SlotComponent::showEffectPickerMenu ({ 0, 0 }, [] (EffectType) {},
+                                             [] (const juce::PluginDescription&) {});
+    }, "Effects Panel List");
+}
+
+void shootPedalsMenus (World&)
+{
+    const bool wantList = want ("BaySickPedals List");
+    const bool wantView = want ("BaySickPedals View");
+    if (! wantList && ! wantView) return;
+
+    if (wantList)
+    {
+        BaySickPedalsProcessor pedals (nullptr);
+        BaySickPedalsEditor ed (pedals);
+        // Slot 2 is empty: the master shows the picker with Clear greyed.
+        captureMenu ([&] { ed.showSwapMenuForShot (2); }, "BaySickPedals List");
+    }
+
+    if (wantView)
+    {
+        PageMenuBar bar;
+        bar.setViewMenu ({ "Standard", "Compact" }, [] { return 0; }, [] (int) {});
+        captureMenu ([&] { bar.triggerExtraHeadingForShot (0); },
+                     "BaySickPedals View");
+    }
+}
+
+void shootRecordMenu (World& w)
+{
+    if (! want ("Recording Menu")) return;
+    GlobalTransportBar bar (*w.playHead);
+    captureMenu ([&] { bar.showRecordMenuForShot(); }, "Recording Menu");
+}
+
+
+void shootBuilderMenus (World& w)
+{
+    static const char* const kFigs[] = { "Builder Menu", "Builder Edit", "Builder View" };
+    bool any = false;
+    for (auto* f : kFigs) any = any || want (f);
+    if (! any) return;
+
+    struct NoopAction : juce::UndoableAction
+    {
+        bool perform() override { return true; }
+        bool undo() override { return true; }
+    };
+    juce::UndoManager um;
+    UndoContext ctx;
+    ctx.manager = &um;
+    ctx.perform = [&um] (juce::UndoableAction* a, const juce::String& label)
+    { um.beginNewTransaction (label); return um.perform (a); };
+    ctx.undo = [&um] { um.undo(); };
+    ctx.redo = [&um] { um.redo(); };
+
+    BuilderPage page (*w.proc, *w.patterns);
+    page.setUndoContext (ctx);
+    ctx.perform (new NoopAction(), "Place Pattern Clip");
+
+    if (want ("Builder Menu"))
+    { juce::PopupMenu m; page.buildClipsMenu (m); saveMenu (m, "Builder Menu"); }
+    if (want ("Builder Edit"))
+    { juce::PopupMenu m; page.buildEditMenu (m); saveMenu (m, "Builder Edit"); }
+    if (want ("Builder View"))
+    { juce::PopupMenu m; page.buildViewMenu (m); saveMenu (m, "Builder View"); }
+}
+
+void shootMixerMenus (World& w)
+{
+    const bool wantTitle = want ("Mixer Menu");
+    const bool wantAdd   = want ("Mixer Add");
+    const bool wantSend  = want ("Send Menu");
+    if (! wantTitle && ! wantAdd && ! wantSend) return;
+
+    if (wantTitle)
+        saveMenu (shots::buildMixerTitleMenu (*w.proc, *w.deviceMgr), "Mixer Menu");
+
+    if (wantAdd || wantSend)
+    {
+        MixerPage page (*w.proc, *w.patterns);
+        page.addBassChannel (0, "Bass 1");
+        w.proc->mVibeGraph.rebuildRoutingFromApvts();
+        if (wantAdd) saveMenu (page.buildAddMenu(), "Mixer Add");
+        if (wantSend)
+            captureMenu ([&] { page.showSendMenuForShot (MixerChannelIds::bassInsert (0)); },
+                         "Send Menu");
+    }
+}
+
+void shootEffectsRackMenu (World& w)
+{
+    if (! want ("Effects Rack Menu")) return;
+    TrackSelectionManager tsm;
+    EffectsPage page (tsm, *w.proc);
+    juce::PopupMenu m;
+    page.buildTitleMenu (m);
+    saveMenu (m, "Effects Rack Menu");
+}
+
+void shootEffectPanelMenu (World& w)
+{
+    if (! want ("Effects Panel Menu")) return;
+    auto nameMaster = [] (int) { return juce::String ("Master"); };
+    auto* rack = EffectsPage::rackForChannelId (w.proc->mVibeGraph, 4);
+    if (rack == nullptr)
+    { ++gFailed; std::cout << "  FAILED Effects Panel Menu (no rack)" << std::endl; return; }
+
+    rack->loadEffect (2, EffectType::Compressor);   // basic mode by default
+    EffectSlotWindow content (*w.proc, 4, rack->getSlotUuid (2), nameMaster,
+                              UndoContext {});
+    WorkspaceWindow win ("shot:fxmenu", content.windowTitle());
+    win.setContentNonOwned (&content);
+    content.configureTitleStrip (*win.getPageMenu());
+    win.setSize (686, 263);
+
+    std::unique_ptr<juce::PopupMenu> got;
+    juce::PopupMenu::Options gotOpts;
+    gMenuCapture = [&got, &gotOpts] (const juce::PopupMenu& m,
+                                     const juce::PopupMenu::Options& o)
+    { got = std::make_unique<juce::PopupMenu> (m); gotOpts = o; };
+    win.getPageMenu()->triggerMenuForShot();
+    gMenuCapture = nullptr;
+    if (got == nullptr)
+    { ++gFailed; std::cout << "  FAILED Effects Panel Menu (no capture)" << std::endl; return; }
+
+    // The master shows the strip's Menu heading with the popup dropped under
+    // it, so the figure composes the window (clipped to the menu's width)
+    // over the rendered menu.
+    MenuCanvas canvas (*got, gotOpts, juce::LookAndFeel::getDefaultLookAndFeel());
+    const int barH = win.getPageMenu()->getBottom();
+    juce::Component host;
+    host.setSize (canvas.getWidth(), barH + canvas.getHeight());
+    host.addAndMakeVisible (win);
+    win.setTopLeftPosition (0, 0);
+    host.addAndMakeVisible (canvas);
+    canvas.setTopLeftPosition (0, barH);
+    save (host, "Effects Panel Menu", 1.25f);
+}
+
+void shootEngineMenus (World& w)
+{
+    auto dressPlayerBar = [] (PageMenuBar& bar)
+    {
+        bar.setFxRackSlot ([] {});
+        bar.setFreezeSlot ([] { return 0; }, [] (bool) {});
+    };
+
+    if (want ("BaySickSynth-BaySickPlayer-Harmless Menu"))
+    {
+        LayersPage page (*w.proc, *w.patterns, 3);
+        page.selectEngine ("BaySickSynth");
+        PageMenuBar bar;
+        dressPlayerBar (bar);
+        page.onBuildWindowNavMenu = [&page, &bar] (juce::PopupMenu& m)
+        {
+            m.addItem ("Player", true, page.getActiveTab() == 0, [] {});
+            m.addItem ("Piano Roll", [] {});
+            bar.appendStandardItems (m);
+        };
+        captureMenu ([&] { page.showPageActionsMenu (nullptr); },
+                     "BaySickSynth-BaySickPlayer-Harmless Menu");
+    }
+
+    if (want ("BaySickBass Menu Updated"))
+    {
+        BassPage page (*w.proc, *w.patterns, 1);
+        page.selectEngine ("BaySickBass");
+        PageMenuBar bar;
+        dressPlayerBar (bar);
+        page.onBuildWindowNavMenu = [&page, &bar] (juce::PopupMenu& m)
+        {
+            m.addItem ("Player", true, page.getActiveTab() == 0, [] {});
+            m.addItem ("Piano Roll", [] {});
+            bar.appendStandardItems (m);
+        };
+        captureMenu ([&] { page.showPageActionsMenu (nullptr); },
+                     "BaySickBass Menu Updated");
+    }
+
+    if (want ("BaySickVocals Menu"))
+    {
+        VoxPage page (*w.proc, 1);          // ctor creates its own engine
+        PageMenuBar bar;
+        dressPlayerBar (bar);
+        page.onBuildWindowNavMenu = [&bar] (juce::PopupMenu& m)
+        {
+            m.addItem ("Vocal Chain",  [] {});
+            m.addItem ("BaySickPitch", [] {});
+            m.addItem ("BaySickAlign", [] {});
+            m.addItem ("NAM/IR",       [] {});
+            bar.appendStandardItems (m);
+        };
+        captureMenu ([&] { page.showPageActionsMenu (nullptr); },
+                     "BaySickVocals Menu");
+    }
+
+    if (want ("BaySickDrum Menu"))
+    {
+        DrumPage page (*w.proc, *w.patterns, 1);
+        page.selectEngine ("BaySickPlayer");
+        PageMenuBar bar;
+        dressPlayerBar (bar);
+        page.onBuildWindowNavMenu = [&page, &bar] (juce::PopupMenu& m)
+        {
+            m.addItem ("Drum Kit", [] {});
+            m.addItem ("Player", true, page.getActiveTab() == 1, [] {});
+            m.addItem ("Piano Roll", [] {});
+            bar.appendStandardItems (m);
+        };
+        juce::Component dummyAnchor;   // showContextMenu null-guards its anchor
+        // fromKit: the master documents the kit pad right-click shape (per-drum
+        // MIDI Note / MIDI Learn rows), not the window Menu dropdown.
+        captureMenu ([&] { page.showContextMenu (&dummyAnchor, true); },
+                     "BaySickDrum Menu");
+    }
+
+    if (want ("BaySickPlugins Menu"))
+    {
+        PluginsPage page (*w.proc, 1);
+        PageMenuBar bar;
+        dressPlayerBar (bar);
+        page.onBuildWindowNavMenu = [&bar] (juce::PopupMenu& m)
+        {
+            m.addItem ("Piano Roll", [] {});
+            bar.appendStandardItems (m);
+        };
+        captureMenu ([&] { page.showPageActionsMenu (nullptr); },
+                     "BaySickPlugins Menu");
+    }
+
+    if (want ("BaySickGuitars & Basses Menu"))
+    {
+        InstPage page (*w.proc, 0);         // guitars kit rides shootGuitars
+        page.setSource (InstPage::Source::BaySickGuitars);
+        PageMenuBar bar;
+        dressPlayerBar (bar);
+        page.onBuildWindowNavMenu = [&page, &bar] (juce::PopupMenu& m)
+        {
+            m.addItem ("Pedals", [] {});
+            m.addItem ("NAM/IR", [] {});
+            if (page.getSource() != InstPage::Source::LiveInput)
+                m.addItem ("Piano Roll", [] {});
+            bar.appendStandardItems (m);
+        };
+        captureMenu ([&] { page.showPageActionsMenu (nullptr); },
+                     "BaySickGuitars & Basses Menu");
+    }
+
+    if (want ("BaySickPedals Menu"))
+    {
+        // The pedals aux window frames the SAME InstPage of a LIVE-INPUT tab;
+        // its bar carries no FX/freeze slots, so the standard tail is absent.
+        InstPage page (*w.proc, 2);
+        page.onBuildWindowNavMenu = [] (juce::PopupMenu& m)
+        {
+            m.addItem ("Pedals", [] {});
+            m.addItem ("NAM/IR", [] {});
+        };
+        captureMenu ([&] { page.showPageActionsMenu (nullptr); },
+                     "BaySickPedals Menu");
+    }
+
+    if (want ("BaySickRustyDrums Menu"))
+    {
+        // Replicated from the editor-resident inline builder (its items need
+        // the live editor for their actions; the harness needs only the rows).
+        // Rides after "rusty family" so the kit-loaded gate reads true.
+        juce::PopupMenu m;
+        m.addItem ("Drum Kit", true, true, [] {});
+        m.addItem ("Player", true, false, [] {});
+        m.addItem ("Piano Roll", [] {});
+        m.addItem ("Rusty Drums Map...", [] {});
+        PageMenuBar bar;
+        bar.setFreezeSlot ([] { return 0; }, [] (bool) {});
+        bar.appendStandardItems (m);
+        m.addSeparator();
+        m.addItem (100, "Save Page Preset As...", w.proc->hasBaySickRustyDrums());
+        juce::PopupMenu loadSub;
+        int nPresets = 0;
+        const auto root = PagePresetIO::myPresetsDirForPageKind (
+            PagePresetIO::PageKind::RustyDrums);
+        if (root.isDirectory())
+        {
+            juce::Array<juce::File> files;
+            root.findChildFiles (files, juce::File::findFiles, false, "*.xml");
+            files.sort();
+            for (auto& f : files)
+                loadSub.addItem (1000 + nPresets++, f.getFileNameWithoutExtension());
+        }
+        if (nPresets == 0)
+            loadSub.addItem (-1, "(no page presets saved)", false, false);
+        m.addSubMenu ("Load Page Preset", loadSub);
+        saveMenu (m, "BaySickRustyDrums Menu");
+    }
+}
+
+void shootRibbonAddMenu (World&)
+{
+    if (! want ("Ribbon + Menu")) return;
+    RibbonTabBar ribbon;
+    saveMenu (ribbon.buildAddMenu(), "Ribbon + Menu");
+}
+
+void shootMetronomeMenu (World&)
+{
+    if (! want ("Metronome Menu")) return;
+    juce::Component host;
+    host.setSize (400, 260);
+    MetroPanel panel;
+    // Parented CallOutBox: no desktop, real frame + arrow, pointing up at the
+    // transport's metro chevron like the app.
+    juce::CallOutBox box (panel, { 190, 4, 1, 1 }, &host);
+    save (box, "Metronome Menu", 1.25f);
+}
+
+void shootAnalyzerMenu (World& w)
+{
+    if (! want ("Analyzer Menu")) return;
+    MasterAnalyzerView view (*w.proc);
+    saveMenu (shots::buildAnalyzerMenu (view, nullptr), "Analyzer Menu");
+}
+
+void shootEditorMenus (World& w)
+{
+    static const struct { const char* fig; int idx; const char* name; } kMenus[] = {
+        { "File Menu", 0, "File" },        { "Edit Menu", 1, "Edit" },
+        { "Pattern Menu", 2, "Patterns" }, { "View Menu", 3, "View" },
+        { "Options Menu", 4, "Options" },  { "Help Menu", 5, "Help" },
+    };
+    bool any = want ("RightClick Knob or Slider");
+    for (const auto& m : kMenus) any = any || want (m.fig);
+    if (! any) return;
+
+    // The one figure group that builds the WHOLE editor: getMenuForIndex is a
+    // member, and its state (recents, templates, the ribbon's New Tab
+    // submenu, pattern count) is the editor's own.  MUST run last in the
+    // registry - the ctor re-points the processor's PatternManager at the
+    // editor's own and installs process-wide static hooks.
+    StandaloneEditor ed (*w.proc, *w.playHead, *w.deviceMgr);
+    for (const auto& m : kMenus)
+        if (want (m.fig))
+            saveMenu (ed.getMenuForIndex (m.idx, m.name), m.fig);
+
+    if (want ("RightClick Knob or Slider"))
+        saveMenu (GlobalAutoRightClick::buildControlMenu ("mixer_master_fader", true),
+                  "RightClick Knob or Slider");
+}
+
 using ShootFn = void (*) (World&);
 struct Figure { const char* group; ShootFn fn; };
 const Figure kFigures[] = {
@@ -980,6 +1558,22 @@ const Figure kFigures[] = {
     { "analyzer",      &shootAnalyzer },
     { "plugin search", &shootPluginSearch },
     { "audio settings", &shootAudioSettings },
+    // Task 3 - menu figures.  Engine menus ride earlier figures' state
+    // (guitars kit, rusty kit); the editor group is LAST by contract.
+    { "roll menus",    &shootPianoRollMenus },
+    { "kit menus",     &shootDrumKitMenus },
+    { "fx picker",     &shootEffectPickerMenu },
+    { "pedals menus",  &shootPedalsMenus },
+    { "record menu",   &shootRecordMenu },
+    { "builder menus", &shootBuilderMenus },
+    { "mixer menus",   &shootMixerMenus },
+    { "fx rack menu",  &shootEffectsRackMenu },
+    { "fx panel menu", &shootEffectPanelMenu },
+    { "engine menus",  &shootEngineMenus },
+    { "ribbon menu",   &shootRibbonAddMenu },
+    { "metronome",     &shootMetronomeMenu },
+    { "analyzer menu", &shootAnalyzerMenu },
+    { "editor menus",  &shootEditorMenus },
 };
 
 } // namespace

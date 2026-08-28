@@ -46,6 +46,15 @@ public:
     void paint  (juce::Graphics&) override;
     void resized() override;
 
+    // --shot only: runs the real send-menu path so the harness's capture hook
+    // (ShotMenuHook.h) can take the menu headless.
+    void showSendMenuForShot (int srcChannelId) { onAddCableRequestedFor (srcChannelId); }
+
+    // The title strip's Add menu (L13's ruled seven rows exactly -- Vox/Inst
+    // STRIP adds live on the ribbon's "+" flow, not here).  Build-only: the
+    // editor's Add heading shows it, the --shot harness renders it.
+    juce::PopupMenu buildAddMenu();
+
     // Set by StandaloneEditor - called when any strip's FX button is clicked.
     std::function<void(const juce::String&)> onEffectsTabRequested;
 

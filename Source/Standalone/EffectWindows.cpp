@@ -1,4 +1,5 @@
 #include "EffectWindows.h"
+#include "ShotMenuHook.h"
 #include "../AppPaths.h"
 #include "../UserFileSave.h"
 #include "../SafeXml.h"
@@ -393,6 +394,7 @@ void EffectSlotWindow::configureTitleStrip (PageMenuBar& bar)
         if (auto* b = mBar.getComponent())
             b->appendStandardItems (m);
 
+        if (shots::maybeCapture (m)) return;
         m.showMenuAsync (juce::PopupMenu::Options()
                              .withTargetComponent (anchor != nullptr ? anchor
                                                                      : (juce::Component*) mBar));

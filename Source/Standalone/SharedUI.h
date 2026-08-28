@@ -360,6 +360,16 @@ public:
                       std::function<int()>     getMode,
                       std::function<void(int)> setMode);
 
+    // --shot only: run the stored builders through their real click paths so
+    // the harness's capture hook (ShotMenuHook.h) can take the menu headless.
+    void triggerMenuForShot()                { showHamburgerMenu(); }
+    void triggerExtraHeadingForShot (int i)
+    {
+        if (i >= 0 && i < (int) mExtraHeadings.size()
+            && mExtraHeadings[(size_t) i]->onClick)
+            mExtraHeadings[(size_t) i]->onClick();
+    }
+
     // QA-Layout T17: the Menu dropdown's "Visual" entry -- opens this effect's
     // Visual sub-page window, and is the way back once the user has closed it.
     //
@@ -966,6 +976,34 @@ namespace VKnobAutomation
 class GlobalAutoRightClick : public juce::MouseListener
 {
 public:
+    // I-3c (2026-05-02): MIDI Learn items shared between VKnob's own
+    // mouseDown and this global handler.  IDs start at 100 to keep the
+    // 1-99 range free for automation items above.
+    static constexpr int kMidiFirstId = 100;
+
+    static juce::PopupMenu buildControlMenu (const juce::String& id, bool isSlider)
+    {
+        // Resolve paramId -> friendly label for the menu text only; the backend
+        // callback still receives the stable `id`.
+        juce::String menuLabel;
+        if (VKnobAutomation::sResolveMenuLabel)
+            menuLabel = VKnobAutomation::sResolveMenuLabel(id);
+        if (menuLabel.isEmpty()) menuLabel = id;
+
+        juce::PopupMenu m;
+        m.addItem(1, "Automate: " + menuLabel);
+        // Only offer "Type in value" for components that have a value (Sliders).
+        if (isSlider)
+            m.addItem(2, "Type in value...");
+
+        if (VKnobAutomation::sShouldOfferModulate
+            && VKnobAutomation::sShouldOfferModulate(id))
+            m.addItem(3, "Modulate envelope...");
+
+        VKnobAutomation::appendMidiLearnMenuItems (m, id, kMidiFirstId);
+        return m;
+    }
+
     void mouseDown(const juce::MouseEvent& e) override
     {
         if (!e.mods.isRightButtonDown()) return;
@@ -979,34 +1017,12 @@ public:
         juce::String id = comp->getComponentID();
         if (id.isEmpty()) return;
 
-        // Only offer "Type in value" for components that have a value (Sliders).
         auto* asSlider = dynamic_cast<juce::Slider*>(comp);
         juce::Component::SafePointer<juce::Slider> safeSlider(asSlider);
 
-        // Resolve paramId -> friendly label for the menu text only; the backend
-        // callback still receives the stable `id`.
-        juce::String menuLabel;
-        if (VKnobAutomation::sResolveMenuLabel)
-            menuLabel = VKnobAutomation::sResolveMenuLabel(id);
-        if (menuLabel.isEmpty()) menuLabel = id;
+        auto m = buildControlMenu (id, asSlider != nullptr);
 
-        juce::PopupMenu m;
-        m.addItem(1, "Automate: " + menuLabel);
-        if (asSlider != nullptr)
-            m.addItem(2, "Type in value...");
-
-        const bool offerModulate = (VKnobAutomation::sShouldOfferModulate
-                                 && VKnobAutomation::sShouldOfferModulate(id));
-        if (offerModulate)
-            m.addItem(3, "Modulate envelope...");
-
-        // I-3c (2026-05-02): MIDI Learn items shared between VKnob's own
-        // mouseDown and this global handler.  IDs start at 100 to keep the
-        // 1-99 range free for automation items above.
-        constexpr int kMidiFirstId = 100;
-        VKnobAutomation::appendMidiLearnMenuItems (m, id, kMidiFirstId);
-
-        m.showMenuAsync(juce::PopupMenu::Options{}, [id, safeSlider, kMidiFirstId](int result)
+        m.showMenuAsync(juce::PopupMenu::Options{}, [id, safeSlider](int result)
         {
             if (result == 1 && VKnobAutomation::sOnAutomate)
                 VKnobAutomation::sOnAutomate(id);

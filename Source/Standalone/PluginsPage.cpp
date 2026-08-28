@@ -1,4 +1,5 @@
 #include "PluginsPage.h"
+#include "ShotMenuHook.h"
 #include "UndoSnapshotStore.h"   // QA-UndoCoverage ruling 3a: swap snapshots
 #include "../Hosting/PluginManager.h"   // Replace Plugin list (2026-08-16)
 #include "../PluginProcessor.h"
@@ -728,6 +729,7 @@ void PluginsPage::showPageActionsMenu (juce::Component* anchor)
     menu.addSeparator();
     menu.addItem (kIdDeleteTab, "Delete Plugin");
 
+    if (shots::maybeCapture (menu)) return;
     juce::Component::SafePointer<PluginsPage> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor),
         [safeThis, presetXmls = std::move (presetXmls),

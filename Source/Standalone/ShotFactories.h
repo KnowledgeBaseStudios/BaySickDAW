@@ -9,6 +9,8 @@
 
 class BuilderPage;
 class BaySickDAWProcessor;
+class MasterAnalyzerView;
+class VersionCapture;
 
 namespace shots
 {
@@ -18,4 +20,11 @@ namespace shots
     // The dialog enumerates device types/names without opening anything; a
     // never-initialised manager is its designed input.
     std::unique_ptr<juce::Component> makeAudioSettingsComponent (juce::AudioDeviceManager& dm);
+
+    // Build-only halves of two editor-resident menus (QA-ManualPress M-2):
+    // the editor's builders call these then show; the harness calls them and
+    // renders, so the imaged items can never drift from the app.
+    juce::PopupMenu buildMixerTitleMenu (BaySickDAWProcessor& proc,
+                                         juce::AudioDeviceManager& dm);
+    juce::PopupMenu buildAnalyzerMenu (MasterAnalyzerView& view, VersionCapture* vc);
 }

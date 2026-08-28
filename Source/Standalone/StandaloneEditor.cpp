@@ -7675,28 +7675,7 @@ void StandaloneEditor::showPageForTab(int tabId)
                 {
                     auto* mx = safeMx.getComponent();
                     if (mx == nullptr) return;
-                    // L13's ruled seven rows exactly -- Vox/Inst STRIP adds
-                    // live on the ribbon's "+" flow, not here.
-                    juce::PopupMenu m;
-                    m.addItem ("Aux Strip", [safeMx] { if (auto* p = safeMx.getComponent()) p->addAuxChannel(); });
-                    m.addSeparator();
-                    m.addItem ("Vox Bus", ! mx->isVoxBus2Active(), false,
-                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateVoxBus2(); });
-                    m.addItem ("Inst Bus", ! (mx->isInstBus2Active() && mx->isInstBus3Active()), false,
-                               [safeMx]
-                               {
-                                   auto* p = safeMx.getComponent();
-                                   if (p == nullptr) return;
-                                   if (! p->activateInstBus2()) p->activateInstBus3();
-                               });
-                    m.addItem ("Layers Bus", ! mx->isLayersBus2Active(), false,
-                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateLayersBus2(); });
-                    m.addItem ("Bass Bus", ! mx->isBassBus2Active(), false,
-                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateBassBus2(); });
-                    m.addItem ("Clips Bus", ! mx->isClipsBus2Active(), false,
-                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activateClipsBus2(); });
-                    m.addItem ("Plugins Bus", ! mx->isPluginsBus2Active(), false,
-                               [safeMx] { if (auto* p = safeMx.getComponent()) p->activatePluginsBus2(); });
+                    auto m = mx->buildAddMenu();
                     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (anchor));
                 });
             }
@@ -7713,87 +7692,8 @@ void StandaloneEditor::showPageForTab(int tabId)
                 [safeThis] (juce::Component* anchor)
                 {
                     if (! safeThis) return;
-                    juce::PopupMenu m;
-                    juce::PopupMenu panLawSub;
-                    auto* p = safeThis->mProcessor.apvts.getParameter ("master_pan_law");
-                    const int current = p ? (int) ((juce::AudioParameterInt*) p)->get() : 0;
-                    auto addLaw = [&panLawSub, current] (int id, const char* name, const char* tip)
-                    {
-                        juce::PopupMenu::Item pmi (name);
-                        pmi.itemID = id;
-                        pmi.customComponent = new TooltipMenuItem (name, tip, true, VC::Text,
-                                                                   current == id - 101);
-                        panLawSub.addItem (std::move (pmi));
-                    };
-                    addLaw (101, "Ramped",
-                            "Constant-power panning. A sound keeps its level at center and "
-                            "rises by up to 3 dB as you pan it toward one side, so it feels "
-                            "equally loud anywhere in the stereo field.");
-                    addLaw (102, "Flat",
-                            "No level compensation. The side you pan toward holds its level "
-                            "while the other side fades out, so a sound is loudest at center "
-                            "and about 3 dB quieter at the sides.");
-                    m.addSubMenu ("Pan Law", panLawSub);
-
-                    // J-A2 (2026-05-04): Master Output channel selector.  Lists
-                    // every stereo pair on the active audio device first, then
-                    // every mono channel.  IDs:
-                    //   300 + firstChannel  -> stereo pair starting at firstChannel
-                    //   400 + channelIndex  -> mono on channelIndex
-                    juce::PopupMenu masterOutSub;
-                    int curFirst = MasterOutputRouting::gFirstOutputChannel.load (std::memory_order_relaxed);
-                    bool curMono = MasterOutputRouting::gMasterIsMono.load (std::memory_order_relaxed);
-                    if (auto* dev = safeThis->mDeviceManager.getCurrentAudioDevice())
-                    {
-                        const auto outNames = dev->getOutputChannelNames();
-                        const int nOut = outNames.size();
-                        // Stereo pairs (consecutive even-indexed pairs).
-                        for (int i = 0; i + 1 < nOut; i += 2)
-                        {
-                            const juce::String label = juce::String (i + 1) + "/" + juce::String (i + 2)
-                                + "  (" + outNames[i].trim() + " / " + outNames[i + 1].trim() + ")";
-                            const bool ticked = (! curMono) && (curFirst == i);
-                            masterOutSub.addItem (300 + i, label, true, ticked);
-                        }
-                        if (nOut > 0) masterOutSub.addSeparator();
-                        for (int i = 0; i < nOut; ++i)
-                        {
-                            const juce::String label = "Output " + juce::String (i + 1) + " (mono)  ("
-                                + outNames[i].trim() + ")";
-                            const bool ticked = curMono && (curFirst == i);
-                            masterOutSub.addItem (400 + i, label, true, ticked);
-                        }
-                    }
-                    else
-                    {
-                        masterOutSub.addItem (-1, "(no audio device open)", false, false);
-                    }
-                    m.addSubMenu ("Master Output", masterOutSub);
-
-                    // H-meter (2026-05-02): latency-compensate meters toggle.
-                    const bool latCompOn = MeterLatencyComp::gEnabled.load (std::memory_order_relaxed);
-                    m.addItem (201,
-                                "Latency-compensate meters",
-                                true,                  // enabled
-                                latCompOn);            // checked
-
-                    // 2026-05-07 (Batch 10): hot-swappable multi-core rendering
-                    // toggle.  Click flips RenderEngine::gMultiThreadedEngineEnabled
-                    // immediately.  QA-Ef (2026-05-21): the worker threads
-                    // acquire-load this at the top of BaySickThreadPool::workerLoop
-                    // -- true = full parallel, false = workers park and the audio
-                    // thread drains the whole graph itself (single-core diagnostic;
-                    // identical dispatcher / task code, zero parallelism).  No
-                    // restart needed; the very next audio block picks the new mode.
-                    const bool mtOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
-                    m.addItem (202,
-                                "Multi-core Rendering",
-                                true,                  // enabled
-                                mtOn);                 // checked
-
-                    // QA-Layout T10 (L30): "MIDI trigger velocity" moved to
-                    // the Audio Settings dialog, beside the MIDI inputs it
-                    // configures.
+                    auto m = shots::buildMixerTitleMenu (safeThis->mProcessor,
+                                                         safeThis->mDeviceManager);
 
                     m.showMenuAsync (
                         juce::PopupMenu::Options().withTargetComponent (anchor),
@@ -17138,112 +17038,205 @@ void StandaloneEditor::openMasterAnalyzerWindow()
         bar->setMenuBuilder ([safeView, safeEditor] (juce::Component* anchor) mutable
         {
             if (safeView == nullptr || safeEditor == nullptr) return;
-            using VM = MasterAnalyzerView::ViewMode;
-            juce::PopupMenu m;
-
-            m.addSectionHeader ("View");
-            m.addItem ("Levels", true, safeView->getViewMode() == VM::Levels,
-                       [safeView]() mutable
-                       { if (safeView) safeView->setViewMode (VM::Levels); });
-            m.addItem ("Loudness", true, safeView->getViewMode() == VM::Loudness,
-                       [safeView]() mutable
-                       { if (safeView) safeView->setViewMode (VM::Loudness); });
-            m.addItem ("Spectrum", true, safeView->getViewMode() == VM::Spectrum,
-                       [safeView]() mutable
-                       { if (safeView) safeView->setViewMode (VM::Spectrum); });
-
-            // §2.5: source belongs on this menu.  It lists the SAME takes as the
-            // in-view combo and routes through the SAME selectSource(), because
-            // the previous shape -- menu calls showLive(), combo owns the take id
-            // -- let the two disagree: picking Live left the combo showing a take
-            // name over a live trace, and the next refresh re-applied it.
-            m.addSectionHeader ("Source");
-            const int curId = safeView->getSelectedTakeId();
-            m.addItem ("Live", true, curId == 0,
-                       [safeView]() mutable { if (safeView) safeView->selectSource (0); });
-            if (safeEditor->mVersionCapture.versions().empty())
-            {
-                // Shown DISABLED rather than hidden so the capability is
-                // discoverable before any take exists.
-                m.addItem ("No captured takes yet", false, false, []{});
-            }
-            else
-            {
-                for (const auto& v : safeEditor->mVersionCapture.versions())
-                {
-                    const int id = v.id;
-                    m.addItem (v.label, true, curId == id,
-                               [safeView, id]() mutable
-                               { if (safeView) safeView->selectSource (id); });
-                }
-            }
-
-            m.addSectionHeader ("Target");
-            // This target drives the WINDOW'S bar only -- deliberately separate
-            // from the capture/export standard (exSpecId/exSpecCustom) so a view
-            // tweak never silently changes take verdicts.  Custom is excluded
-            // from the table loop because get(Id::Custom) is the -14 placeholder
-            // LoudnessSpec.h warns about -- it gets its own prompt item below.
-            bool matchesPreset = false;
-            for (int i = 0; i < LoudnessSpec::numSpecs(); ++i)
-            {
-                const auto& sp = LoudnessSpec::get ((LoudnessSpec::Id) i);
-                if (! sp.checksIntegrated) continue;   // measure-only has no target
-                if (sp.id == LoudnessSpec::Id::Custom) continue;
-                const float t = sp.integratedLufs;
-                const float c = sp.maxTruePeakDb;
-                const bool ticked =
-                    juce::approximatelyEqual (safeView->getTargetLufs(), t);
-                matchesPreset = matchesPreset || ticked;
-                m.addItem (juce::String (sp.name),
-                           true,
-                           ticked,
-                           [safeView, t, c]() mutable
-                           { if (safeView) { safeView->setTargetLufs (t); safeView->setCeilingDb (c); } });
-            }
-
-            {
-                const juce::String customLabel = matchesPreset
-                    ? juce::String ("Custom...")
-                    : "Custom (" + juce::String (safeView->getTargetLufs(), 1)
-                        + " LUFS)...";
-                m.addItem (customLabel, true, ! matchesPreset,
-                           [safeView]() mutable
-                {
-                    if (safeView == nullptr) return;
-                    auto* aw = new juce::AlertWindow (
-                        "Custom Target",
-                        "Target loudness in LUFS (-40 to 0):",
-                        juce::AlertWindow::NoIcon);
-                    aw->addTextEditor ("lufs",
-                                       juce::String (safeView->getTargetLufs(), 1));
-                    if (auto* ed = aw->getTextEditor ("lufs"))
-                        ed->setInputRestrictions (7, "-0123456789.");
-                    aw->addButton ("OK",     1,
-                                   juce::KeyPress (juce::KeyPress::returnKey));
-                    aw->addButton ("Cancel", 0,
-                                   juce::KeyPress (juce::KeyPress::escapeKey));
-                    aw->enterModalState (true, juce::ModalCallbackFunction::create (
-                        [safeView, aw] (int r)
-                        {
-                            if (r != 1 || safeView == nullptr) return;
-                            const auto t = aw->getTextEditorContents ("lufs").trim();
-                            if (t.isEmpty() || t == "-" || t == ".") return;
-                            safeView->setTargetLufs (
-                                juce::jlimit (-40.0f, 0.0f, t.getFloatValue()));
-                        }), true);
-                });
-            }
-
-            m.addSeparator();
-            m.addItem ("Reset history",
-                       [safeView]() mutable { if (safeView) safeView->resetHistory(); });
-
+            auto m = shots::buildAnalyzerMenu (*safeView, &safeEditor->mVersionCapture);
             m.showMenuAsync (juce::PopupMenu::Options()
                                  .withTargetComponent (anchor != nullptr ? anchor
                                                                          : safeView.getComponent()));
         });
     }
+}
+
+juce::PopupMenu shots::buildAnalyzerMenu (MasterAnalyzerView& view, VersionCapture* vc)
+{
+    juce::Component::SafePointer<MasterAnalyzerView> safeView (&view);
+    using VM = MasterAnalyzerView::ViewMode;
+    juce::PopupMenu m;
+
+    m.addSectionHeader ("View");
+    m.addItem ("Levels", true, view.getViewMode() == VM::Levels,
+               [safeView]() mutable
+               { if (safeView) safeView->setViewMode (VM::Levels); });
+    m.addItem ("Loudness", true, view.getViewMode() == VM::Loudness,
+               [safeView]() mutable
+               { if (safeView) safeView->setViewMode (VM::Loudness); });
+    m.addItem ("Spectrum", true, view.getViewMode() == VM::Spectrum,
+               [safeView]() mutable
+               { if (safeView) safeView->setViewMode (VM::Spectrum); });
+
+    // §2.5: source belongs on this menu.  It lists the SAME takes as the
+    // in-view combo and routes through the SAME selectSource(), because
+    // the previous shape -- menu calls showLive(), combo owns the take id
+    // -- let the two disagree: picking Live left the combo showing a take
+    // name over a live trace, and the next refresh re-applied it.
+    m.addSectionHeader ("Source");
+    const int curId = view.getSelectedTakeId();
+    m.addItem ("Live", true, curId == 0,
+               [safeView]() mutable { if (safeView) safeView->selectSource (0); });
+    if (vc == nullptr || vc->versions().empty())
+    {
+        // Shown DISABLED rather than hidden so the capability is
+        // discoverable before any take exists.
+        m.addItem ("No captured takes yet", false, false, []{});
+    }
+    else
+    {
+        for (const auto& v : vc->versions())
+        {
+            const int id = v.id;
+            m.addItem (v.label, true, curId == id,
+                       [safeView, id]() mutable
+                       { if (safeView) safeView->selectSource (id); });
+        }
+    }
+
+    m.addSectionHeader ("Target");
+    // This target drives the WINDOW'S bar only -- deliberately separate
+    // from the capture/export standard (exSpecId/exSpecCustom) so a view
+    // tweak never silently changes take verdicts.  Custom is excluded
+    // from the table loop because get(Id::Custom) is the -14 placeholder
+    // LoudnessSpec.h warns about -- it gets its own prompt item below.
+    bool matchesPreset = false;
+    for (int i = 0; i < LoudnessSpec::numSpecs(); ++i)
+    {
+        const auto& sp = LoudnessSpec::get ((LoudnessSpec::Id) i);
+        if (! sp.checksIntegrated) continue;   // measure-only has no target
+        if (sp.id == LoudnessSpec::Id::Custom) continue;
+        const float t = sp.integratedLufs;
+        const float c = sp.maxTruePeakDb;
+        const bool ticked =
+            juce::approximatelyEqual (view.getTargetLufs(), t);
+        matchesPreset = matchesPreset || ticked;
+        m.addItem (juce::String (sp.name),
+                   true,
+                   ticked,
+                   [safeView, t, c]() mutable
+                   { if (safeView) { safeView->setTargetLufs (t); safeView->setCeilingDb (c); } });
+    }
+
+    {
+        const juce::String customLabel = matchesPreset
+            ? juce::String ("Custom...")
+            : "Custom (" + juce::String (view.getTargetLufs(), 1)
+                + " LUFS)...";
+        m.addItem (customLabel, true, ! matchesPreset,
+                   [safeView]() mutable
+        {
+            if (safeView == nullptr) return;
+            auto* aw = new juce::AlertWindow (
+                "Custom Target",
+                "Target loudness in LUFS (-40 to 0):",
+                juce::AlertWindow::NoIcon);
+            aw->addTextEditor ("lufs",
+                               juce::String (safeView->getTargetLufs(), 1));
+            if (auto* ed = aw->getTextEditor ("lufs"))
+                ed->setInputRestrictions (7, "-0123456789.");
+            aw->addButton ("OK",     1,
+                           juce::KeyPress (juce::KeyPress::returnKey));
+            aw->addButton ("Cancel", 0,
+                           juce::KeyPress (juce::KeyPress::escapeKey));
+            aw->enterModalState (true, juce::ModalCallbackFunction::create (
+                [safeView, aw] (int r)
+                {
+                    if (r != 1 || safeView == nullptr) return;
+                    const auto t = aw->getTextEditorContents ("lufs").trim();
+                    if (t.isEmpty() || t == "-" || t == ".") return;
+                    safeView->setTargetLufs (
+                        juce::jlimit (-40.0f, 0.0f, t.getFloatValue()));
+                }), true);
+        });
+    }
+
+    m.addSeparator();
+    m.addItem ("Reset history",
+               [safeView]() mutable { if (safeView) safeView->resetHistory(); });
+    return m;
+}
+
+juce::PopupMenu shots::buildMixerTitleMenu (BaySickDAWProcessor& proc,
+                                            juce::AudioDeviceManager& dm)
+{
+    juce::PopupMenu m;
+    juce::PopupMenu panLawSub;
+    auto* p = proc.apvts.getParameter ("master_pan_law");
+    const int current = p ? (int) ((juce::AudioParameterInt*) p)->get() : 0;
+    auto addLaw = [&panLawSub, current] (int id, const char* name, const char* tip)
+    {
+        juce::PopupMenu::Item pmi (name);
+        pmi.itemID = id;
+        pmi.customComponent = new TooltipMenuItem (name, tip, true, VC::Text,
+                                                   current == id - 101);
+        panLawSub.addItem (std::move (pmi));
+    };
+    addLaw (101, "Ramped",
+            "Constant-power panning. A sound keeps its level at center and "
+            "rises by up to 3 dB as you pan it toward one side, so it feels "
+            "equally loud anywhere in the stereo field.");
+    addLaw (102, "Flat",
+            "No level compensation. The side you pan toward holds its level "
+            "while the other side fades out, so a sound is loudest at center "
+            "and about 3 dB quieter at the sides.");
+    m.addSubMenu ("Pan Law", panLawSub);
+
+    // J-A2 (2026-05-04): Master Output channel selector.  Lists
+    // every stereo pair on the active audio device first, then
+    // every mono channel.  IDs:
+    //   300 + firstChannel  -> stereo pair starting at firstChannel
+    //   400 + channelIndex  -> mono on channelIndex
+    juce::PopupMenu masterOutSub;
+    int curFirst = MasterOutputRouting::gFirstOutputChannel.load (std::memory_order_relaxed);
+    bool curMono = MasterOutputRouting::gMasterIsMono.load (std::memory_order_relaxed);
+    if (auto* dev = dm.getCurrentAudioDevice())
+    {
+        const auto outNames = dev->getOutputChannelNames();
+        const int nOut = outNames.size();
+        // Stereo pairs (consecutive even-indexed pairs).
+        for (int i = 0; i + 1 < nOut; i += 2)
+        {
+            const juce::String label = juce::String (i + 1) + "/" + juce::String (i + 2)
+                + "  (" + outNames[i].trim() + " / " + outNames[i + 1].trim() + ")";
+            const bool ticked = (! curMono) && (curFirst == i);
+            masterOutSub.addItem (300 + i, label, true, ticked);
+        }
+        if (nOut > 0) masterOutSub.addSeparator();
+        for (int i = 0; i < nOut; ++i)
+        {
+            const juce::String label = "Output " + juce::String (i + 1) + " (mono)  ("
+                + outNames[i].trim() + ")";
+            const bool ticked = curMono && (curFirst == i);
+            masterOutSub.addItem (400 + i, label, true, ticked);
+        }
+    }
+    else
+    {
+        masterOutSub.addItem (-1, "(no audio device open)", false, false);
+    }
+    m.addSubMenu ("Master Output", masterOutSub);
+
+    // H-meter (2026-05-02): latency-compensate meters toggle.
+    const bool latCompOn = MeterLatencyComp::gEnabled.load (std::memory_order_relaxed);
+    m.addItem (201,
+                "Latency-compensate meters",
+                true,                  // enabled
+                latCompOn);            // checked
+
+    // 2026-05-07 (Batch 10): hot-swappable multi-core rendering
+    // toggle.  Click flips RenderEngine::gMultiThreadedEngineEnabled
+    // immediately.  QA-Ef (2026-05-21): the worker threads
+    // acquire-load this at the top of BaySickThreadPool::workerLoop
+    // -- true = full parallel, false = workers park and the audio
+    // thread drains the whole graph itself (single-core diagnostic;
+    // identical dispatcher / task code, zero parallelism).  No
+    // restart needed; the very next audio block picks the new mode.
+    const bool mtOn = RenderEngine::gMultiThreadedEngineEnabled.load (std::memory_order_acquire);
+    m.addItem (202,
+                "Multi-core Rendering",
+                true,                  // enabled
+                mtOn);                 // checked
+
+    // QA-Layout T10 (L30): "MIDI trigger velocity" moved to
+    // the Audio Settings dialog, beside the MIDI inputs it
+    // configures.
+    return m;
 }
 
 void StandaloneEditor::closeDeadEffectWindows (int channelId)
