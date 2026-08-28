@@ -2068,7 +2068,7 @@ private:
         std::atomic<std::atomic<float>*> p[eqNumBankGlobalSlots] {};
     };
 
-    static constexpr int kEqBands         = 24;   // QA-EqPro: the kbs band pool
+    static constexpr int kEqBands         = StripEq::kBands;   // ONE home: kbs::kEqMaxBands
     static constexpr int kEqBanksPerStrip = 2;    // post-rack, pre-rack
     static constexpr int kEqBankPost      = 0;
     static constexpr int kEqBankPre       = 1;

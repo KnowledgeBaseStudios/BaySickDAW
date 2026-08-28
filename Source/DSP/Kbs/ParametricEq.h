@@ -143,16 +143,24 @@ struct EqBandParams
 // The home positions: 8 named defaults, then log-spaced.  ONE home - the
 // parameter defaults and the A/B spare's seed both read it, so a band index
 // means the same frequency wherever the band is built.
+// QA-EqFlagship W-15: the band pool, ONE home.  96 pre-allocated - the
+// engine NEVER grows storage under a running audio thread; the UI shows
+// pages of 24 that appear as they fill, so the ceiling is invisible until
+// band 97, which nobody places.
+inline constexpr int kEqMaxBands = 96;
+
 inline float eqDefaultFreq (int b)
 {
     static const float k8[8] = { 40.0f, 100.0f, 250.0f, 630.0f,
                                  1600.0f, 4000.0f, 8000.0f, 12500.0f };
     if (b >= 0 && b < 8) return k8[b];
-    const float t = (float) (b - 8) / 16.0f;
+    // Bands 9..N share the same log span the 24-band law covered (56 Hz to
+    // ~13.8 kHz), redistributed across however many bands the pool holds.
+    const float t = (float) (b - 8) / (float) (kEqMaxBands - 9);
     return 20.0f * std::pow (1000.0f, 0.15f + 0.8f * t);
 }
 
-// A band as it ships: 1-8 on and flat at their home frequencies, 9-24 off.
+// A band as it ships: 1-8 on and flat at their home frequencies, the rest off.
 // Every other field's struct default already IS the parameter default.
 inline EqBandParams eqDefaultBand (int b)
 {
@@ -305,7 +313,7 @@ inline double butterworthQ (int poles, int pair)
 class ParametricEq
 {
 public:
-    static constexpr int kMaxBands = 24;
+    static constexpr int kMaxBands = kEqMaxBands;
 
     // Dynamics update interval. The envelope runs per sample; the gain it
     // commands is applied by rebuilding the band's section this often, with a

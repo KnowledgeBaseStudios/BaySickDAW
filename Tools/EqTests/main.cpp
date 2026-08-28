@@ -969,6 +969,39 @@ int main()
             near (total, steadyTotal, 0.75, "and covers the same range in total");
         }
     }
+    // ---- 14. QA-EqFlagship Task 1: the 96-band pool (W-15)
+    std::printf ("%s", "\n  14. the 96-band pool\n");
+    {
+        check (kbs::ParametricEq::kMaxBands == 96, "the pool holds 96 bands",
+               (double) kbs::ParametricEq::kMaxBands, 96.0);
+
+        // Home frequencies: the named eight, then strictly rising log-spaced
+        // homes that stay inside the audible span for every band in the pool.
+        bool rising = true;
+        for (int b = 9; b < kbs::kEqMaxBands && rising; ++b)
+            rising = kbs::eqDefaultFreq (b) > kbs::eqDefaultFreq (b - 1);
+        check (rising, "home frequencies rise monotonically past band 8", 1.0, 1.0);
+        check (kbs::eqDefaultFreq (8) > 20.0f
+               && kbs::eqDefaultFreq (95) < 20000.0f,
+               "and every home stays inside 20 Hz - 20 kHz",
+               (double) kbs::eqDefaultFreq (95), 14000.0);
+
+        // The last band is a real band: set it, hear it, query it.
+        kbs::ParametricEq eq;
+        eq.prepare (48000.0, 512);
+        kbs::EqBandParams b95;
+        b95.on = true; b95.type = kbs::EqType::bell;
+        b95.freqHz = 1000.0f; b95.gainDb = 6.0f; b95.q = 1.0f;
+        eq.setBand (95, b95);
+        near (20.0 * std::log10 (eq.bandMagnitudeAt (95, 1000.0f)), 6.0, 0.3,
+              "band 96 boosts like any other band");
+
+        // 95 idle bands beside it change nothing: the summed curve equals the
+        // one live band's own curve.
+        near (20.0 * std::log10 (eq.magnitudeAt (1000.0f)),
+              20.0 * std::log10 (eq.bandMagnitudeAt (95, 1000.0f)), 0.01,
+              "95 idle bands contribute exactly nothing");
+    }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;
 }

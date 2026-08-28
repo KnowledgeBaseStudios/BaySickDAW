@@ -910,6 +910,12 @@ add_custom_command(TARGET BaySickPluginHost POST_BUILD
 # do_build.bat's gate (EXCLUDE_FROM_ALL): built + run on demand via
 # run_eq_tests.bat, exit code 0 = every measured claim held.
 add_executable(BaySickEqTests Tools/EqTests/main.cpp)
+# The harness stacks ~22 engine locals in one main() and a 96-band engine is
+# ~100KB, so the default 1MB stack dies at the prologue probe.  The PRODUCTS
+# heap-allocate every engine; only the test needs the headroom.
+if(MSVC)
+  target_link_options(BaySickEqTests PRIVATE "/STACK:8388608")
+endif()
 set_target_properties(BaySickEqTests PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON

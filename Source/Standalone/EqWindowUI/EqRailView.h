@@ -225,7 +225,14 @@ public:
     }
 };
 
-// ── the chip row (24 chips, "+", and the A/B control per SC-16) ────────────
+// ── the chip row: pages of 24 chips, "+", and the A/B control ──────────────
+//
+// QA-EqFlagship W-15: the pool is 96 bands, shown 24 at a time.  Pages are
+// cycled by the two arrows at the row's left; a page only EXISTS once there
+// is a reason for it (the previous page filled, or a band already lives on
+// it), so a beginner sees exactly the 24-chip row QA-EqPro shipped and the
+// arrows never appear.  Pages are numbered - never lettered, "A/B" already
+// means the setup pill on this same row.
 class BandChipRow : public juce::Component,
                     public juce::TooltipClient,
                     private juce::Timer
@@ -246,14 +253,35 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        const int lastPage = lastVisiblePage();
+        page = juce::jlimit (0, lastPage, page);
         const float w = chipWidth();
+        const float x0 = chipX0();
 
-        for (int b = 0; b < EqGraphView::kBands; ++b)
+        if (lastPage > 0)
         {
+            auto arrow = [&] (juce::Rectangle<float> r, bool up, bool usable)
+            {
+                juce::Path t;
+                const float cx = r.getCentreX(), cy = r.getCentreY();
+                if (up) t.addTriangle (cx - 4.0f, cy + 2.5f, cx + 4.0f, cy + 2.5f, cx, cy - 3.0f);
+                else    t.addTriangle (cx - 4.0f, cy - 2.5f, cx + 4.0f, cy - 2.5f, cx, cy + 3.0f);
+                g.setColour (usable ? VC::Text.withAlpha (0.75f)
+                                    : VC::Surface.darker (0.1f));
+                g.fillPath (t);
+            };
+            arrow (arrowUpArea(),   true,  page > 0);
+            arrow (arrowDownArea(), false, page < lastPage);
+        }
+
+        for (int i = 0; i < kPageSize; ++i)
+        {
+            const int b = page * kPageSize + i;
+            if (b >= EqGraphView::kBands) break;
             const auto p = graph.bandParams (b);
             // The side inset shrinks with the chip: at a narrow window those
             // 2px each side are the difference between "24" fitting and not.
-            auto cell = juce::Rectangle<float> (b * w, 0.0f, w, (float) getHeight())
+            auto cell = juce::Rectangle<float> (x0 + i * w, 0.0f, w, (float) getHeight())
                             .reduced (juce::jmin (2.0f, w * 0.12f), 4.0f);
 
             auto col = graph.bandColour (b);
@@ -344,10 +372,37 @@ public:
             return;
         }
 
+        if (lastVisiblePage() > 0)
+        {
+            if (arrowUpArea().contains (e.position))
+            { page = juce::jmax (0, page - 1); repaint(); return; }
+            if (arrowDownArea().contains (e.position))
+            { page = juce::jmin (lastVisiblePage(), page + 1); repaint(); return; }
+        }
+
         if (addArea().contains (e.position))
         {
+            // W-15: "+" fills the page you are LOOKING at first, then the
+            // pool - and the row follows the band it just made.
             if (! e.mods.isPopupMenu())
-                graph.addBandAt ({ graph.freqToX (1000.0), graph.gainToY (0.0f) });
+            {
+                int f = -1;
+                for (int i = 0; i < kPageSize && f < 0; ++i)
+                {
+                    const int b = page * kPageSize + i;
+                    if (b < EqGraphView::kBands && ! graph.bandParams (b).on) f = b;
+                }
+                if (f < 0)
+                    for (int b = 0; b < EqGraphView::kBands && f < 0; ++b)
+                        if (! graph.bandParams (b).on) f = b;
+                if (f >= 0)
+                {
+                    graph.enableBand (f);
+                    graph.selectBand (f);
+                    page = f / kPageSize;
+                    repaint();
+                }
+            }
             return;
         }
 
@@ -389,6 +444,10 @@ public:
             return "A/B compare: click swaps the two setups, right-click "
                    "copies or locks them.";
         if (addArea().contains (hoverAt)) return "Add a band";
+        if (lastVisiblePage() > 0
+            && (arrowUpArea().contains (hoverAt) || arrowDownArea().contains (hoverAt)))
+            return "Band pages: 24 chips at a time. A new page appears when "
+                   "this one fills.";
         const int b = chipAt (hoverAt);
         if (b < 0) return {};
         if (! graph.bandParams (b).on)
@@ -400,16 +459,55 @@ public:
 
 private:
     static constexpr int kRightControls = 54;   // "+" plus the A/B pill
+    static constexpr int kPageSize = 24;
+    static constexpr int kArrowW = 14;
+
+    // The last page a user can reach: the highest page holding an ON band,
+    // plus one more once that page is FULL - so there is always somewhere to
+    // grow, and never an empty page to wander into.
+    int lastVisiblePage() const
+    {
+        const int maxPage = (EqGraphView::kBands + kPageSize - 1) / kPageSize - 1;
+        int last = 0;
+        for (int b = 0; b < EqGraphView::kBands; ++b)
+            if (graph.bandParams (b).on) last = juce::jmax (last, b / kPageSize);
+        if (last < maxPage)
+        {
+            bool full = true;
+            for (int i = 0; i < kPageSize && full; ++i)
+                full = graph.bandParams (last * kPageSize + i).on;
+            if (full) ++last;
+        }
+        return last;
+    }
+
+    float chipX0() const
+    {
+        return lastVisiblePage() > 0 ? (float) kArrowW : 0.0f;
+    }
+
+    juce::Rectangle<float> arrowUpArea() const
+    {
+        return { 0.0f, 0.0f, (float) kArrowW, getHeight() * 0.5f };
+    }
+
+    juce::Rectangle<float> arrowDownArea() const
+    {
+        return { 0.0f, getHeight() * 0.5f, (float) kArrowW, getHeight() * 0.5f };
+    }
 
     int chipAt (juce::Point<float> pos) const
     {
-        const int b = (int) (pos.x / chipWidth());
-        return b >= 0 && b < EqGraphView::kBands ? b : -1;
+        if (pos.x < chipX0()) return -1;
+        const int i = (int) ((pos.x - chipX0()) / chipWidth());
+        const int b = page * kPageSize + i;
+        return i >= 0 && i < kPageSize && b < EqGraphView::kBands ? b : -1;
     }
 
     float chipWidth() const
     {
-        return (float) (getWidth() - kRightControls) / (float) EqGraphView::kBands;
+        return (float) (getWidth() - kRightControls - (int) chipX0())
+             / (float) kPageSize;
     }
 
     juce::Rectangle<float> addArea() const
@@ -422,9 +520,17 @@ private:
         return { (float) getWidth() - 26.0f, 4.0f, 24.0f, (float) getHeight() - 8.0f };
     }
 
-    void timerCallback() override { repaint(); }
+    void timerCallback() override
+    {
+        const int sel = graph.selectedBand();
+        if (sel >= 0 && sel != lastSelected)
+            page = sel / kPageSize;
+        lastSelected = sel;
+        repaint();
+    }
 
     EqGraphView& graph;
+    int page = 0, lastSelected = -1;
     juce::Point<float> hoverAt;
     juce::SharedResourcePointer<fontaudio::IconHelper> icons;
 };
