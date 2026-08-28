@@ -55,6 +55,9 @@ void StripEq::pushBand (int i, const kbs::EqBandParams& p)
         && c.rangeBDb == p.rangeBDb && c.onsetMix == p.onsetMix
         && c.spectral == p.spectral && c.density == p.density
         && c.satAmt == p.satAmt
+        && c.lfoRateHz == p.lfoRateHz && c.lfoDepth == p.lfoDepth
+        && c.lfoTarget == p.lfoTarget && c.envDepth == p.envDepth
+        && c.envTarget == p.envTarget
         && c.rangeDb == p.rangeDb && c.scExternal == p.scExternal
         && c.scSource == p.scSource;
     if (same) return;
@@ -215,6 +218,11 @@ juce::ValueTree StripEq::bandToTree (int index, const kbs::EqBandParams& p)
     t.setProperty ("spectral", p.spectral,          nullptr);
     t.setProperty ("density",  p.density,           nullptr);
     t.setProperty ("sat",      p.satAmt,            nullptr);
+    t.setProperty ("lfoRate",  p.lfoRateHz,         nullptr);
+    t.setProperty ("lfoDepth", p.lfoDepth,          nullptr);
+    t.setProperty ("lfoTgt",   p.lfoTarget,         nullptr);
+    t.setProperty ("envDepth", p.envDepth,          nullptr);
+    t.setProperty ("envTgt",   p.envTarget,         nullptr);
     return t;
 }
 
@@ -243,6 +251,11 @@ void StripEq::bandFromTree (const juce::XmlElement& e, kbs::EqBandParams& p)
     p.spectral    = e.getBoolAttribute   ("spectral", p.spectral);
     p.density     = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("density", p.density));
     p.satAmt      = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("sat", p.satAmt));
+    p.lfoRateHz   = juce::jlimit (0.02f, 20.0f, (float) e.getDoubleAttribute ("lfoRate", p.lfoRateHz));
+    p.lfoDepth    = juce::jlimit (0.0f, 1.0f, (float) e.getDoubleAttribute ("lfoDepth", p.lfoDepth));
+    p.lfoTarget   = juce::jlimit (0, 2, e.getIntAttribute ("lfoTgt", p.lfoTarget));
+    p.envDepth    = juce::jlimit (-1.0f, 1.0f, (float) e.getDoubleAttribute ("envDepth", p.envDepth));
+    p.envTarget   = juce::jlimit (0, 2, e.getIntAttribute ("envTgt", p.envTarget));
     p.releaseMs   = (float) e.getDoubleAttribute ("rel",   p.releaseMs);
     p.autoRelease = e.getBoolAttribute   ("relAuto",  p.autoRelease);
     p.rangeDb     = (float) e.getDoubleAttribute ("range", p.rangeDb);

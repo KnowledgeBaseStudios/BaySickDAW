@@ -892,7 +892,8 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
     m.addItem (111, "Proportional Q", true, boolParam ("propq"));
     m.addSeparator();
 
-    // W-3: the color stage.  Names are working drafts pending Jeff's pick.
+    // W-3: the color stage.  Names per Jeff (sub-spec 1, 2026-08-27):
+    // Smooth / Warm / Changed - Changed colors only what the EQ altered.
     {
         juce::PopupMenu ch;
         int chMode = 0;
@@ -900,9 +901,9 @@ void EffectEqWindow::showOptionsMenu (juce::Component* anchor)
         if (auto* p2 = mProc.apvts.getRawParameterValue (gid ("charmode"))) chMode = (int) p2->load();
         if (auto* p2 = mProc.apvts.getRawParameterValue (gid ("charamt")))  chAmt = p2->load();
         ch.addItem (180, "None", true, chMode == 0);
-        ch.addItem (181, "Color A", true, chMode == 1);
-        ch.addItem (182, "Color B", true, chMode == 2);
-        ch.addItem (183, "Difference", true, chMode == 3);
+        ch.addItem (181, "Smooth", true, chMode == 1);
+        ch.addItem (182, "Warm", true, chMode == 2);
+        ch.addItem (183, "Changed", true, chMode == 3);
         ch.addSeparator();
         const float amounts2[] = { 0.25f, 0.5f, 0.75f, 1.0f };
         for (int i = 0; i < 4; ++i)

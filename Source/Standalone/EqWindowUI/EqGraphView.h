@@ -322,28 +322,30 @@ public:
     // show.  They stay live per pixel, and there are rarely more than one.
     struct CurveKey
     {
-        bool on = false, muted = false, dyn = false;
+        bool on = false, muted = false, dyn = false, modOn = false;
         int type = -1;
         float slope = -1.0f, f = 0.0f, g = 0.0f, q = 0.0f;
 
         bool operator== (const CurveKey& o) const noexcept
         {
             return on == o.on && muted == o.muted && dyn == o.dyn
-                && type == o.type && slope == o.slope
+                && modOn == o.modOn && type == o.type && slope == o.slope
                 && f == o.f && g == o.g && q == o.q;
         }
     };
 
     static CurveKey keyOf (const kbs::EqBandParams& p)
     {
-        return { p.on, p.muted, p.dynamic, (int) p.type, p.slope,
-                 p.freqHz, p.gainDb, p.q };
+        return { p.on, p.muted, p.dynamic,
+                 p.lfoDepth > 0.001f || std::abs (p.envDepth) > 0.001f,
+                 (int) p.type, p.slope, p.freqHz, p.gainDb, p.q };
     }
 
     bool bandIsLive (int b) const
     {
         if (b < 0 || b >= kBands) return false;
         const auto& k = curveKey[(size_t) b];
+        if (k.modOn) return true;
         return k.dyn && kbs::eqTypeSupportsDynamic ((kbs::EqType) k.type);
     }
 
@@ -865,6 +867,9 @@ public:
             { "thrb", "ThresholdB" }, { "ratb", "RatioB" },
             { "rngb", "RangeB" }, { "onset", "Onset" },
             { "spec", "Spectral" }, { "dens", "Density" }, { "sat", "Sat" },
+            { "lforate", "LfoRate" }, { "lfodepth", "LfoDepth" },
+            { "lfotgt", "LfoTarget" }, { "envdepth", "EnvDepth" },
+            { "envtgt", "EnvTarget" },
         };
         for (const auto& e : map)
             if (std::strcmp (e.f, field) == 0) return e.s;

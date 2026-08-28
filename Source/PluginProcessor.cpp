@@ -5603,6 +5603,11 @@ void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int ban
         bp.spectral    = get (eqSlotSpectral) > 0.5f;
         bp.density     = juce::jlimit (0.0f, 1.0f, get (eqSlotDensity));
         bp.satAmt      = juce::jlimit (0.0f, 1.0f, get (eqSlotSat));
+        bp.lfoRateHz   = juce::jlimit (0.02f, 20.0f, get (eqSlotLfoRate));
+        bp.lfoDepth    = juce::jlimit (0.0f, 1.0f, get (eqSlotLfoDepth));
+        bp.lfoTarget   = juce::jlimit (0, 2, (int) get (eqSlotLfoTarget));
+        bp.envDepth    = juce::jlimit (-1.0f, 1.0f, get (eqSlotEnvDepth));
+        bp.envTarget   = juce::jlimit (0, 2, (int) get (eqSlotEnvTarget));
         eq->pushBand (b, bp);
     }
 
@@ -7611,7 +7616,7 @@ namespace EqBandIds
         "Mute", "Isolate", "Dynamic", "Threshold", "Ratio", "Attack",
         "Release", "AutoRelease", "Range", "ScSource", "Phase",
         "ThresholdB", "RatioB", "RangeB", "Onset", "Spectral", "Density",
-        "Sat"
+        "Sat", "LfoRate", "LfoDepth", "LfoTarget", "EnvDepth", "EnvTarget"
     };
     // Index order must match BaySickDAWProcessor::EqBankGlobalSlot.  Mode and
     // os ride the same spelling family but never enter the sweep cache
@@ -7675,6 +7680,11 @@ namespace
         dynB (apvts, ids, bp + "Spectral",    labelBase + "Spectral",    false);
         dynF (apvts, ids, bp + "Density",     labelBase + "Density",     0.f, 1.f, 0.5f);
         dynF (apvts, ids, bp + "Sat",         labelBase + "Sat",         0.f, 1.f, 0.f);
+        dynF (apvts, ids, bp + "LfoRate",     labelBase + "LFO Rate",    0.02f, 20.f, 2.f);
+        dynF (apvts, ids, bp + "LfoDepth",    labelBase + "LFO Depth",   0.f, 1.f, 0.f);
+        dynI (apvts, ids, bp + "LfoTarget",   labelBase + "LFO Target",  0, 2, 0);
+        dynF (apvts, ids, bp + "EnvDepth",    labelBase + "Env Depth",   -1.f, 1.f, 0.f);
+        dynI (apvts, ids, bp + "EnvTarget",   labelBase + "Env Target",  0, 2, 1);
     }
 
     void registerEqBankGlobals (juce::AudioProcessorValueTreeState& apvts, juce::StringArray& ids,

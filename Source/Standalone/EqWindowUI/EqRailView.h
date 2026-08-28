@@ -726,7 +726,9 @@ public:
         const std::pair<juce::Slider*, const char*> dynGestures[] = {
             { &thrK, "thr" }, { &ratK, "ratio" }, { &atkK, "atk" }, { &relK, "rel" },
             { &thrBK, "thrb" }, { &ratBK, "ratb" }, { &rngBK, "rngb" },
-            { &onsK, "onset" }, { &denK, "dens" } };
+            { &onsK, "onset" }, { &denK, "dens" },
+            { &lfoRateK, "lforate" }, { &lfoDepthK, "lfodepth" },
+            { &envDepthK, "envdepth" } };
         for (const auto& kf : dynGestures)
             gestureOnDragStart (*kf.first, kf.second);
         initDynKnob (thrK, "thr", -60.0, 0.0, 0.0,
@@ -761,6 +763,33 @@ public:
         onsK.setDoubleClickReturnValue (true, 0.0);
 
         // W-1: how surgical a SPECTRAL band is about which bins it moves.
+        // W-13: the modulator pair.  Lives outside the dynamics gate -
+        // a static bell can wobble too.
+        initDynKnob (lfoRateK, "lforate", 0.02, 20.0, 0.3, "LFO speed");
+        lfoRateK.setDoubleClickReturnValue (true, 2.0);
+        initDynKnob (lfoDepthK, "lfodepth", 0.0, 1.0, 0.0,
+                     "How far the LFO swings this band. Zero = off.");
+        lfoDepthK.setDoubleClickReturnValue (true, 0.0);
+        initDynKnob (envDepthK, "envdepth", -1.0, 1.0, 0.0,
+                     "The band follows its own level: up rides with the "
+                     "material, down ducks against it. Zero = off.");
+        envDepthK.setDoubleClickReturnValue (true, 0.0);
+
+        lfoTgt.segs = {
+            { {}, "F", "LFO moves the frequency" },
+            { {}, "G", "LFO moves the gain" },
+            { {}, "Q", "LFO moves the width" },
+        };
+        wireSegment (lfoTgt, "lfotgt");
+        addAndMakeVisible (lfoTgt);
+        envTgt.segs = {
+            { {}, "F", "Envelope moves the frequency" },
+            { {}, "G", "Envelope moves the gain" },
+            { {}, "Q", "Envelope moves the width" },
+        };
+        wireSegment (envTgt, "envtgt");
+        addAndMakeVisible (envTgt);
+
         initDynKnob (denK, "dens", 0.0, 1.0, 0.0,
                      "Spectral density: left, only real spikes over their "
                      "neighborhood register; right, individual resonances "
@@ -879,6 +908,9 @@ public:
         caption (rngBK, "RNG-B");
         caption (onsK, "ONSET");
         caption (denK, "DENSE");
+        caption (lfoRateK, "RATE");
+        caption (lfoDepthK, "LFO");
+        caption (envDepthK, "ENV");
 
         auto readout = [&] (juce::Slider& k, const juce::String& text)
         {
@@ -907,6 +939,10 @@ public:
                                 + juce::String (p.rangeBDb, 0));
             readout (onsK, juce::String ((int) std::round (p.onsetMix * 100)) + "%");
             readout (denK, juce::String ((int) std::round (p.density * 100)) + "%");
+            readout (lfoRateK, juce::String (p.lfoRateHz, p.lfoRateHz < 1.0f ? 2 : 1));
+            readout (lfoDepthK, juce::String ((int) std::round (p.lfoDepth * 100)) + "%");
+            readout (envDepthK, (p.envDepth > 0 ? "+" : "")
+                                + juce::String ((int) std::round (p.envDepth * 100)) + "%");
         }
     }
 
@@ -973,7 +1009,10 @@ private:
             const int b = graph.selectedBand();
             if (b < 0) return 0;
             const auto p = graph.bandParams (b);
-            return std::strcmp (field, "type") == 0 ? (int) p.type : (int) p.slope;
+            if (std::strcmp (field, "type") == 0) return (int) p.type;
+            if (std::strcmp (field, "lfotgt") == 0) return p.lfoTarget;
+            if (std::strcmp (field, "envtgt") == 0) return p.envTarget;
+            return (int) p.slope;
         };
         row.set = [this, field] (int v)
         {
@@ -1004,7 +1043,7 @@ private:
         // disagree is how a layout starts reserving space for nothing.
         const bool showDynRow  = dynT.isVisible();
         const bool showDynBody = direction.isVisible();
-        const int need = 233 + (showDynRow  ? 12 + 16 : 0)
+        const int need = 233 + 152 + (showDynRow  ? 12 + 16 : 0)
                              + (showDynBody ? 4 + 16 + 4 + 200 : 0);
 
         mMaxScroll = juce::jmax (0, need - full.getHeight());
@@ -1071,6 +1110,18 @@ private:
         body.removeFromTop (20);
         auto k5 = body.removeFromTop (30);
         denK.setBounds (k5.removeFromLeft (kw).reduced (8, 0));
+        r.removeFromTop (12);
+        auto m1 = r.removeFromTop (30);
+        const int mw = m1.getWidth() / 2;
+        lfoRateK.setBounds (m1.removeFromLeft (mw).reduced (8, 0));
+        lfoDepthK.setBounds (m1.reduced (8, 0));
+        r.removeFromTop (20);
+        lfoTgt.setBounds (r.removeFromTop (16));
+        r.removeFromTop (6);
+        auto m2 = r.removeFromTop (30);
+        envDepthK.setBounds (m2.removeFromLeft (mw).reduced (8, 0));
+        r.removeFromTop (20);
+        envTgt.setBounds (r.removeFromTop (16));
     }
 
     void syncFromParams()
@@ -1105,6 +1156,9 @@ private:
             rngBK.setComponentID (graph.paramId (b, "rngb"));
             onsK.setComponentID (graph.paramId (b, "onset"));
             denK.setComponentID (graph.paramId (b, "dens"));
+            lfoRateK.setComponentID (graph.paramId (b, "lforate"));
+            lfoDepthK.setComponentID (graph.paramId (b, "lfodepth"));
+            envDepthK.setComponentID (graph.paramId (b, "envdepth"));
         }
 
         gain.setVisible (show && kbs::eqTypeHasGain (p.type));
@@ -1131,6 +1185,10 @@ private:
         for (auto* k : { &thrK, &ratK, &atkK, &relK, &thrBK, &ratBK, &rngBK, &onsK })
             k->setVisible (dyn);
         denK.setVisible (dyn && p.spectral);
+        for (auto* k : { &lfoRateK, &lfoDepthK, &envDepthK })
+            k->setVisible (show);
+        lfoTgt.setVisible (show);
+        envTgt.setVisible (show);
         relK.setVisible (dyn && ! p.autoRelease);
         direction.setVisible (dyn);
 
@@ -1182,6 +1240,8 @@ private:
     EqGraphView& graph;
 
     juce::Slider gain, pan, thrK, ratK, atkK, relK, thrBK, ratBK, rngBK, onsK, denK;
+    juce::Slider lfoRateK, lfoDepthK, envDepthK;
+    SegmentRow lfoTgt, envTgt;
     SegmentRow direction;
     DragNumber freq, q;
     SegmentRow type, chan;

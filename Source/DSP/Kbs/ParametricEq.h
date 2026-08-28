@@ -173,6 +173,19 @@ struct EqBandParams
     // back in.  0 = untouched.
     float satAmt = 0.0f;
 
+    // W-13: per-band modulators - one LFO and one envelope follower, each
+    // aimable at freq, gain or Q.  IIR modes only: modulating the static
+    // curve in a linear mode would mean a full FIR redesign per control
+    // tick, so there the pair is inert (same class of rule as all-pass).
+    // Depth semantics: freq swings +-half an octave, gain +-6 dB, Q one
+    // octave of width, all times depth.  Envelope depth is SIGNED - up
+    // follows the material, down ducks against it.
+    float lfoRateHz = 2.0f;               // 0.02..20
+    float lfoDepth = 0.0f;                // 0..1, 0 = off
+    int   lfoTarget = 0;                  // 0 freq, 1 gain, 2 Q
+    float envDepth = 0.0f;                // -1..1, 0 = off
+    int   envTarget = 1;                  // 0 freq, 1 gain, 2 Q
+
     // W-1: spectral dynamics.  In a linear mode a spectral band watches the
     // individual bins inside its footprint and moves only the ones that
     // stand out from their own spectral neighborhood; outside the linear
@@ -899,6 +912,9 @@ private:
         float envFastL = 0.0f, envFastR = 0.0f;   // onset detection pair
         float envSlowL = 0.0f, envSlowR = 0.0f;
         Biquad satFL, satFR;                      // W-14 band-scoped slice
+        float lfoPhase = 0.0f;                    // W-13 modulator state
+        float modEnv = 0.0f;
+        float modFreqMul = 1.0f, modGainAdd = 0.0f, modQMul = 1.0f;
         float grDb = 0.0f;          // target from the gain computer
         float grSmooth = 0.0f;      // what the filter actually carries
         float overSec = 0.0f;       // how long the signal has been over - auto release
@@ -1362,15 +1378,61 @@ private:
             {
                 if (! bandActive (b)) continue;
 
+                // W-13: the modulators run at this same control tick and
+                // fold into the glide TARGETS, so the glide smoother is the
+                // one anti-zipper stage for knobs and modulators alike.
+                const bool modActive = ! dynamicDeltaOnly
+                    && (b.p.lfoDepth > 0.001f || std::abs (b.p.envDepth) > 0.001f);
+                if (modActive)
+                {
+                    float lfoV = 0.0f, envV = 0.0f;
+                    if (b.p.lfoDepth > 0.001f)
+                    {
+                        b.lfoPhase += (float) (2.0 * kPi) * b.p.lfoRateHz
+                                    * (float) kDynChunk / (float) sr;
+                        if (b.lfoPhase > (float) (2.0 * kPi))
+                            b.lfoPhase -= (float) (2.0 * kPi);
+                        lfoV = std::sin (b.lfoPhase) * b.p.lfoDepth;
+                    }
+                    if (std::abs (b.p.envDepth) > 0.001f)
+                    {
+                        float acc = 0.0f;
+                        const int lim = std::min (hostTo, (int) detL.size());
+                        for (int i2 = hostFrom; i2 < lim; ++i2)
+                            acc += std::abs (detL[(size_t) i2]) + std::abs (detR[(size_t) i2]);
+                        const float mean = acc / (2.0f * (float) std::max (1, lim - hostFrom));
+                        const float aM = std::exp (-(float) kDynChunk / (0.030f * (float) sr));
+                        b.modEnv = aM * b.modEnv + (1.0f - aM) * mean;
+                        envV = (b.modEnv / (b.modEnv + 0.05f)) * b.p.envDepth;
+                    }
+                    const float toF = b.p.lfoTarget == 0 ? lfoV : 0.0f;
+                    const float toG = b.p.lfoTarget == 1 ? lfoV : 0.0f;
+                    const float toQ = b.p.lfoTarget == 2 ? lfoV : 0.0f;
+                    const float teF = b.p.envTarget == 0 ? envV : 0.0f;
+                    const float teG = b.p.envTarget == 1 ? envV : 0.0f;
+                    const float teQ = b.p.envTarget == 2 ? envV : 0.0f;
+                    b.modFreqMul = std::pow (2.0f, 0.5f * (toF + teF));
+                    b.modGainAdd = 6.0f * (toG + teG);
+                    b.modQMul    = std::pow (2.0f, toQ + teQ);
+                }
+                else
+                {
+                    b.modFreqMul = 1.0f; b.modGainAdd = 0.0f; b.modQMul = 1.0f;
+                }
+
+                const float tgtF = b.p.freqHz * b.modFreqMul;
+                const float tgtG = b.p.gainDb + b.modGainAdd;
+                const float tgtQ = std::clamp (b.p.q * b.modQMul, 0.1f, 30.0f);
+
                 bool moved = false;
-                const bool gliding = std::abs (b.cFreq - b.p.freqHz) > 1.0e-3f * b.p.freqHz
-                                  || std::abs (b.cGain - b.p.gainDb) > 1.0e-3f
-                                  || std::abs (b.cQ - b.p.q) > 1.0e-4f;
+                const bool gliding = std::abs (b.cFreq - tgtF) > 1.0e-3f * tgtF
+                                  || std::abs (b.cGain - tgtG) > 1.0e-3f
+                                  || std::abs (b.cQ - tgtQ) > 1.0e-4f;
                 if (gliding)
                 {
-                    b.cFreq += (b.p.freqHz - b.cFreq) * aGlide;
-                    b.cGain += (b.p.gainDb - b.cGain) * aGlide;
-                    b.cQ    += (b.p.q      - b.cQ)    * aGlide;
+                    b.cFreq += (tgtF - b.cFreq) * aGlide;
+                    b.cGain += (tgtG - b.cGain) * aGlide;
+                    b.cQ    += (tgtQ - b.cQ)    * aGlide;
                     moved = true;
                 }
 
@@ -1546,13 +1608,17 @@ private:
         // move with the PAN knob. A curve that bent when you panned was
         // indistinguishable from dynamics doing it (test pass six).
         (void) channel;
-        float g = p.gainDb;
+        const bool modLive = withDynamic && ! eqModeIsLinear (mode)
+            && (p.lfoDepth > 0.001f || std::abs (p.envDepth) > 0.001f);
+        float g = modLive ? b.cGain : p.gainDb;
         if (withDynamic && p.dynamic && eqTypeSupportsDynamic (p.type)
             && ! (p.spectral && eqModeIsLinear (mode)))
             g += b.grSmooth;
 
         BiquadCoeffs cs[2];
-        const int n = designBiquads (p, designSr, g, cs);
+        const int n = modLive
+            ? designBiquads (p, designSr, g, cs, b.cFreq, b.cQ)
+            : designBiquads (p, designSr, g, cs);
         double mag = 1.0, ph = 0.0, mTot = 1.0;
         for (int i = 0; i < n; ++i)
         {

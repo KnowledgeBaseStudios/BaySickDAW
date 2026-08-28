@@ -206,3 +206,39 @@ that IS saturation; the level pin lives at the working 50% amount.
 EqTests section 19 (6 checks incl. off-is-bit-exact and the difference
 null) green; suite green; gate six zeros + four links (one suffix-table
 static_assert + one blob call fixed on the way - the assert did its job).
+
+## 2026-08-27 - Task 7 - per-band modulators (W-13)
+
+Every band grew an LFO (Rate 0.02-20 Hz, Depth, target F/G/Q) and an
+envelope follower (bipolar Depth -1..+1, target F/G/Q) - five new band
+params, 31 suffixes total. The modulators live in the control tick and
+FOLD INTO THE EXISTING GLIDE TARGETS (tgtF/tgtG/tgtQ): the LFO phase
+advances per kDynChunk, the env is chunk-mean |detector| smoothed 30 ms
+and normalized soft (env/(env+0.05)), and the offsets compose as
+freq x 2^(0.5 x sum), gain + 6 dB x sum, Q x 2^sum - so modulation rides
+the same coefficient-glide path dynamics already uses, no second
+smoothing system. modActive gates the whole block (zero depths = zero
+cost, and the zero-depth band is pinned bit-near its static self).
+
+SCOPE RULE stated in the header and enforced: modulators are
+IIR-MODES-ONLY. A linear-phase FIR is a periodically-rebuilt snapshot -
+an LFO wobbling the design target would rebuild the kernel at frame rate
+(a full FFT design per frame, for a wobble quantized to frame boundaries
+that no longer resembles an LFO). In linear/mixed modes the depths are
+inert and the band renders static; the graph's live-curve cache treats a
+modulating band as live (CurveKey.modOn) so the drawn curve breathes in
+IIR modes only.
+
+Rail: MOD block after the dyn body (RATE/LFO/ENV knobs + two F/G/Q
+segment rows for the targets), body 200 tall; automation lanes registered
+for all five per Jeff's sub-spec ruling 2a (full lanes, not menu-only).
+Sub-spec rulings applied this task: 1a color names shipped as
+None/Smooth/Warm/Changed ("Changed" per Jeff, not "Change Only") in the
+window Color submenu; 2a modulator lanes as above; 3c (plugin instance
+naming auto-number + renameable) recorded for Task 10. Blob + compare
+carry all five fields.
+
+EqTests section 20 (LFO measurably swings the band between half-cycle
+windows, negative env depth ducks the boost on hot vs quiet material,
+zero-depth bit-near static) green; suite green; gate six zeros + four
+links, clean first run.

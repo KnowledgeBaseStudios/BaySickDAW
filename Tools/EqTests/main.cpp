@@ -1545,6 +1545,103 @@ int main()
             check (h3c < -80.0, "zero sat is clean", h3c, -80.0);
         }
     }
+    // ---- 20. QA-EqFlagship Task 7: per-band modulators (W-13)
+    std::printf ("%s", "\n  20. per-band modulators\n");
+    {
+        const double srr = 48000.0;
+
+        auto windowGain = [] (kbs::ParametricEq& eq, double freq, double srr2,
+                              int settleBlocks, int measureBlocks)
+        {
+            const int block = 256;
+            std::vector<float> L (block), R (block), tail;
+            double phase = 0.0;
+            for (int bl = 0; bl < settleBlocks + measureBlocks; ++bl)
+            {
+                for (int i = 0; i < block; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * freq / srr2;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), block);
+                if (bl >= settleBlocks) tail.insert (tail.end(), L.begin(), L.end());
+            }
+            const double period = srr2 / freq;
+            const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+            tail.resize (std::max<size_t> (whole, (size_t) period));
+            return 20.0 * std::log10 (levelAt (tail, freq, srr2, 0) / 0.1);
+        };
+
+        // A slow LFO on gain makes the band's measured gain differ between
+        // two short windows a half-cycle apart.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 6.0f; b.q = 1.0f;
+            b.lfoDepth = 1.0f; b.lfoRateHz = 1.0f; b.lfoTarget = 1;   // gain
+            eq.setBand (0, b);
+            // 1 Hz: half a cycle is ~94 blocks.  Two ~10-block windows.
+            const double w1 = windowGain (eq, 1000.0, srr, 20, 10);
+            const double w2 = windowGain (eq, 1000.0, srr, 84, 10);
+            check (std::abs (w1 - w2) > 2.0,
+                   "a gain LFO audibly swings the band between windows",
+                   std::abs (w1 - w2), 2.0);
+        }
+
+        // The envelope follower ducks against loud material (negative depth
+        // on gain): a hot tone measures LESS boost than a quiet one.
+        {
+            kbs::ParametricEq loud, quiet;
+            loud.prepare (srr, 256);
+            quiet.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 6.0f; b.q = 1.0f;
+            b.envDepth = -1.0f; b.envTarget = 1;
+            loud.setBand (0, b);
+            quiet.setBand (0, b);
+
+            auto run = [&] (kbs::ParametricEq& eq, double amp)
+            {
+                const int block = 256;
+                std::vector<float> L (block), R (block), tail;
+                double phase = 0.0;
+                for (int bl = 0; bl < 120; ++bl)
+                {
+                    for (int i = 0; i < block; ++i)
+                    {
+                        phase += 2.0 * kbs::kPi * 1000.0 / srr;
+                        L[(size_t) i] = R[(size_t) i] = (float) (amp * std::sin (phase));
+                    }
+                    eq.process (L.data(), R.data(), block);
+                    if (bl >= 80) tail.insert (tail.end(), L.begin(), L.end());
+                }
+                const double period = srr / 1000.0;
+                const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+                tail.resize (std::max<size_t> (whole, (size_t) period));
+                return 20.0 * std::log10 (levelAt (tail, 1000.0, srr, 0) / amp);
+            };
+            const double hot = run (loud, 0.5);
+            const double soft = run (quiet, 0.005);
+            check (soft - hot > 2.0,
+                   "negative env depth ducks the boost on hot material",
+                   soft - hot, 2.0);
+        }
+
+        // Zero depths = the plain static band, near-exactly.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::bell;
+            b.freqHz = 1000.0f; b.gainDb = 6.0f; b.q = 1.0f;
+            eq.setBand (0, b);
+            near (windowGain (eq, 1000.0, srr, 40, 40), 6.0, 0.15,
+                  "zero depths leave the band its plain static self");
+        }
+    }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;
 }
