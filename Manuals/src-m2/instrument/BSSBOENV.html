@@ -1,6 +1,6 @@
 <p>Press a piano key and the sound is not a flat block: it jumps out, settles,
 holds while your finger stays down, and rings away when you let go. An
-<b>envelope</b> is the tool that gives a synth note that same life story. It
+<b>envelope</b> is the tool that gives a synth note that same behavior. It
 is a shape - drawn by four controls - that the synth follows automatically on
 every single note you play. This panel has two of them: one shaping each
 note's <em>volume</em>, one shaping its <em>pitch</em>.</p>
@@ -13,7 +13,7 @@ one per stage of the note's life, read left to right:</p>
 <p><b>ATTACK</b> is how long the note takes to go from silence to full
 volume after you press the key. All the way down it is instant - the note
 starts with a click, like hitting a drum. Push it up and the note fades in
-instead, like a bowed violin or a wave rolling in; at the top it takes a
+instead, like a bowed violin; at the top it takes a
 couple of seconds to arrive. If your notes feel like they "pop" too hard,
 raise this a hair. If a bass feels mushy and late, lower it.</p>
 
@@ -42,12 +42,12 @@ short, sustain low, release short. <em>Pad</em> = attack up, sustain high,
 release long. <em>Organ</em> = everything instant, sustain full.
 <em>Percussion</em> = attack down, decay short, sustain zero. The bass
 version of this engine ships snappier than the synth on every stage,
-because basslines live and die on definition.</p>
+because basslines need tight definition.</p>
 
 <p id="BSSBOENV-2"><b>VEL</b> is short for velocity - how hard you hit the
 key (or how hard the note in the Piano Roll is set, its velocity bar). At
 zero, every note comes out equally loud no matter what. Turn it up and
-playing soft actually sounds soft, playing hard actually barks. This one
+playing soft sounds soft, playing hard sounds hard. This one
 knob is most of the difference between a part that sounds programmed and
 one that sounds played. If you write notes by mouse, pair it with the
 velocity lane at the bottom of the Piano Roll.</p>
@@ -58,7 +58,7 @@ velocity lane at the bottom of the Piano Roll.</p>
 at a different target: instead of shaping how LOUD the note is over its
 life, it shapes what PITCH the note is at. Each note starts off-pitch,
 travels to its true note along the attack, and can drift again on release.
-Why would anyone want that? Because tiny, fast pitch movement at the start
+Tiny, fast pitch movement at the start
 of a note is what "punch" is made of - drums do it naturally, and the
 classic synth kick or pluck fakes it with exactly this: a quick downward
 blip that lasts a few milliseconds.</p>

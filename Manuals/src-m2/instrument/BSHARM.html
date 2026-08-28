@@ -1,8 +1,7 @@
 <p>Harmless builds sound the opposite way from the other synth: instead of
 starting with a bright wave and filtering it down, it adds the sound up out
-of individual harmonics - the pure tones that stack to make any note. That
-lets it do things a filter never could, and it is why its panel has controls
-no other engine carries. Two sound layers - Part A and Part B - always play
+of individual harmonics - the pure tones that stack to make any note. Two
+sound layers - Part A and Part B - always play
 together, blended by one knob, and a modulation editor on the right can put
 almost any knob in motion on every note.</p>
 
@@ -21,7 +20,7 @@ hand off when they end.</p>
 <p id="BSHARM-2"><b>TREMOLO</b> is a volume wobble. <code>WAVE</code>
 picks the wobble's shape, <code>DEPTH</code> how deep the dips go,
 <code>SPEED</code> how fast, and <code>GAP</code> inserts silence between
-pulses - push GAP far enough and smooth tremolo becomes outright rhythmic
+pulses - push GAP far enough and smooth tremolo becomes rhythmic
 chopping.</p>
 
 <figure data-cluster="Routing|3">
@@ -37,8 +36,7 @@ whether loudness follows the envelope directly or its own path.</p>
 
 <p id="BSHARM-4"><b>VIBRATO / LEGATO.</b> Vibrato is a pitch wobble on
 held notes: <code>WAVE</code>, <code>DEPTH</code> and <code>SPEED</code>
-shape it, and <code>ENV</code> makes it fade in late the way a singer
-adds it - a note that starts still and starts to shimmer.
+shape it, and <code>ENV</code> makes it fade in late.
 <code>GLIDE</code> is slide time between notes, <code>LIMIT</code> caps
 how far a slide may travel, and <code>LEGATO</code> makes overlapped
 notes connect without restarting their envelopes.</p>
@@ -50,11 +48,11 @@ notes connect without restarting their envelopes.</p>
 pattern), <code>PAN</code> fans them across the stereo field,
 <code>PITCH</code> tunes them apart, <code>PHASE</code> offsets their
 wave cycles. The stack is gain-compensated - adding voices adds width and
-thickness, never loudness, so your mix balance survives.
+thickness, not loudness.
 <span id="BSHARM-26"></span><b>TYPE</b> picks how the copies disagree:
 <code>Pure</code> tidy offsets, <code>Random</code> scatter,
 <code>Drifting</code> slow wander, <code>Alt-only</code> alternating
-signs - from polished to loose.</p>
+signs.</p>
 
 <figure data-cluster="The two filters|6,7">
 
@@ -62,10 +60,10 @@ signs - from polished to loose.</p>
 2</b> - two complete tone-shapers in a row, each with a type picker, an
 <code>ENV</code> depth, frequency, <code>RES</code>onance, keyboard
 tracking (<code>KB</code>) and its own ATK/DEC/SUS/REL envelope. A filter
-holds back part of the sound's frequency range; two in series can do
-what one cannot - one darkening the whole sound while the other notches a
-moving hole in it is a classic Harmless texture. These envelopes are
-recalculated every sample, so even the fastest sweeps stay silky.</p>
+holds back part of the sound's frequency range; in series, one can
+darken the whole sound while the other notches a
+moving hole in it. These envelopes are
+recalculated every sample.</p>
 
 <figure data-cluster="The two parts|8,9,10,11">
 
@@ -83,9 +81,8 @@ selector above only changes what you are editing.</p>
 <code>VOICE B</code> set each part's level; <code>BROWN</code> adds
 brownian per-harmonic roughness; <code>F1 OFS</code> /
 <code>F2 OFS</code> offset each part differently into the two filters;
-<code>A MASK</code> / <code>B MASK</code> thin each part's harmonics -
-carving teeth out of the overtone stack, which no ordinary filter can
-do.</p>
+<code>A MASK</code> / <code>B MASK</code> thin each part's
+harmonics.</p>
 
 <figure data-cluster="Pitch|12">
 
@@ -114,7 +111,7 @@ strummed guitar - <code>DIR</code> up or down the chord,
 
 <p id="BSHARM-15"><b>FX - PLUCK / PHASER / EQ.</b> The built-in color
 block. <code>PLUCK</code> shortens every note toward a plucked decay
-(<code>BLU</code> switches its blur flavor). The phaser - a swirling
+(<code>BLU</code> switches its blur flavor). The phaser - a
 comb of moving notches - runs off <code>MIX</code>, <code>DEPTH</code>,
 <code>RATE</code>, <code>WIDTH</code>, <code>OFS</code> and
 <code>MASK</code>. <code>EQ</code> is the block's tone trim.</p>
@@ -130,12 +127,13 @@ attacks, randomized for organic variety.</p>
 
 <figure data-cluster="Blur and prism|17">
 
-<p id="BSHARM-17"><b>BLUR / PRISM</b> - the spectral tools, the ones that
-sound like nothing else in the app. <code>BLUR</code> and
-<code>TIME</code> smear the harmonics' energy in time, turning attacks
-into washes. <code>HARM</code> weights which harmonics smear.
+<p id="BSHARM-17"><b>BLUR / PRISM</b> - the spectral tools.
+<code>BLUR</code> and
+<code>TIME</code> smear the harmonics' energy in time.
+<code>HARM</code> weights which harmonics smear.
 <code>PRISM</code> slides the harmonics off their exact musical
-multiples - a little is shimmer, a lot is glassy clangor - and
+multiples - small amounts detune the partials slightly, large amounts
+turn the tone inharmonic - and
 <code>MODE</code> picks the algorithm's flavor.</p>
 
 <figure data-cluster="The mod pad and spectrogram|18,19">
@@ -144,8 +142,8 @@ multiples - a little is shimmer, a lot is glassy clangor - and
 <code>X</code> / <code>Y</code> / <code>Z</code> knobs beneath it: three
 free values you can play live, automate, or route anywhere via the mod
 editor. <span id="BSHARM-19"></span><b>SPECTROGRAM</b> draws the
-harmonics as they sound, live - watch BLUR smear them and the masks carve
-them in real time.</p>
+harmonics as they sound - the display updates live as BLUR and the
+masks change.</p>
 
 <figure data-cluster="The modulation editor|20,21,22,23,24,25">
 
@@ -155,8 +153,8 @@ the curve drives, and <span id="BSHARM-21"></span><b>the source
 picker</b> chooses what plays the curve: <code>Envelope</code> (each
 note's own timeline), <code>LFO</code> (a repeating wobble),
 <code>Velocity</code> / <code>Keyboard</code> (how hard / how high you
-play), or the pad's <code>Mod X/Y/Z</code>. Shortcut worth knowing:
-right-click any Harmless knob and <code>Modulate envelope...</code> jumps
+play), or the pad's <code>Mod X/Y/Z</code>.
+Right-click any Harmless knob and <code>Modulate envelope...</code> jumps
 this editor straight to it.</p>
 
 <p id="BSHARM-22"><b>The toolbar</b> - <code>ENV</code> /
