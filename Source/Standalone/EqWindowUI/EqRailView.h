@@ -618,8 +618,10 @@ public:
             { fontaudio::FilterNotch, {}, "Notch" },
             { fontaudio::FilterBandpass, {}, "Band Pass" },
             { {}, "T", "Tilt - low shelf up, high shelf down, one pivot" },
+            { {}, "AP", "All Pass - changes phase only, for aligning layered "
+                        "sounds. Zero-latency modes; linear phase flattens it." },
         };
-        type.columns = 4;              // 2 rows of 4: glyphs get real room
+        type.columns = 3;              // 3 rows of 3: nine types, real room
         wireSegment (type, "type");
         addAndMakeVisible (type);
 
@@ -648,19 +650,18 @@ public:
         };
         addAndMakeVisible (chan);
 
-        slope.addItemList ({ "6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct",
-                             "36 dB/oct", "48 dB/oct", "72 dB/oct", "96 dB/oct",
-                             "Brickwall" }, 1);
-        slope.setTooltip ("How steep the filter falls. Brickwall exists in "
-                          "the linear-phase modes.");
-        slope.onChange = [this]
-        {
-            if (syncing) return;
-            const int b = graph.selectedBand();
-            if (b < 0) return;
-            beginParamUndoGesture (graph.processor().apvts, graph.paramId (b, "slope"));
-            graph.setBandValue (b, "slope", (float) (slope.getSelectedId() - 1));
-        };
+        // W-6: slope is CONTINUOUS - drag any dB/oct, double-click to type
+        // one, and the very top is Brickwall.  The band menu keeps the nine
+        // classic detents.
+        wireNumber (slope, "slope", false, 0.5f,
+                    [] (float v)
+                    {
+                        if (kbs::eqSlopeIsBrickwall (v)) return juce::String ("Brick");
+                        return juce::String (v, v < 10.0f ? 1 : 0) + "/oct";
+                    });
+        slope.setTooltip ("How steep the filter falls - any dB per octave, "
+                          "drag or double-click to type. All the way up is "
+                          "Brickwall, which exists in the linear-phase modes.");
         addAndMakeVisible (slope);
 
         dynT.setButtonText ("DYN");
@@ -891,7 +892,8 @@ private:
             const int b = graph.selectedBand();
             if (b < 0) return 0.0f;
             const auto p = graph.bandParams (b);
-            return std::strcmp (field, "freq") == 0 ? p.freqHz : p.q;
+            return std::strcmp (field, "freq") == 0 ? p.freqHz
+                 : std::strcmp (field, "slope") == 0 ? p.slope : p.q;
         };
         d.set = [this, field] (float v)
         {
@@ -912,7 +914,7 @@ private:
             const int b = graph.selectedBand();
             if (b < 0) return 0;
             const auto p = graph.bandParams (b);
-            return std::strcmp (field, "type") == 0 ? (int) p.type : p.slope;
+            return std::strcmp (field, "type") == 0 ? (int) p.type : (int) p.slope;
         };
         row.set = [this, field] (int v)
         {
@@ -943,7 +945,7 @@ private:
         // disagree is how a layout starts reserving space for nothing.
         const bool showDynRow  = dynT.isVisible();
         const bool showDynBody = direction.isVisible();
-        const int need = 158 + (showDynRow  ? 12 + 16 : 0)
+        const int need = 181 + (showDynRow  ? 12 + 16 : 0)
                              + (showDynBody ? 4 + 16 + 4 + 100 : 0);
 
         mMaxScroll = juce::jmax (0, need - full.getHeight());
@@ -962,11 +964,11 @@ private:
         q.setBounds (row);
         r.removeFromTop (4);
 
-        type.setBounds (r.removeFromTop (34));
+        type.setBounds (r.removeFromTop (48));
         r.removeFromTop (3);
         chan.setBounds (r.removeFromTop (16));
         r.removeFromTop (3);
-        slope.setBounds (r.removeFromTop (17));
+        slope.setBounds (r.removeFromTop (26));
 
         if (showDynRow)
         {
@@ -1003,9 +1005,7 @@ private:
     {
         const int b = graph.selectedBand();
         if (b < 0) return;
-        syncing = true;
-        slope.setSelectedId (graph.bandParams (b).slope + 1, juce::dontSendNotification);
-        syncing = false;
+        slope.refresh();
     }
 
     void timerCallback() override
@@ -1102,7 +1102,7 @@ private:
     SegmentRow direction;
     DragNumber freq, q;
     SegmentRow type, chan;
-    juce::ComboBox slope;
+    DragNumber slope { "SLOPE" };
     juce::TextButton dynT, autoT, extT;
     GrMeter grMeter;
     int dynTop = 300;

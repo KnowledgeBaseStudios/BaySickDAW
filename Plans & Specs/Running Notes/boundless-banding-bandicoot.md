@@ -48,3 +48,35 @@ CMakeLists. New EqTests section 14 (5 checks): pool size, home-frequency
 monotonicity + audible-span bounds, band 96 boosts like any band, 95 idle
 bands contribute exactly nothing. Suite green; build gate six zeros + four
 link lines.
+
+## 2026-08-27 - Task 2 - all-pass + continuous slopes (W-6)
+
+EqType::allPass appended (unity magnitude by contract, RBJ second-order
+phase rotation at freq/Q; linear modes flatten phase so there it
+contributes nothing - stated in code, menu tooltip, and the rail seg).
+Slope is now CONTINUOUS dB/oct: EqBandParams.slope int index -> float
+(1..96, >=96.5 = Brickwall via kEqSlopeBrickwallDb); the old table survives
+only as the band menu's nine detents. Realization: linear modes evaluate
+the EXACT analytic fractional Butterworth (the FIR realizes the query, so
+any dB/oct is exact incl. below 6); IIR modes decompose into integer-order
+sections (existing machinery, user-Q at exactly 2 poles kept) plus a
+6-pair staggered pole/zero ladder for the fractional remainder, and BOTH
+the audio and the query build the same pairs statelessly - drawn == heard
+by construction, pinned by test. Band-pass rounds to whole constant-peak
+sections in the IIR (a partial section is not realizable) and gets exact
+fractional skirts in linear - recorded here as the honest W-6 delivery
+shape. Rail slope combo -> continuous SLOPE drag-number ("24/oct",
+"Brick" at top, double-click types); rail type grid 3x3 for nine types;
+graph menu detents write dB values.
+
+Findings: (1) pure-fractional bands (slope < 6: no poles, no SVFs) were
+silently skipped by the per-sample inclusion gate - heard 0 dB while the
+query drew a filter; gate extended to ladCount (caught by the new
+heard-equals-drawn check, which is exactly why that check exists).
+(2) The ladder's KNEE is softer than the analytic fractional (-3 dB at
+cutoff is not reachable with a pole ladder); ladder start tightened to a
+quarter spacing and the test pins the asymptotic region - the knee
+difference between IIR and linear modes for fractional slopes is real,
+each mode draws its own truth, noted for the docs. (3) One deduction
+error (wireSegment fallback) - trivial. EqTests section 15: 10 checks, all
+green; suite green; build gate six zeros + four links (second run).

@@ -39,7 +39,7 @@ inline kbs::EqBandParams shelf (float hz, float dB, bool high)
     return b;
 }
 
-inline kbs::EqBandParams hp (float hz, int slope = 3)
+inline kbs::EqBandParams hp (float hz, float slope = 24.0f)
 {
     kbs::EqBandParams b;
     b.on = true; b.type = kbs::EqType::highPass;

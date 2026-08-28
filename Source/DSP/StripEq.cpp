@@ -205,11 +205,12 @@ juce::ValueTree StripEq::bandToTree (int index, const kbs::EqBandParams& p)
 void StripEq::bandFromTree (const juce::XmlElement& e, kbs::EqBandParams& p)
 {
     p.on          = e.getBoolAttribute   ("on",       p.on);
-    p.type        = (kbs::EqType) juce::jlimit (0, 7, e.getIntAttribute ("type", (int) p.type));
+    p.type        = (kbs::EqType) juce::jlimit (0, 8, e.getIntAttribute ("type", (int) p.type));
     p.freqHz      = (float) e.getDoubleAttribute ("freq",  p.freqHz);
     p.gainDb      = (float) e.getDoubleAttribute ("gain",  p.gainDb);
     p.q           = (float) e.getDoubleAttribute ("q",     p.q);
-    p.slope       = juce::jlimit (0, kbs::kEqNumSlopes - 1, e.getIntAttribute ("slope", p.slope));
+    p.slope       = juce::jlimit (1.0f, kbs::kEqSlopeBrickwallDb,
+                                  (float) e.getDoubleAttribute ("slope", p.slope));
     p.channel     = (kbs::EqChannel) juce::jlimit (0, 4, e.getIntAttribute ("channel", (int) p.channel));
     p.placement   = juce::jlimit (-1.0f, 1.0f, (float) e.getDoubleAttribute ("place", p.placement));
     p.muted       = e.getBoolAttribute   ("muted",    p.muted);

@@ -55,15 +55,28 @@ namespace kbs {
 
 enum class EqType
 {
-    bell = 0, lowPass, highPass, lowShelf, highShelf, notch, bandPass, tilt
+    bell = 0, lowPass, highPass, lowShelf, highShelf, notch, bandPass, tilt,
+    // QA-EqFlagship W-6: unity magnitude, second-order phase rotation at
+    // freq/Q - the layer-alignment tool.  Linear-phase modes flatten phase
+    // by design, so there an all-pass deliberately contributes nothing.
+    allPass
 };
 
-// Slope is an index into this table, filters (LP / HP / BP) only. Brickwall is
-// a linear-phase shape - an IIR cannot be one - so outside the linear modes it
-// processes as 96 dB/oct and the editor says so.
+// QA-EqFlagship W-6: slope is CONTINUOUS dB/oct (filters only), 1..96 with
+// Brickwall as the value past the top.  The table below is the MENU's detent
+// list, nothing more - the engine no longer indexes anything by it.  In the
+// linear modes any fractional slope is exact (the FIR realizes the query's
+// analytic fractional Butterworth); in the IIR modes the fractional
+// remainder is a staggered pole/zero ladder fit across the band, and the
+// query evaluates the very pairs the audio runs, so drawn == heard.
+// Brickwall is a linear-phase shape - an IIR cannot be one - so outside the
+// linear modes it processes as 96 dB/oct and the editor says so.
 inline constexpr int   kEqNumSlopes = 9;
 inline constexpr float kEqSlopeDbPerOct[kEqNumSlopes] = { 6, 12, 18, 24, 36, 48, 72, 96, -1 };
 inline constexpr int   kEqSlopeBrickwall = 8;
+inline constexpr float kEqSlopeBrickwallDb = 97.0f;
+inline bool eqSlopeIsBrickwall (float s) { return s >= 96.5f; }
+inline constexpr int   kEqLadderPairs = 6;
 
 // Poles per slope. 6 dB/oct is one real pole; odd orders are a pole plus
 // biquads; even orders are biquads at the Butterworth angles. The section Qs
@@ -118,7 +131,8 @@ struct EqBandParams
     float     freqHz = 1000.0f;
     float     gainDb = 0.0f;              // gain types only
     float     q = 0.707f;
-    int       slope = 1;                  // filters only; index into the table
+    float     slope = 12.0f;              // filters only; dB/oct, continuous
+                                          // 1..96; >= 96.5 = Brickwall
     EqChannel channel = EqChannel::stereo;
     float     placement = 0.0f;           // -1 left .. +1 right; gain types, stereo only
     bool      muted = false;
@@ -297,6 +311,30 @@ inline void biquadResponse (const BiquadCoeffs& c, double w, double& mag, double
     const auto h = num / den;
     mag = std::abs (h);
     ph  = std::arg (h);
+}
+
+// First-order pole/zero pair - the fractional-slope ladder's unit.  The
+// bilinear image of (1 + s/wz) / (1 + s/wp): flat, then a 6 dB/oct ramp
+// between the pole and zero, then flat again.  Normalized to unity on the
+// side the filter passes (DC for a low-pass ladder, Nyquist for high-pass).
+inline BiquadCoeffs firstOrderPZ (float fpole, float fzero, float sr, bool unityAtNyquist)
+{
+    const double wp = std::tan (kPi * std::clamp ((double) fpole, 5.0, sr * 0.47) / sr);
+    const double wz = std::tan (kPi * std::clamp ((double) fzero, 5.0, sr * 0.47) / sr);
+    const double a0 = 1.0 + 1.0 / wp;
+    BiquadCoeffs c;
+    c.b0 = (1.0 + 1.0 / wz) / a0;
+    c.b1 = (1.0 - 1.0 / wz) / a0;
+    c.b2 = 0.0;
+    c.a1 = (1.0 - 1.0 / wp) / a0;
+    c.a2 = 0.0;
+    if (unityAtNyquist)
+    {
+        const double g = (c.b0 - c.b1) / (1.0 - c.a1);
+        c.b0 /= g;
+        c.b1 /= g;
+    }
+    return c;
 }
 
 // Butterworth section Q for pair k (1-based) of a filter with n poles.
@@ -684,6 +722,12 @@ private:
         // here so the audio applies exactly the k the query divides by.
         float bpK = 1.0f;
 
+        // The fractional-slope ladder (W-6): first-order pole/zero pairs as
+        // biquads.  Integer slopes leave it empty.
+        Biquad ladL[kEqLadderPairs], ladR[kEqLadderPairs];
+        BiquadCoeffs ladC[kEqLadderPairs] {};
+        int ladCount = 0;
+
         // Dynamics.
         Biquad detFL, detFR;
         float envL = 0.0f, envR = 0.0f;
@@ -800,8 +844,48 @@ private:
                 out[1] = eqdesign::shelf (f, designSr, q, -gainDb, true);
                 return 2;
 
+            case EqType::allPass:
+            {
+                const double w0 = 2.0 * kPi * (double) f / designSr;
+                const double alpha = std::sin (w0)
+                                   / (2.0 * std::clamp ((double) qRaw, 0.1, 30.0));
+                const double na = 1.0 + alpha;
+                out[0].b0 = (1.0 - alpha) / na;
+                out[0].b1 = (-2.0 * std::cos (w0)) / na;
+                out[0].b2 = 1.0;
+                out[0].a1 = out[0].b1;
+                out[0].a2 = out[0].b0;
+                return 1;
+            }
+
             default: return 0;   // LP/HP/BP live on the SVF path
         }
+    }
+
+    // The fractional remainder (0..6 dB/oct) fit across the band as
+    // kEqLadderPairs log-spaced pole/zero pairs.  Poles march geometrically
+    // from just past the cutoff to the band edge; each pair's zero sits at
+    // the ratio that makes its 6 dB/oct ramp average out to `rem` dB/oct
+    // over the spacing.  Stateless and deterministic: the magnitude query
+    // rebuilds the identical pairs, so drawn == heard by construction.
+    int designSlopeLadder (EqType t, float fc, float rem, float designSr,
+                           BiquadCoeffs* out) const
+    {
+        if (rem <= 0.05f) return 0;
+        const bool hp = t == EqType::highPass;
+        const float edge = hp ? 20.0f : std::min (designSr * 0.45f, 20000.0f);
+        const float span = hp ? fc / edge : edge / fc;
+        if (span < 1.6f) return 0;              // no room to shape anything
+        const float R = std::pow (span, 1.0f / (float) kEqLadderPairs);
+        const float zr = std::pow (R, rem / 6.0f);
+        float fp = hp ? fc / std::pow (R, 0.25f) : fc * std::pow (R, 0.25f);
+        for (int i = 0; i < kEqLadderPairs; ++i)
+        {
+            const float fz = hp ? fp / zr : fp * zr;
+            out[i] = eqdesign::firstOrderPZ (fp, fz, designSr, hp);
+            fp = hp ? fp / R : fp * R;
+        }
+        return kEqLadderPairs;
     }
 
     void rebuildBand (BandRt& b, float designSr)
@@ -810,19 +894,20 @@ private:
 
         if (eqTypeHasSlope (p.type))
         {
-            const int slope = std::clamp (p.slope, 0, kEqNumSlopes - 1);
-            const int poles = kEqSlopePoles[slope == kEqSlopeBrickwall
-                                            && ! eqModeIsLinear (mode)
-                                              ? kEqSlopeBrickwall - 1 : slope];
+            const float slopeDb = eqSlopeIsBrickwall (p.slope)
+                                    ? 96.0f : std::clamp (p.slope, 1.0f, 96.0f);
             const float f = std::clamp (b.cFreq, 20.0f, designSr * 0.45f);
 
             if (p.type == EqType::bandPass)
             {
                 // Cascaded constant-peak sections at the user's Q: centre
-                // stays put, skirts steepen with the slope. Minimum one
-                // full section - a 6 dB band pass is not a thing.
-                b.svfCount = std::max (1, poles / 2);
+                // stays put, skirts steepen with the slope.  A PARTIAL
+                // constant-peak section is not realizable, so the IIR rounds
+                // to whole sections (12 dB granularity); the linear modes
+                // realize the exact fractional skirt from the query instead.
+                b.svfCount = std::max (1, (int) std::round (slopeDb / 12.0f));
                 b.hasPole = false;
+                b.ladCount = 0;
                 b.bpK = 1.0f / std::clamp (b.cQ, 0.35f, 24.0f);
                 for (int s = 0; s < b.svfCount; ++s)
                 {
@@ -832,6 +917,8 @@ private:
             }
             else
             {
+                const int poles = (int) (slopeDb / 6.0f + 1.0e-4f);
+                const float rem = slopeDb - 6.0f * (float) poles;
                 b.hasPole = (poles % 2) == 1;
                 b.svfCount = poles / 2;
                 b.poleG = std::tan ((float) kPi * f / designSr);
@@ -846,6 +933,13 @@ private:
                                         : eqdesign::butterworthQ (poles, s + 1);
                     b.svfL[s].set (f, (float) bq);
                     b.svfR[s].set (f, (float) bq);
+                }
+
+                b.ladCount = designSlopeLadder (p.type, f, rem, designSr, b.ladC);
+                for (int s = 0; s < b.ladCount; ++s)
+                {
+                    b.ladL[s].setCoeffs (b.ladC[s]);
+                    b.ladR[s].setCoeffs (b.ladC[s]);
                 }
             }
             b.biqCount = 0;
@@ -872,6 +966,7 @@ private:
         }
         b.svfCount = 0;
         b.hasPole = false;
+        b.ladCount = 0;
         b.lastBuiltGr = p.dynamic ? b.grSmooth : 0.0f;
     }
 
@@ -888,6 +983,7 @@ private:
         }
         b.svfCount = 0;
         b.hasPole = false;
+        b.ladCount = 0;
         b.lastBuiltGr = b.grSmooth;
     }
 
@@ -1079,7 +1175,8 @@ private:
                 for (auto& b : bands)
                 {
                     if (! bandActive (b)) continue;
-                    if (b.biqCount == 0 && b.svfCount == 0 && ! b.hasPole) continue;
+                    if (b.biqCount == 0 && b.svfCount == 0 && ! b.hasPole
+                        && b.ladCount == 0) continue;
 
                     // Channel routing, per band, in place.
                     float m = 0.0f, s = 0.0f;
@@ -1115,7 +1212,7 @@ private:
 
     inline float bandSample (BandRt& b, float x, int chan) noexcept
     {
-        if (b.svfCount > 0 || b.hasPole)
+        if (b.svfCount > 0 || b.hasPole || b.ladCount > 0)
         {
             // One-pole first on odd orders, then the SVF cascade, taking the
             // response that matches the band's type.
@@ -1136,6 +1233,8 @@ private:
                   : b.p.type == EqType::highPass ? o.hp
                                                  : o.bp * b.bpK;
             }
+            auto* lad = chan == 0 ? b.ladL : b.ladR;
+            for (int i = 0; i < b.ladCount; ++i) x = lad[i].process (x);
             return x;
         }
 
@@ -1151,27 +1250,44 @@ private:
         const double w = 2.0 * kPi * std::clamp ((double) hz, 1.0, sr * 0.499) / designSr;
         const auto& p = b.p;
 
+        if (p.type == EqType::allPass) return 1.0;
+
         if (eqTypeHasSlope (p.type))
         {
-            const int slope = std::clamp (p.slope, 0, kEqNumSlopes - 1);
-            if (slope == kEqSlopeBrickwall && eqModeIsLinear (mode))
+            const bool brick = eqSlopeIsBrickwall (p.slope);
+            if (brick && eqModeIsLinear (mode))
                 return hzInsideBrickwall (p, hz) ? 1.0 : 1.0e-6;
 
-            const int poles = kEqSlopePoles[slope == kEqSlopeBrickwall ? kEqSlopeBrickwall - 1 : slope];
+            const float slopeDb = brick ? 96.0f : std::clamp (p.slope, 1.0f, 96.0f);
             const double fc = std::clamp ((double) p.freqHz, 20.0, designSr * 0.45);
             const double Om = std::tan (w / 2.0) / std::tan (kPi * fc / designSr);
             double mag = 1.0;
 
             if (p.type == EqType::bandPass)
             {
-                const int n = std::max (1, poles / 2);
                 const double k = 1.0 / std::clamp ((double) p.q, 0.35, 24.0);
-                for (int i = 0; i < n; ++i)
-                    mag *= (k * Om) / std::sqrt (sq (1.0 - Om * Om) + sq (k * Om));
-                return mag;
+                const double one = (k * Om) / std::sqrt (sq (1.0 - Om * Om) + sq (k * Om));
+                const double n = eqModeIsLinear (mode)
+                                   ? (double) slopeDb / 12.0
+                                   : (double) std::max (1, (int) std::round (slopeDb / 12.0f));
+                return std::pow (one, n);
             }
 
             const bool hp = p.type == EqType::highPass;
+
+            if (eqModeIsLinear (mode))
+            {
+                // Exact fractional Butterworth: |H|^2 = 1 / (1 + Om^2n) for
+                // any REAL n.  The FIR is designed from this very value, so
+                // the linear modes deliver the true continuous slope.
+                const double n = (double) slopeDb / 6.0;
+                const double o2n = std::pow (Om, 2.0 * n);
+                return (hp ? std::pow (Om, n) : 1.0) / std::sqrt (1.0 + o2n);
+            }
+
+            const int poles = (int) (slopeDb / 6.0f + 1.0e-4f);
+            const float rem = slopeDb - 6.0f * (float) poles;
+
             if ((poles % 2) == 1)
             {
                 const double one = 1.0 / std::sqrt (1.0 + Om * Om);
@@ -1185,6 +1301,18 @@ private:
                                    : 1.0 / eqdesign::butterworthQ (poles, i);
                 const double den = std::sqrt (sq (1.0 - Om * Om) + sq (k * Om));
                 mag *= (hp ? Om * Om : 1.0) / den;
+            }
+
+            // The ladder, rebuilt identically to the audio's pairs and
+            // evaluated as responses - stateless, so the query never depends
+            // on whether the band has been rebuilt yet.
+            BiquadCoeffs lad[kEqLadderPairs];
+            const int ln = designSlopeLadder (p.type, (float) fc, rem, designSr, lad);
+            for (int i = 0; i < ln; ++i)
+            {
+                double m1 = 1.0, p1 = 0.0;
+                eqdesign::biquadResponse (lad[i], w, m1, p1);
+                mag *= m1;
             }
             return mag;
         }
@@ -1218,8 +1346,10 @@ private:
 
         if (eqTypeHasSlope (p.type))
         {
-            const int slope = std::clamp (p.slope, 0, kEqNumSlopes - 1);
-            const int poles = kEqSlopePoles[slope == kEqSlopeBrickwall ? kEqSlopeBrickwall - 1 : slope];
+            const float slopeDb = eqSlopeIsBrickwall (p.slope)
+                                    ? 96.0f : std::clamp (p.slope, 1.0f, 96.0f);
+            const int poles = (int) (slopeDb / 6.0f + 1.0e-4f);
+            const float rem = slopeDb - 6.0f * (float) poles;
             const double fc = std::clamp ((double) p.freqHz, 20.0, designSr * 0.45);
             const double Om = std::tan (w / 2.0) / std::tan (kPi * fc / designSr);
             double ph = 0.0;
@@ -1231,7 +1361,8 @@ private:
                 // 1 / (1 + jOm), numerator jOm for HP.
                 ph += (hp ? kPi / 2.0 : 0.0) - std::atan2 (Om, 1.0);
             }
-            const int pairs = bp ? std::max (1, poles / 2) : poles / 2;
+            const int pairs = bp ? std::max (1, (int) std::round (slopeDb / 12.0f))
+                                 : poles / 2;
             for (int i = 1; i <= pairs; ++i)
             {
                 const double k = (poles == 2 || bp)
@@ -1239,6 +1370,18 @@ private:
                                    : 1.0 / eqdesign::butterworthQ (poles, i);
                 const double num = bp ? kPi / 2.0 : (hp ? kPi : 0.0);
                 ph += num - std::atan2 (k * Om, 1.0 - Om * Om);
+            }
+            if (! bp)
+            {
+                BiquadCoeffs lad[kEqLadderPairs];
+                const int ln = designSlopeLadder (p.type, (float) fc, rem,
+                                                  designSr, lad);
+                for (int i = 0; i < ln; ++i)
+                {
+                    double m1 = 1.0, p1 = 0.0;
+                    eqdesign::biquadResponse (lad[i], w, m1, p1);
+                    ph += p1;
+                }
             }
             return ph;
         }

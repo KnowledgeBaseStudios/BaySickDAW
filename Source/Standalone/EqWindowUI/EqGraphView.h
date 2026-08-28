@@ -323,8 +323,8 @@ public:
     struct CurveKey
     {
         bool on = false, muted = false, dyn = false;
-        int type = -1, slope = -1;
-        float f = 0.0f, g = 0.0f, q = 0.0f;
+        int type = -1;
+        float slope = -1.0f, f = 0.0f, g = 0.0f, q = 0.0f;
 
         bool operator== (const CurveKey& o) const noexcept
         {
@@ -732,19 +732,24 @@ public:
 
         juce::PopupMenu type;
         const char* typeNames[] = { "Bell", "Low Pass", "High Pass", "Low Shelf",
-                                    "High Shelf", "Notch", "Band Pass", "Tilt" };
-        for (int t = 0; t < 8; ++t)
+                                    "High Shelf", "Notch", "Band Pass", "Tilt",
+                                    "All Pass" };
+        for (int t = 0; t < 9; ++t)
             type.addItem (100 + t, typeNames[t], true, (int) p.type == t);
         m.addSubMenu ("Type", type);
 
         if (kbs::eqTypeHasSlope (p.type))
         {
             juce::PopupMenu slope;
+            // Detents: the menu picks the classic values; the rail's SLOPE
+            // number is where any dB/oct in between lives (W-6).
             const char* slopeNames[] = { "6 dB/oct", "12 dB/oct", "18 dB/oct",
                                          "24 dB/oct", "36 dB/oct", "48 dB/oct",
                                          "72 dB/oct", "96 dB/oct", "Brickwall" };
             for (int sl = 0; sl < 9; ++sl)
-                slope.addItem (200 + sl, slopeNames[sl], true, p.slope == sl);
+                slope.addItem (200 + sl, slopeNames[sl], true,
+                               sl == 8 ? kbs::eqSlopeIsBrickwall (p.slope)
+                                       : std::abs (p.slope - kbs::kEqSlopeDbPerOct[sl]) < 0.5f);
             m.addSubMenu ("Slope", slope);
         }
 
@@ -795,7 +800,7 @@ public:
             [this, b] (int r)
             {
                 if (r == 0) return;
-                if (r >= 100 && r < 108)
+                if (r >= 100 && r < 109)
                 {
                     beginParamUndoGesture (proc.apvts, paramId (b, "type"));
                     setBandValue (b, "type", (float) (r - 100));
@@ -803,7 +808,9 @@ public:
                 else if (r >= 200 && r < 209)
                 {
                     beginParamUndoGesture (proc.apvts, paramId (b, "slope"));
-                    setBandValue (b, "slope", (float) (r - 200));
+                    const int sl = r - 200;
+                    setBandValue (b, "slope", sl == 8 ? kbs::kEqSlopeBrickwallDb
+                                                      : kbs::kEqSlopeDbPerOct[sl]);
                 }
                 else if (r == 300 || r == 303 || r == 304)
                 {
@@ -1255,7 +1262,7 @@ private:
             case kbs::EqType::highShelf: return fontaudio::FilterShelvingHi;
             case kbs::EqType::notch:     return fontaudio::FilterNotch;
             case kbs::EqType::bandPass:  return fontaudio::FilterBandpass;
-            default:                     return {};         // Tilt: drawn
+            default:                     return {};         // Tilt + All Pass: drawn
         }
     }
 

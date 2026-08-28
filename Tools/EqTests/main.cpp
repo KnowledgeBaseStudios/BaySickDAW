@@ -126,29 +126,29 @@ int main()
             b.on = true; b.type = kbs::EqType::lowPass; b.freqHz = 1000.0f;
             b.q = 0.707f;
 
-            b.slope = 0;    // 6 dB/oct
+            b.slope = 6.0f;    // 6 dB/oct
             eq.setBand (0, b);
             const double one6 = gainAt (eq, 4000.0, srr);
             near (one6, -12.3, 1.5, "6 dB/oct falls ~12 dB over two octaves");
 
-            b.slope = 5;    // 48
+            b.slope = 48.0f;   // 48
             eq.setBand (0, b);
             const double at48 = gainAt (eq, 2000.0, srr);
             const double q48  = 20.0 * std::log10 (eq.magnitudeAt (2000.0f));
             near (at48, q48, 0.3, "48 dB/oct audio matches its query");
 
-            b.slope = 7;    // 96
+            b.slope = 96.0f;   // 96
             eq.setBand (0, b);
             const double at96 = gainAt (eq, 2000.0, srr);
             check (at96 < at48 - 10.0, "96 dB/oct rejects more than 48", at96, at48 - 10.0);
 
-            b.type = kbs::EqType::bandPass; b.slope = 1; b.q = 2.0f;
+            b.type = kbs::EqType::bandPass; b.slope = 12.0f; b.q = 2.0f;
             eq.setBand (0, b);
             near (gainAt (eq, 1000.0, srr), 0.0, 0.4, "band pass holds 0 dB at centre");
             const double bpSkirt = gainAt (eq, 250.0, srr);
             check (bpSkirt < -12.0, "and rejects two octaves down", bpSkirt, -12.0);
 
-            b.type = kbs::EqType::notch; b.q = 4.0f; b.slope = 1;
+            b.type = kbs::EqType::notch; b.q = 4.0f; b.slope = 12.0f;
             eq.setBand (0, b);
             const double nullDepth = gainAt (eq, 1000.0, srr);
             check (nullDepth < -30.0, "a static notch is a real null", nullDepth, -30.0);
@@ -1001,6 +1001,125 @@ int main()
         near (20.0 * std::log10 (eq.magnitudeAt (1000.0f)),
               20.0 * std::log10 (eq.bandMagnitudeAt (95, 1000.0f)), 0.01,
               "95 idle bands contribute exactly nothing");
+    }
+    // ---- 15. QA-EqFlagship Task 2: continuous slopes + all-pass (W-6)
+    std::printf ("%s", "\n  15. continuous slopes + all-pass\n");
+    {
+        const double srr = 48000.0;
+
+        auto queryDb = [] (kbs::ParametricEq& eq, double hz)
+        { return 20.0 * std::log10 (eq.magnitudeAt ((float) hz)); };
+
+        auto gainAt = [] (kbs::ParametricEq& eq, double freq, double srr2)
+        {
+            const int block = 256;
+            std::vector<float> L (block), R (block), tail;
+            double phase = 0.0;
+            for (int bl = 0; bl < 80; ++bl)
+            {
+                for (int i = 0; i < block; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * freq / srr2;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), block);
+                if (bl >= 40) tail.insert (tail.end(), L.begin(), L.end());
+            }
+            const double period = srr2 / freq;
+            const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+            tail.resize (std::max<size_t> (whole, (size_t) period));
+            return 20.0 * std::log10 (levelAt (tail, freq, srr2, 0) / 0.1);
+        };
+
+        // A classic detent through the continuous path is the classic filter:
+        // 24 dB/oct exactly equals the 4-pole Butterworth analytic.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::lowPass;
+            b.freqHz = 1000.0f; b.q = 0.707f; b.slope = 24.0f;
+            eq.setBand (0, b);
+            const double om = std::tan (kbs::kPi * 2000.0 / srr)
+                            / std::tan (kbs::kPi * 1000.0 / srr);
+            const double want = -10.0 * std::log10 (1.0 + std::pow (om, 8.0));
+            near (queryDb (eq, 2000.0), want, 0.05,
+                  "24 dB/oct continuous IS the 4-pole Butterworth");
+        }
+
+        // 17 dB/oct: heard equals drawn (the ladder the audio runs is the
+        // ladder the query evaluates), and it sits strictly between the
+        // neighboring detents.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::lowPass;
+            b.freqHz = 500.0f; b.q = 0.707f; b.slope = 17.0f;
+            eq.setBand (0, b);
+            near (gainAt (eq, 2000.0, srr), queryDb (eq, 2000.0), 0.3,
+                  "17 dB/oct: heard equals drawn");
+
+            kbs::ParametricEq lo, hi;
+            lo.prepare (srr, 256); hi.prepare (srr, 256);
+            b.slope = 12.0f; lo.setBand (0, b);
+            b.slope = 18.0f; hi.setBand (0, b);
+            const double m17 = queryDb (eq, 4000.0);
+            check (m17 < queryDb (lo, 4000.0) && m17 > queryDb (hi, 4000.0),
+                   "and lands between the 12 and 18 curves",
+                   m17, queryDb (lo, 4000.0));
+        }
+
+        // Fractional below the old floor: 3 dB/oct is exact-analytic in the
+        // linear modes and ladder-approximate (within 1.5 dB over two
+        // octaves) in the IIR modes.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setMode (kbs::EqMode::linearLow);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::highPass;
+            b.freqHz = 2000.0f; b.q = 0.707f; b.slope = 3.0f;
+            eq.setBand (0, b);
+            const double om = std::tan (kbs::kPi * 500.0 / srr)
+                            / std::tan (kbs::kPi * 2000.0 / srr);
+            const double n = 0.5;
+            const double want = 20.0 * std::log10 (std::pow (om, n)
+                                / std::sqrt (1.0 + std::pow (om, 2.0 * n)));
+            near (queryDb (eq, 500.0), want, 0.05,
+                  "linear-mode 3 dB/oct is the exact fractional Butterworth");
+
+            eq.setMode (kbs::EqMode::zeroLatency);
+            // The ladder is pinned in its ASYMPTOTIC region (three octaves
+            // out): the analytic fractional is -3 dB at the cutoff and a
+            // pole ladder cannot be, so the knee is softer by design - the
+            // query draws each mode's truth either way.
+            const double om3 = std::tan (kbs::kPi * 250.0 / srr)
+                             / std::tan (kbs::kPi * 2000.0 / srr);
+            const double want3 = 20.0 * std::log10 (std::pow (om3, n)
+                                / std::sqrt (1.0 + std::pow (om3, 2.0 * n)));
+            near (queryDb (eq, 250.0), want3, 1.5,
+                  "IIR 3 dB/oct ladder tracks the ideal within 1.5 dB");
+            near (gainAt (eq, 250.0, srr), queryDb (eq, 250.0), 0.3,
+                  "and heard equals drawn in the IIR too");
+        }
+
+        // All-pass: unity magnitude everywhere, audibly nothing, but real
+        // phase rotation at the corner.
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::allPass;
+            b.freqHz = 1000.0f; b.q = 0.707f;
+            eq.setBand (0, b);
+            near (queryDb (eq, 300.0), 0.0, 0.001, "all-pass draws flat");
+            near (gainAt (eq, 300.0, srr), 0.0, 0.1, "all-pass passes level at 300");
+            near (gainAt (eq, 4000.0, srr), 0.0, 0.1, "and at 4k");
+            check (std::abs (eq.phaseAt (1000.0f)) > 1.0,
+                   "and rotates real phase at its corner",
+                   std::abs (eq.phaseAt (1000.0f)), 1.0);
+        }
     }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;

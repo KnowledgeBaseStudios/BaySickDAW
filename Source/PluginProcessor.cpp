@@ -5580,9 +5580,9 @@ void BaySickDAWProcessor::updateEQFromCache (StripEq* eq, int stripSlot, int ban
         bp.freqHz      = freqP->load (std::memory_order_relaxed);
         bp.gainDb      = get (eqSlotGain);
         bp.q           = get (eqSlotQ);
-        bp.type        = (kbs::EqType) juce::jlimit (0, 7, (int) get (eqSlotType));
+        bp.type        = (kbs::EqType) juce::jlimit (0, 8, (int) get (eqSlotType));
         bp.on          = get (eqSlotOn) > 0.5f;
-        bp.slope       = juce::jlimit (0, kbs::kEqNumSlopes - 1, (int) get (eqSlotSlope));
+        bp.slope       = juce::jlimit (1.0f, kbs::kEqSlopeBrickwallDb, get (eqSlotSlope));
         bp.channel     = (kbs::EqChannel) juce::jlimit (0, 4, (int) get (eqSlotChannel));
         bp.placement   = juce::jlimit (-1.f, 1.f, get (eqSlotPlace));
         bp.muted       = get (eqSlotMute) > 0.5f;
@@ -7633,12 +7633,12 @@ namespace
         dynF (apvts, ids, bp + "Freq",        labelBase + "Freq",        20.f, 20000.f, EqBandIds::defaultFreqFor (b));
         dynF (apvts, ids, bp + "Gain",        labelBase + "Gain",        -30.f, 30.f, 0.f);
         dynF (apvts, ids, bp + "Q",           labelBase + "Q",           0.1f, 30.f, 0.707f);
-        dynI (apvts, ids, bp + "Type",        labelBase + "Type",        0, 7, 0);
+        dynI (apvts, ids, bp + "Type",        labelBase + "Type",        0, 8, 0);
         // The plugin ships bands 1-8 on and flat (Jeff's test-pass-1 ruling);
         // flat bells are identity in the engine and the wrapper's isIdentity
         // still short-circuits the whole strip, so this costs nothing.
         dynB (apvts, ids, bp + "On",          labelBase + "On",          b < 8);
-        dynI (apvts, ids, bp + "Slope",       labelBase + "Slope",       0, 8, 1);
+        dynF (apvts, ids, bp + "Slope",       labelBase + "Slope",       1.f, 97.f, 12.f);
         dynI (apvts, ids, bp + "Channel",     labelBase + "Channel",     0, 4, 0);
         dynF (apvts, ids, bp + "Place",       labelBase + "Place",       -1.f, 1.f, 0.f);
         dynB (apvts, ids, bp + "Mute",        labelBase + "Mute",        false);
