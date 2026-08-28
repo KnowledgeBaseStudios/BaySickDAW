@@ -135,6 +135,10 @@ code, kbd {
   border-radius: 3px;
   padding: 1px 5px;
 }
+/* Long In The Weeds excerpt lines scroll inside their own block instead of
+   painting off the page (pre is white-space:pre; without this there is no
+   scrollbar and no way to reach the clipped text). */
+pre { overflow-x: auto; max-width: 100%; }
 kbd { color: var(--accent-2); }
 
 a { color: var(--link); }
