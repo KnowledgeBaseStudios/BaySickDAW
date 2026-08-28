@@ -45,6 +45,7 @@ if os.path.exists(_cb_path):
     _cb_spec.loader.exec_module(_cb)
     BLURBS = getattr(_cb, "BLURBS", {})
 
+
 def _ct_num(v):
     if v is None:
         return ""
@@ -137,6 +138,43 @@ for m in re.finditer(r'^\| (Shell|Instrument|Mixing & Effects) \| (\d+) \| `([A-
                       files=re.findall(r'`([^`]+)`', files) or [files.strip().strip('`')])
     ORDER.append(code)
 assert len(ORDER) == 91
+
+# QA-ManualPress M-4: menu-figure dots self-anchor.  Menu callouts number
+# down the rows by convention, and the harness emits every captured menu's
+# row rects into bsd-docs.json - so a conforming figure's dot map is
+# rebuilt from the menu itself and tracks menu changes.  A figure whose
+# callout count does not match its row count keeps its hand coordinates
+# and is reported (generated-plus-exceptions).
+MENU_DOT_REPORT = []
+MENU_DOT_GENERATED = 0
+for _code in list(C.keys()):
+    _files = (FIGS.get(_code) or {}).get('files') or []
+    if not _files:
+        continue
+    _fig = os.path.splitext(os.path.basename(_files[0]))[0]
+    _rows = (DOCS.get(_fig) or {}).get('menurows')
+    if not _rows:
+        continue
+    _old = C[_code]
+    _withH = [r for r in _rows if not r.get('sep')]
+    _noH = [r for r in _withH if not r.get('header')]
+    _anchors = None
+    for _cand in (_withH, _noH):
+        if len(_cand) == len(_old):
+            _anchors = _cand
+            break
+    if _anchors is None:
+        MENU_DOT_REPORT.append(
+            "%s (%s): %d callouts vs %d rows (%d excl headers) - hand coords kept"
+            % (_code, _fig, len(_old), len(_withH), len(_noH)))
+        continue
+    _gen = {}
+    for _i, _r in enumerate(_anchors):
+        _d = _r['dot']
+        _gen[_i + 1] = (round(_d[0], 2), round(_d[1], 2))
+    C[_code] = _gen
+    MENU_DOT_GENERATED += 1
+
 GROUPS = ["Shell", "Instrument", "Mixing & Effects"]
 GSLUG = {"Shell": "shell", "Instrument": "instrument", "Mixing & Effects": "mixing-effects"}
 CHILDREN = {}
@@ -979,6 +1017,9 @@ open(OUT, "w", encoding="utf-8", newline="").write(doc)
 print("figures        :", len(ORDER))
 print("markers        :", markers_total)
 print("clusters       :", len(m2crop_data))
+print("menu dots gen  : %d figures" % MENU_DOT_GENERATED)
+for _m in MENU_DOT_REPORT:
+    print("  DOT MISMATCH " + _m)
 print("topics placed  :", len(re.findall(r'class="tp" id="IMP-', doc)), "of", len(TOPIC))
 print("size           : %.1f MB" % (len(doc) / 1e6))
 for w in warns: print("WARN:", w)

@@ -477,6 +477,36 @@ void saveMenu (juce::PopupMenu menu, const juce::String& name,
     MenuCanvas canvas (menu, opts,
                        laf != nullptr ? *laf
                                       : juce::LookAndFeel::getDefaultLookAndFeel());
+
+    // Task 12: per-row dot anchors.  Menu callouts number down the rows by
+    // convention, so the generator can rebuild a menu figure's dot map from
+    // these - the coordinates track the menu, not a hand measurement.
+    if (gDocsMode && gDocs != nullptr)
+    {
+        juce::Array<juce::var> rowsOut;
+        const int border = canvas.getLookAndFeel()
+                               .getPopupMenuBorderSizeWithOptions (canvas.opts);
+        const float w = (float) canvas.getWidth();
+        const float h = (float) canvas.getHeight();
+        int y = border;
+        for (const auto& r : canvas.rows)
+        {
+            juce::DynamicObject::Ptr o = new juce::DynamicObject();
+            o->setProperty ("text", r.item->text);
+            o->setProperty ("sep", r.item->isSeparator);
+            o->setProperty ("header", r.item->isSectionHeader);
+            juce::Array<juce::var> dot;
+            dot.add (100.0 * 11.2 / w);                    // the hand gutter, ~14px native
+            dot.add (100.0 * ((float) y + r.h * 0.5f) / h);
+            o->setProperty ("dot", dot);
+            rowsOut.add (juce::var (o.get()));
+            y += r.h;
+        }
+        juce::DynamicObject::Ptr fig = new juce::DynamicObject();
+        fig->setProperty ("menurows", rowsOut);
+        gDocs->setProperty (name, juce::var (fig.get()));
+    }
+
     gInMenuSave = true;
     save (canvas, name, 1.25f);
     gInMenuSave = false;
@@ -1541,6 +1571,33 @@ void shootEffectPanelMenu (World& w)
     win.setTopLeftPosition (0, 0);
     host.addAndMakeVisible (canvas);
     canvas.setTopLeftPosition (0, barH);
+
+    if (gDocsMode && gDocs != nullptr)
+    {
+        juce::Array<juce::var> rowsOut;
+        const int border = canvas.getLookAndFeel()
+                               .getPopupMenuBorderSizeWithOptions (canvas.opts);
+        const float w = (float) host.getWidth();
+        const float h = (float) host.getHeight();
+        int y = barH + border;
+        for (const auto& r : canvas.rows)
+        {
+            juce::DynamicObject::Ptr o = new juce::DynamicObject();
+            o->setProperty ("text", r.item->text);
+            o->setProperty ("sep", r.item->isSeparator);
+            o->setProperty ("header", r.item->isSectionHeader);
+            juce::Array<juce::var> dot;
+            dot.add (100.0 * 11.2 / w);
+            dot.add (100.0 * ((float) y + r.h * 0.5f) / h);
+            o->setProperty ("dot", dot);
+            rowsOut.add (juce::var (o.get()));
+            y += r.h;
+        }
+        juce::DynamicObject::Ptr fig = new juce::DynamicObject();
+        fig->setProperty ("menurows", rowsOut);
+        gDocs->setProperty ("Effects Panel Menu", juce::var (fig.get()));
+    }
+
     gInMenuSave = true;
     save (host, "Effects Panel Menu", 1.25f);
     gInMenuSave = false;

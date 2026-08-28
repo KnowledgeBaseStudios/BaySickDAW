@@ -341,3 +341,31 @@ quotes re-checked line-for-line). The agents also caught two more
 drifted citations in passing (IMP-58 attachTo, IMP-60 rebuild ranges) -
 relabeled. 89/89 topics still place; the manual grew to 1.3 MB with
 the new excerpts.
+
+## 2026-08-28 - Task 12 - self-anchoring dots (M-4)
+
+Menu figures were the volatile half of the dot problem (a changed menu
+breaks every dot below the change), and menu callouts number down the
+rows by convention - so the harness now emits every captured menu's row
+rects into bsd-docs.json (text, separator/header flags, and a dot at
+the hand convention's gutter: ~14px native, row vertical center; the
+composed Effects Panel Menu offsets by its title strip). The generator
+rebuilds a menu figure's C[code] from those rows when the callout count
+matches the row count - trying with and then without section headers,
+so sectioned menus self-select their convention - and prints a
+mismatch report for the rest.
+
+Result: 31 of 38 menu figures fully self-anchor; validation against
+the hand coordinates lands within ~1.5% on every sampled figure
+(TRANRM/FMENU/PMENU/VMENU and the 15-dot BSSBM). The 7 mismatches ARE
+the plan's exceptions: six use deliberately grouped callouts (one dot
+covering a run of rows - ANLZM, BSPDLP, EQB, FXPICK, MIXADD, PRC) and
+keep hand coords; Help Menu mismatches because the MENU GREW (View
+Projects MidiMap) and the registry needs a fourth callout - flagged
+for the Task 13 registry reconcile. Control-figure callouts stay hand
+coordinated (the dump already carries every stamped control's percent
+bounds for a future id-anchored extension); marker-coords.py is
+untouched and remains the exception source, per
+generated-plus-exceptions. Gate six zeros + four links (harness row
+emission); one generator fix (the rebuild ran before the registry
+parse built FIGS - relocated).

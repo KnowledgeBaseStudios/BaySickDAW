@@ -3830,7 +3830,7 @@
   "Effects Panel": {
     "controls": [
       {
-        "id": "master_54c97cd556b44e05a7443be8a26cb3b0_output_vol",
+        "id": "master_9ba4fa0ce05041cf9e74638519eac13e_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -3849,7 +3849,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_54c97cd556b44e05a7443be8a26cb3b0_detect",
+        "id": "master_9ba4fa0ce05041cf9e74638519eac13e_detect",
         "kind": "knob",
         "label": "Detect",
         "tip": "Detection width. Narrow = S sounds only; Wide = also catches Sh sounds",
@@ -3868,7 +3868,7 @@
         "defText": "50"
       },
       {
-        "id": "master_54c97cd556b44e05a7443be8a26cb3b0_thresh",
+        "id": "master_9ba4fa0ce05041cf9e74638519eac13e_thresh",
         "kind": "knob",
         "label": "Thresh",
         "tip": "Threshold (dB). Detector triggers above this level",
@@ -3887,7 +3887,7 @@
         "defText": "-12.5"
       },
       {
-        "id": "master_54c97cd556b44e05a7443be8a26cb3b0_range",
+        "id": "master_9ba4fa0ce05041cf9e74638519eac13e_range",
         "kind": "knob",
         "label": "Range",
         "tip": "Max reduction (dB). Caps how much the de-esser can pull down",
@@ -3906,7 +3906,7 @@
         "defText": "-14.0"
       },
       {
-        "id": "master_54c97cd556b44e05a7443be8a26cb3b0_mode",
+        "id": "master_9ba4fa0ce05041cf9e74638519eac13e_mode",
         "kind": "knob",
         "label": "Mode",
         "tip": "0 = Wide (duck the whole detected sound), 100 = Split (duck only above 4 kHz), between = blend",
@@ -3929,7 +3929,7 @@
   "Effects Panel with Visual": {
     "controls": [
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_output_vol",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_output_vol",
         "kind": "knob",
         "label": "Vol",
         "tip": "Slot output gain (dB) - double-click resets to 0",
@@ -3948,7 +3948,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_room",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_room",
         "kind": "knob",
         "label": "Room",
         "tip": "Room size scale",
@@ -3967,7 +3967,7 @@
         "defText": "0.60"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_decay",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_decay",
         "kind": "knob",
         "label": "Decay",
         "tip": "RT60 decay time (s)",
@@ -3986,7 +3986,7 @@
         "defText": "2.0"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_hfratio",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_hfratio",
         "kind": "knob",
         "label": "HFRatio",
         "tip": "HF decay ratio (<1 = darker/shorter highs)",
@@ -4005,7 +4005,7 @@
         "defText": "0.70"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_diffuse",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_diffuse",
         "kind": "knob",
         "label": "Diffuse",
         "tip": "Pre-diffusion (0=clear, 1=dense)",
@@ -4024,7 +4024,7 @@
         "defText": "0.50"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_predly",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_predly",
         "kind": "knob",
         "label": "PreDly",
         "tip": "Pre-delay (ms)",
@@ -4043,7 +4043,7 @@
         "defText": "10.0"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_wettone",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_wettone",
         "kind": "knob",
         "label": "WetTone",
         "tip": "Wet tone tilt ±12 dB @ 1 kHz (-=warm, +=bright)",
@@ -4062,7 +4062,7 @@
         "defText": "0.0"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_wet",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_wet",
         "kind": "knob",
         "label": "Wet",
         "tip": "Wet level",
@@ -4081,7 +4081,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_dry",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_dry",
         "kind": "knob",
         "label": "Dry",
         "tip": "Dry level",
@@ -4100,7 +4100,7 @@
         "defText": "0.70"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_locut",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_locut",
         "kind": "knob",
         "label": "LoCut",
         "tip": "Input HPF (Hz)",
@@ -4119,7 +4119,7 @@
         "defText": "80"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_hicut",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_hicut",
         "kind": "knob",
         "label": "HiCut",
         "tip": "Input LPF (Hz)",
@@ -4138,7 +4138,7 @@
         "defText": "18000"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_bassmlt",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_bassmlt",
         "kind": "knob",
         "label": "BassMlt",
         "tip": "Bass tail multiplier",
@@ -4157,7 +4157,7 @@
         "defText": "1.20"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_bassx",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_bassx",
         "kind": "knob",
         "label": "BassX",
         "tip": "Bass shelf crossover (Hz)",
@@ -4176,7 +4176,7 @@
         "defText": "250"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_taildep",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_taildep",
         "kind": "knob",
         "label": "TailDep",
         "tip": "Tail modulation depth (ms)",
@@ -4195,7 +4195,7 @@
         "defText": "0.30"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_tailrt",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_tailrt",
         "kind": "knob",
         "label": "TailRt",
         "tip": "Tail modulation rate (Hz)",
@@ -4214,7 +4214,7 @@
         "defText": "0.35"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_stereo",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_stereo",
         "kind": "knob",
         "label": "Stereo",
         "tip": "Stereo separation (%)",
@@ -4233,7 +4233,7 @@
         "defText": "100"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_hidamp",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_hidamp",
         "kind": "knob",
         "label": "HiDamp",
         "tip": "High-freq damping (Hz)",
@@ -4252,7 +4252,7 @@
         "defText": "8000"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_er",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_er",
         "kind": "knob",
         "label": "ER",
         "tip": "Early reflections level (dB)",
@@ -4271,7 +4271,7 @@
         "defText": "-6.0"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_freeze",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_freeze",
         "kind": "toggle",
         "bounds": [
           78.862973760932945,
@@ -4281,7 +4281,7 @@
         ]
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_duck",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_duck",
         "kind": "knob",
         "label": "Duck",
         "tip": "0..100 %.  Sidechain ducking amount.  When the trigger (SC source, or the dry input if none picked) crosses the DkThr threshold, the wet reverb is attenuated by this amount.  0 = disabled.",
@@ -4300,7 +4300,7 @@
         "defText": "0"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_dkthr",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_dkthr",
         "kind": "knob",
         "label": "DkThr",
         "tip": "Duck threshold (dB) - trigger level where ducking starts",
@@ -4319,7 +4319,7 @@
         "defText": "-24"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_dkatt",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_dkatt",
         "kind": "knob",
         "label": "DkAtt",
         "tip": "Duck attack (ms) - how fast the wet ducks once the trigger crosses threshold",
@@ -4338,7 +4338,7 @@
         "defText": "10"
       },
       {
-        "id": "master_621e60bbafc540aaae7e8ecb187602af_dkrel",
+        "id": "master_0f1f4312fbfb4470bb706410bfff85b1_dkrel",
         "kind": "knob",
         "label": "DkRel",
         "tip": "Duck release (ms) - how fast the wet recovers after the trigger falls back",
@@ -7558,6 +7558,127 @@
       }
     ]
   },
+  "EQ Band Menu": {
+    "menurows": [
+      {
+        "text": "Type",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          4.887218045112782
+        ]
+      },
+      {
+        "text": "Channel",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          13.157894736842104
+        ]
+      },
+      {
+        "text": "Move to",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          21.428571428571427
+        ]
+      },
+      {
+        "text": "Dynamic",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          29.699248120300751
+        ]
+      },
+      {
+        "text": "Listen",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          37.969924812030072
+        ]
+      },
+      {
+        "text": "Isolate",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          46.2406015037594
+        ]
+      },
+      {
+        "text": "Delta Listen",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          54.511278195488721
+        ]
+      },
+      {
+        "text": "Mute",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          62.781954887218042
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          68.796992481203006
+        ]
+      },
+      {
+        "text": "Split to Left + Right",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          74.812030075187977
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          80.827067669172934
+        ]
+      },
+      {
+        "text": "Reset Band",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          86.84210526315789
+        ]
+      },
+      {
+        "text": "Delete Band",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          95.112781954887211
+        ]
+      }
+    ]
+  },
   "EQ Instances": {
     "controls": [
       {
@@ -7965,6 +8086,3655 @@
           "defaultText": "0.0000000",
           "kind": "value"
         }
+      }
+    ]
+  },
+  "Piano Roll Edit": {
+    "menurows": [
+      {
+        "text": "Select All\tCtrl+A",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          8.904109589041095
+        ]
+      },
+      {
+        "text": "Deselect",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          23.972602739726028
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          34.93150684931507
+        ]
+      },
+      {
+        "text": "Copy\tCtrl+C",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          45.890410958904113
+        ]
+      },
+      {
+        "text": "Paste\tCtrl+V",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          60.958904109589042
+        ]
+      },
+      {
+        "text": "Delete",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          76.027397260273972
+        ]
+      },
+      {
+        "text": "Duplicate\tCtrl+B",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          91.095890410958901
+        ]
+      }
+    ]
+  },
+  "Piano Roll Tools": {
+    "menurows": [
+      {
+        "text": "Quantize\tAlt+Q",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          3.672316384180791
+        ]
+      },
+      {
+        "text": "Strum\tAlt+S",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          9.887005649717514
+        ]
+      },
+      {
+        "text": "Arpeggiate\tAlt+A",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          16.101694915254239
+        ]
+      },
+      {
+        "text": "Chop...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          22.316384180790962
+        ]
+      },
+      {
+        "text": "Glue\tCtrl+G",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          28.531073446327685
+        ]
+      },
+      {
+        "text": "Articulate\tAlt+L",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          34.745762711864408
+        ]
+      },
+      {
+        "text": "Randomize\tAlt+R",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          40.960451977401128
+        ]
+      },
+      {
+        "text": "Humanize...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          47.175141242937855
+        ]
+      },
+      {
+        "text": "Riff Machine...\tAlt+E",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          53.389830508474574
+        ]
+      },
+      {
+        "text": "Generate Chords\tAlt+P",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          59.604519774011301
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          64.124293785310741
+        ]
+      },
+      {
+        "text": "Quantize Settings",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          68.644067796610173
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          73.163841807909606
+        ]
+      },
+      {
+        "text": "Transpose Up\tShift+Up",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          77.683615819209038
+        ]
+      },
+      {
+        "text": "Transpose Down\tShift+Down",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          83.898305084745758
+        ]
+      },
+      {
+        "text": "Transpose Up Octave\tCtrl+Up",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          90.112994350282491
+        ]
+      },
+      {
+        "text": "Transpose Down Octave\tCtrl+Down",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.758389261744966,
+          96.327683615819211
+        ]
+      }
+    ]
+  },
+  "Piano Roll Scale": {
+    "menurows": [
+      {
+        "text": "Snap to Scale",
+        "sep": false,
+        "header": false,
+        "dot": [
+          7.724137931034483,
+          16.25
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          7.724137931034483,
+          36.25
+        ]
+      },
+      {
+        "text": "Root",
+        "sep": false,
+        "header": false,
+        "dot": [
+          7.724137931034483,
+          56.25
+        ]
+      },
+      {
+        "text": "Scale",
+        "sep": false,
+        "header": false,
+        "dot": [
+          7.724137931034483,
+          83.75
+        ]
+      }
+    ]
+  },
+  "Piano Roll Chords": {
+    "menurows": [
+      {
+        "text": "Major",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          4.166666666666667
+        ]
+      },
+      {
+        "text": "Minor",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          11.217948717948717
+        ]
+      },
+      {
+        "text": "Dim",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          18.26923076923077
+        ]
+      },
+      {
+        "text": "Aug",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          25.320512820512821
+        ]
+      },
+      {
+        "text": "Sus2",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          32.371794871794869
+        ]
+      },
+      {
+        "text": "Sus4",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          39.42307692307692
+        ]
+      },
+      {
+        "text": "Major 7",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          46.474358974358971
+        ]
+      },
+      {
+        "text": "Minor 7",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          53.525641025641029
+        ]
+      },
+      {
+        "text": "Dom 7",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          60.57692307692308
+        ]
+      },
+      {
+        "text": "Half-Dim 7",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          67.628205128205124
+        ]
+      },
+      {
+        "text": "Dim 7",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          74.679487179487182
+        ]
+      },
+      {
+        "text": "Major 9",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          81.730769230769226
+        ]
+      },
+      {
+        "text": "Minor 9",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          88.782051282051285
+        ]
+      },
+      {
+        "text": "Add 9",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.03225806451613,
+          95.833333333333329
+        ]
+      }
+    ]
+  },
+  "Piano Roll View": {
+    "menurows": [
+      {
+        "text": "Zoom In",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          7.303370786516854
+        ]
+      },
+      {
+        "text": "Zoom Out",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          19.662921348314608
+        ]
+      },
+      {
+        "text": "Zoom In Vertical",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          32.022471910112358
+        ]
+      },
+      {
+        "text": "Zoom Out Vertical",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          44.382022471910112
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          53.370786516853933
+        ]
+      },
+      {
+        "text": "Scroll to Playhead",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          62.359550561797754
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          71.348314606741567
+        ]
+      },
+      {
+        "text": "Ghost Notes",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          80.337078651685388
+        ]
+      },
+      {
+        "text": "Velocity Lane",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.363636363636363,
+          92.696629213483149
+        ]
+      }
+    ]
+  },
+  "Drum Kit Edit": {
+    "menurows": [
+      {
+        "text": "Select All\tCtrl+A",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          8.904109589041095
+        ]
+      },
+      {
+        "text": "Deselect",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          23.972602739726028
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          34.93150684931507
+        ]
+      },
+      {
+        "text": "Copy\tCtrl+C",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          45.890410958904113
+        ]
+      },
+      {
+        "text": "Paste\tCtrl+V",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          60.958904109589042
+        ]
+      },
+      {
+        "text": "Delete",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          76.027397260273972
+        ]
+      },
+      {
+        "text": "Duplicate\tCtrl+B",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          91.095890410958901
+        ]
+      }
+    ]
+  },
+  "Drum Kit Tools": {
+    "menurows": [
+      {
+        "text": "Quantize\tAlt+Q",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          7.738095238095238
+        ]
+      },
+      {
+        "text": "Strum\tAlt+S",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          20.833333333333332
+        ]
+      },
+      {
+        "text": "Chop...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          33.928571428571431
+        ]
+      },
+      {
+        "text": "Glue\tCtrl+G",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          47.023809523809526
+        ]
+      },
+      {
+        "text": "Articulate\tAlt+L",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          60.11904761904762
+        ]
+      },
+      {
+        "text": "Randomize\tAlt+R",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          73.214285714285708
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          82.738095238095241
+        ]
+      },
+      {
+        "text": "Quantize Settings",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.473988439306359,
+          92.261904761904759
+        ]
+      }
+    ]
+  },
+  "Drum Kit View": {
+    "menurows": [
+      {
+        "text": "Zoom In",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.436781609195402,
+          11.607142857142858
+        ]
+      },
+      {
+        "text": "Zoom Out",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.436781609195402,
+          31.25
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.436781609195402,
+          45.535714285714285
+        ]
+      },
+      {
+        "text": "Scroll to Playhead",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.436781609195402,
+          59.821428571428569
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.436781609195402,
+          74.107142857142861
+        ]
+      },
+      {
+        "text": "Velocity Lane",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.436781609195402,
+          88.392857142857139
+        ]
+      }
+    ]
+  },
+  "Effects Panel List": {
+    "menurows": [
+      {
+        "text": "Dynamic",
+        "sep": false,
+        "header": true,
+        "dot": [
+          6.706586826347305,
+          3.790983606557377
+        ]
+      },
+      {
+        "text": "Compressor",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          9.426229508196721
+        ]
+      },
+      {
+        "text": "De-esser",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          13.934426229508198
+        ]
+      },
+      {
+        "text": "Gate",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          18.442622950819672
+        ]
+      },
+      {
+        "text": "Limiter",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          22.950819672131146
+        ]
+      },
+      {
+        "text": "Transient Shaper",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          27.459016393442624
+        ]
+      },
+      {
+        "text": "Harmonics",
+        "sep": false,
+        "header": true,
+        "dot": [
+          6.706586826347305,
+          33.094262295081968
+        ]
+      },
+      {
+        "text": "Overdrive",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          38.729508196721312
+        ]
+      },
+      {
+        "text": "Saturation",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          43.23770491803279
+        ]
+      },
+      {
+        "text": "Modulation",
+        "sep": false,
+        "header": true,
+        "dot": [
+          6.706586826347305,
+          48.872950819672134
+        ]
+      },
+      {
+        "text": "Chorus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          54.508196721311478
+        ]
+      },
+      {
+        "text": "Flanger",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          59.016393442622949
+        ]
+      },
+      {
+        "text": "Phaser",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          63.524590163934427
+        ]
+      },
+      {
+        "text": "Time",
+        "sep": false,
+        "header": true,
+        "dot": [
+          6.706586826347305,
+          69.159836065573771
+        ]
+      },
+      {
+        "text": "De-reverb",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          74.795081967213122
+        ]
+      },
+      {
+        "text": "Delay",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          79.303278688524586
+        ]
+      },
+      {
+        "text": "Reverb",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          83.811475409836063
+        ]
+      },
+      {
+        "text": "Pedals",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          89.446721311475414
+        ]
+      },
+      {
+        "text": "VST Plugins",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.706586826347305,
+          96.209016393442624
+        ]
+      }
+    ]
+  },
+  "BaySickPedals List": {
+    "menurows": [
+      {
+        "text": "User NAM Pedal",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.685279187817259,
+          2.700729927007299
+        ]
+      },
+      {
+        "text": "Load NAM Pedal",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          6.715328467153284
+        ]
+      },
+      {
+        "text": "Dynamics",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.685279187817259,
+          10.729927007299271
+        ]
+      },
+      {
+        "text": "Bass Compressor",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          14.744525547445255
+        ]
+      },
+      {
+        "text": "Compressor",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          17.956204379562045
+        ]
+      },
+      {
+        "text": "Noise Gate",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          21.167883211678831
+        ]
+      },
+      {
+        "text": "Harmonics",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.685279187817259,
+          25.182481751824817
+        ]
+      },
+      {
+        "text": "Bass Driver",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          29.197080291970803
+        ]
+      },
+      {
+        "text": "Bass Overdrive",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          32.408759124087588
+        ]
+      },
+      {
+        "text": "Blues Drive",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          35.620437956204377
+        ]
+      },
+      {
+        "text": "Distortion",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          38.832116788321166
+        ]
+      },
+      {
+        "text": "Fuzz",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          42.043795620437955
+        ]
+      },
+      {
+        "text": "High-Gain",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          45.255474452554743
+        ]
+      },
+      {
+        "text": "Octave",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          48.467153284671532
+        ]
+      },
+      {
+        "text": "Overdrive",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          51.678832116788321
+        ]
+      },
+      {
+        "text": "Saturation",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          54.89051094890511
+        ]
+      },
+      {
+        "text": "Modulation",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.685279187817259,
+          58.905109489051092
+        ]
+      },
+      {
+        "text": "Acoustic Simulator",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          62.919708029197082
+        ]
+      },
+      {
+        "text": "Chorus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          66.131386861313871
+        ]
+      },
+      {
+        "text": "Flanger",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          69.34306569343066
+        ]
+      },
+      {
+        "text": "Phaser",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          72.554744525547449
+        ]
+      },
+      {
+        "text": "Polyphonic Synth",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          75.766423357664237
+        ]
+      },
+      {
+        "text": "Wah",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          78.978102189781026
+        ]
+      },
+      {
+        "text": "Time",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.685279187817259,
+          82.992700729927009
+        ]
+      },
+      {
+        "text": "Acoustic Preamp",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          87.007299270072991
+        ]
+      },
+      {
+        "text": "Delay",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          90.21897810218978
+        ]
+      },
+      {
+        "text": "Reverb",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          93.430656934306569
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          95.766423357664237
+        ]
+      },
+      {
+        "text": "Clear",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.685279187817259,
+          98.102189781021892
+        ]
+      }
+    ]
+  },
+  "BaySickPedals View": {
+    "menurows": [
+      {
+        "text": "Standard",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.91150442477876,
+          27.083333333333332
+        ]
+      },
+      {
+        "text": "Compact",
+        "sep": false,
+        "header": false,
+        "dot": [
+          9.91150442477876,
+          72.916666666666671
+        ]
+      }
+    ]
+  },
+  "Recording Menu": {
+    "menurows": [
+      {
+        "text": "ASIO",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          16.25
+        ]
+      },
+      {
+        "text": "MIDI (piano roll tabs only)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          43.75
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          63.75
+        ]
+      },
+      {
+        "text": "Global Record-Quantize",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          83.75
+        ]
+      }
+    ]
+  },
+  "Builder Menu": {
+    "menurows": [
+      {
+        "text": "Import Audio...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          9.701492537313433
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          21.64179104477612
+        ]
+      },
+      {
+        "text": "Rename Pattern\tF2",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          33.582089552238806
+        ]
+      },
+      {
+        "text": "Find Next Empty\tF3",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          50.0
+        ]
+      },
+      {
+        "text": "New Automation Clip...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          66.417910447761187
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          78.358208955223887
+        ]
+      },
+      {
+        "text": "Render Pattern to WAV...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          90.298507462686572
+        ]
+      }
+    ]
+  },
+  "Builder Edit": {
+    "menurows": [
+      {
+        "text": "Undo",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          6.5
+        ]
+      },
+      {
+        "text": "Redo",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          17.5
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          25.5
+        ]
+      },
+      {
+        "text": "Select All\tCtrl+A",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          33.5
+        ]
+      },
+      {
+        "text": "Deselect\tEsc",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          44.5
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          52.5
+        ]
+      },
+      {
+        "text": "Copy\tCtrl+C",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          60.5
+        ]
+      },
+      {
+        "text": "Paste\tCtrl+V",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          71.5
+        ]
+      },
+      {
+        "text": "Delete\tDel",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          82.5
+        ]
+      },
+      {
+        "text": "Duplicate\tCtrl+B",
+        "sep": false,
+        "header": false,
+        "dot": [
+          6.787878787878788,
+          93.5
+        ]
+      }
+    ]
+  },
+  "Builder View": {
+    "menurows": [
+      {
+        "text": "Zoom In\t+",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.890829694323144,
+          16.25
+        ]
+      },
+      {
+        "text": "Zoom Out\t-",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.890829694323144,
+          43.75
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.890829694323144,
+          63.75
+        ]
+      },
+      {
+        "text": "Performance Mode\tCtrl+P",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.890829694323144,
+          83.75
+        ]
+      }
+    ]
+  },
+  "Mixer Menu": {
+    "menurows": [
+      {
+        "text": "Pan Law",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.516129032258065,
+          14.130434782608695
+        ]
+      },
+      {
+        "text": "Master Output",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.516129032258065,
+          38.043478260869563
+        ]
+      },
+      {
+        "text": "Latency-compensate meters",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.516129032258065,
+          61.956521739130437
+        ]
+      },
+      {
+        "text": "Multi-core Rendering",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.516129032258065,
+          85.869565217391298
+        ]
+      }
+    ]
+  },
+  "Mixer Add": {
+    "menurows": [
+      {
+        "text": "Aux Strip",
+        "sep": false,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          7.738095238095238
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          17.261904761904763
+        ]
+      },
+      {
+        "text": "Vox Bus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          26.785714285714285
+        ]
+      },
+      {
+        "text": "Inst Bus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          39.88095238095238
+        ]
+      },
+      {
+        "text": "Layers Bus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          52.976190476190474
+        ]
+      },
+      {
+        "text": "Bass Bus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          66.071428571428569
+        ]
+      },
+      {
+        "text": "Clips Bus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          79.166666666666671
+        ]
+      },
+      {
+        "text": "Plugins Bus",
+        "sep": false,
+        "header": false,
+        "dot": [
+          8.682170542635658,
+          92.261904761904759
+        ]
+      }
+    ]
+  },
+  "Send Menu": {
+    "menurows": [
+      {
+        "text": "Send...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          11.403508771929825
+        ]
+      },
+      {
+        "text": "Sidechain...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          30.701754385964911
+        ]
+      },
+      {
+        "text": "Move Output...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          50.0
+        ]
+      },
+      {
+        "text": "Add Main Out...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          69.298245614035082
+        ]
+      },
+      {
+        "text": "Remove Main Out...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.957446808510638,
+          88.596491228070178
+        ]
+      }
+    ]
+  },
+  "Effects Rack Menu": {
+    "menurows": [
+      {
+        "text": "Save FX Rack Preset...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.745762711864407,
+          9.701492537313433
+        ]
+      },
+      {
+        "text": "Load FX Rack Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.745762711864407,
+          26.119402985074625
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.745762711864407,
+          38.059701492537314
+        ]
+      },
+      {
+        "text": "Open Presets Folder",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.745762711864407,
+          50.0
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.745762711864407,
+          61.940298507462686
+        ]
+      },
+      {
+        "text": "VU Calibration (0 VU = ...)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.745762711864407,
+          73.880597014925371
+        ]
+      },
+      {
+        "text": "VU Meter",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.745762711864407,
+          90.298507462686572
+        ]
+      }
+    ]
+  },
+  "Effects Panel Menu": {
+    "menurows": [
+      {
+        "text": "Show Advanced Controls",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          26.219512195121951
+        ]
+      },
+      {
+        "text": "Mode: Modern...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          39.634146341463413
+        ]
+      },
+      {
+        "text": "SC: Off...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          53.048780487804876
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          62.804878048780488
+        ]
+      },
+      {
+        "text": "Presets...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          72.560975609756099
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          82.317073170731703
+        ]
+      },
+      {
+        "text": "Visual",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.022421524663677,
+          92.073170731707322
+        ]
+      }
+    ]
+  },
+  "BaySickSynth-BaySickPlayer-Harmless Menu": {
+    "menurows": [
+      {
+        "text": "Player",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          3.217821782178218
+        ]
+      },
+      {
+        "text": "Piano Roll",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          8.663366336633663
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          12.623762376237623
+        ]
+      },
+      {
+        "text": "FX Rack",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          16.584158415841586
+        ]
+      },
+      {
+        "text": "Freeze",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          22.029702970297031
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          25.990099009900991
+        ]
+      },
+      {
+        "text": "Lock Layer",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          29.950495049504951
+        ]
+      },
+      {
+        "text": "Polyphony: Polyphonic",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          35.396039603960396
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          39.356435643564353
+        ]
+      },
+      {
+        "text": "Rename...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          43.316831683168317
+        ]
+      },
+      {
+        "text": "Replace Engine",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          48.762376237623762
+        ]
+      },
+      {
+        "text": "Duplicate Layer (new tab)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          54.207920792079207
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          58.168316831683171
+        ]
+      },
+      {
+        "text": "Choke Group",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          62.128712871287128
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          66.089108910891085
+        ]
+      },
+      {
+        "text": "Save Current Patch As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          70.049504950495049
+        ]
+      },
+      {
+        "text": "Load Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          75.495049504950501
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          79.455445544554451
+        ]
+      },
+      {
+        "text": "Save Page Preset As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          83.415841584158414
+        ]
+      },
+      {
+        "text": "Load Page Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          88.861386138613867
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          92.821782178217816
+        ]
+      },
+      {
+        "text": "Delete Layer",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.848484848484849,
+          96.78217821782178
+        ]
+      }
+    ]
+  },
+  "BaySickBass Menu Updated": {
+    "menurows": [
+      {
+        "text": "Player",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          3.217821782178218
+        ]
+      },
+      {
+        "text": "Piano Roll",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          8.663366336633663
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          12.623762376237623
+        ]
+      },
+      {
+        "text": "FX Rack",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          16.584158415841586
+        ]
+      },
+      {
+        "text": "Freeze",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          22.029702970297031
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          25.990099009900991
+        ]
+      },
+      {
+        "text": "Lock Bass",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          29.950495049504951
+        ]
+      },
+      {
+        "text": "Polyphony: Monophonic",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          35.396039603960396
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          39.356435643564353
+        ]
+      },
+      {
+        "text": "Rename...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          43.316831683168317
+        ]
+      },
+      {
+        "text": "Replace Engine",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          48.762376237623762
+        ]
+      },
+      {
+        "text": "Duplicate Bass (new tab)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          54.207920792079207
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          58.168316831683171
+        ]
+      },
+      {
+        "text": "Choke Group",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          62.128712871287128
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          66.089108910891085
+        ]
+      },
+      {
+        "text": "Save Current Patch As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          70.049504950495049
+        ]
+      },
+      {
+        "text": "Load Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          75.495049504950501
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          79.455445544554451
+        ]
+      },
+      {
+        "text": "Save Page Preset As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          83.415841584158414
+        ]
+      },
+      {
+        "text": "Load Page Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          88.861386138613867
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          92.821782178217816
+        ]
+      },
+      {
+        "text": "Delete Bass",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.977777777777778,
+          96.78217821782178
+        ]
+      }
+    ]
+  },
+  "BaySickVocals Menu": {
+    "menurows": [
+      {
+        "text": "Vocal Chain",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          4.088050314465409
+        ]
+      },
+      {
+        "text": "BaySickPitch",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          11.0062893081761
+        ]
+      },
+      {
+        "text": "BaySickAlign",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          17.924528301886792
+        ]
+      },
+      {
+        "text": "NAM/IR",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          24.842767295597483
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          29.874213836477988
+        ]
+      },
+      {
+        "text": "FX Rack",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          34.905660377358494
+        ]
+      },
+      {
+        "text": "Freeze",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          41.823899371069182
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          46.855345911949684
+        ]
+      },
+      {
+        "text": "Lock",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          51.886792452830186
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          56.918238993710695
+        ]
+      },
+      {
+        "text": "Rename...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          61.949685534591197
+        ]
+      },
+      {
+        "text": "Duplicate Vox (new tab)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          68.867924528301884
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          73.899371069182394
+        ]
+      },
+      {
+        "text": "Save Page Preset As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          78.930817610062888
+        ]
+      },
+      {
+        "text": "Load Page Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          85.84905660377359
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          90.880503144654085
+        ]
+      },
+      {
+        "text": "Delete Vox",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.137614678899083,
+          95.911949685534594
+        ]
+      }
+    ]
+  },
+  "BaySickDrum Menu": {
+    "menurows": [
+      {
+        "text": "Lock Drum",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          4.924242424242424
+        ]
+      },
+      {
+        "text": "Polyphony: Polyphonic",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          13.257575757575758
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          19.318181818181817
+        ]
+      },
+      {
+        "text": "Rename...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          25.378787878787879
+        ]
+      },
+      {
+        "text": "Replace Sound...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          33.712121212121211
+        ]
+      },
+      {
+        "text": "Duplicate Drum (new tab)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          42.045454545454547
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          48.106060606060609
+        ]
+      },
+      {
+        "text": "Choke Group",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          54.166666666666664
+        ]
+      },
+      {
+        "text": "MIDI Note",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          62.5
+        ]
+      },
+      {
+        "text": "MIDI Learn",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          70.833333333333329
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          76.893939393939391
+        ]
+      },
+      {
+        "text": "Save Current Patch As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          82.954545454545453
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          89.015151515151516
+        ]
+      },
+      {
+        "text": "Delete Drum",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.827586206896552,
+          95.075757575757578
+        ]
+      }
+    ]
+  },
+  "BaySickPlugins Menu": {
+    "menurows": [
+      {
+        "text": "Piano Roll",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          4.924242424242424
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          10.984848484848484
+        ]
+      },
+      {
+        "text": "FX Rack",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          17.045454545454547
+        ]
+      },
+      {
+        "text": "Freeze",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          25.378787878787879
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          31.439393939393938
+        ]
+      },
+      {
+        "text": "Rename...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          37.5
+        ]
+      },
+      {
+        "text": "Replace Plugin",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          45.833333333333336
+        ]
+      },
+      {
+        "text": "Duplicate Plugin (new tab)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          54.166666666666664
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          60.227272727272727
+        ]
+      },
+      {
+        "text": "Save Page Preset As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          66.287878787878782
+        ]
+      },
+      {
+        "text": "Load Page Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          74.621212121212125
+        ]
+      },
+      {
+        "text": "Automate",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          82.954545454545453
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          89.015151515151516
+        ]
+      },
+      {
+        "text": "Delete Plugin",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.76595744680851,
+          95.075757575757578
+        ]
+      }
+    ]
+  },
+  "BaySickGuitars & Basses Menu": {
+    "menurows": [
+      {
+        "text": "Pedals",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          4.391891891891892
+        ]
+      },
+      {
+        "text": "NAM/IR",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          11.824324324324325
+        ]
+      },
+      {
+        "text": "Piano Roll",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          19.256756756756758
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          24.662162162162161
+        ]
+      },
+      {
+        "text": "FX Rack",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          30.067567567567568
+        ]
+      },
+      {
+        "text": "Freeze",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          37.5
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          42.905405405405403
+        ]
+      },
+      {
+        "text": "Lock",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          48.310810810810814
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          53.716216216216218
+        ]
+      },
+      {
+        "text": "Rename...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          59.121621621621621
+        ]
+      },
+      {
+        "text": "Duplicate Inst (new tab)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          66.554054054054049
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          71.959459459459453
+        ]
+      },
+      {
+        "text": "Save Page Preset As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          77.36486486486487
+        ]
+      },
+      {
+        "text": "Load Page Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          84.797297297297291
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          90.202702702702709
+        ]
+      },
+      {
+        "text": "Delete Inst",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          95.608108108108112
+        ]
+      }
+    ]
+  },
+  "BaySickPedals Menu": {
+    "menurows": [
+      {
+        "text": "Pedals",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          5.909090909090909
+        ]
+      },
+      {
+        "text": "NAM/IR",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          15.909090909090908
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          23.181818181818183
+        ]
+      },
+      {
+        "text": "Lock",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          30.454545454545453
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          37.727272727272727
+        ]
+      },
+      {
+        "text": "Rename...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          45.0
+        ]
+      },
+      {
+        "text": "Duplicate Inst (new tab)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          55.0
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          62.272727272727273
+        ]
+      },
+      {
+        "text": "Save Page Preset As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          69.545454545454547
+        ]
+      },
+      {
+        "text": "Load Page Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          79.545454545454547
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          86.818181818181813
+        ]
+      },
+      {
+        "text": "Delete Inst",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          94.090909090909093
+        ]
+      }
+    ]
+  },
+  "BaySickRustyDrums Menu": {
+    "menurows": [
+      {
+        "text": "Drum Kit",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          7.303370786516854
+        ]
+      },
+      {
+        "text": "Player",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          19.662921348314608
+        ]
+      },
+      {
+        "text": "Piano Roll",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          32.022471910112358
+        ]
+      },
+      {
+        "text": "Rusty Drums Map...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          44.382022471910112
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          53.370786516853933
+        ]
+      },
+      {
+        "text": "Freeze",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          62.359550561797754
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          71.348314606741567
+        ]
+      },
+      {
+        "text": "Save Page Preset As...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          80.337078651685388
+        ]
+      },
+      {
+        "text": "Load Page Preset",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.410628019323672,
+          92.696629213483149
+        ]
+      }
+    ]
+  },
+  "Ribbon + Menu": {
+    "menurows": [
+      {
+        "text": "BaySickVocal",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          5.284552845528455
+        ]
+      },
+      {
+        "text": "BaySickLiveInst",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          14.227642276422765
+        ]
+      },
+      {
+        "text": "BaySickGuitars",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          23.170731707317074
+        ]
+      },
+      {
+        "text": "BaySickBasses",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          32.113821138211385
+        ]
+      },
+      {
+        "text": "VSTPlugin",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          41.056910569105689
+        ]
+      },
+      {
+        "text": "Harmless",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          50.0
+        ]
+      },
+      {
+        "text": "BaySickSynth",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          58.943089430894311
+        ]
+      },
+      {
+        "text": "BaySickPlayer",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          67.886178861788622
+        ]
+      },
+      {
+        "text": "BaySickBass",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          76.829268292682926
+        ]
+      },
+      {
+        "text": "BaySickDrums",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          85.77235772357723
+        ]
+      },
+      {
+        "text": "BaySickRustyDrums",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.894736842105263,
+          94.715447154471548
+        ]
+      }
+    ]
+  },
+  "Analyzer Menu": {
+    "menurows": [
+      {
+        "text": "View",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.463414634146342,
+          5.211267605633803
+        ]
+      },
+      {
+        "text": "Levels",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          12.95774647887324
+        ]
+      },
+      {
+        "text": "Loudness",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          19.154929577464788
+        ]
+      },
+      {
+        "text": "Spectrum",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          25.35211267605634
+        ]
+      },
+      {
+        "text": "Source",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.463414634146342,
+          33.098591549295776
+        ]
+      },
+      {
+        "text": "Live",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          40.845070422535208
+        ]
+      },
+      {
+        "text": "No captured takes yet",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          47.04225352112676
+        ]
+      },
+      {
+        "text": "Target",
+        "sep": false,
+        "header": true,
+        "dot": [
+          5.463414634146342,
+          54.7887323943662
+        ]
+      },
+      {
+        "text": "Streaming (-14 LUFS)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          62.535211267605632
+        ]
+      },
+      {
+        "text": "Streaming (-16 LUFS)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          68.732394366197184
+        ]
+      },
+      {
+        "text": "EBU R128 (-23 LUFS)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          74.929577464788736
+        ]
+      },
+      {
+        "text": "ATSC A/85 (-24 LKFS)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          81.126760563380287
+        ]
+      },
+      {
+        "text": "Custom...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          87.323943661971825
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          91.83098591549296
+        ]
+      },
+      {
+        "text": "Reset history",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.463414634146342,
+          96.338028169014081
+        ]
+      }
+    ]
+  },
+  "File Menu": {
+    "menurows": [
+      {
+        "text": "New Project...  (Ctrl+N)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          4.088050314465409
+        ]
+      },
+      {
+        "text": "New from Template",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          11.0062893081761
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          16.037735849056602
+        ]
+      },
+      {
+        "text": "Open Project...  (Ctrl+O)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          21.069182389937108
+        ]
+      },
+      {
+        "text": "Quick Open Project...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          27.987421383647799
+        ]
+      },
+      {
+        "text": "Open Recent",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          34.905660377358494
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          39.937106918238996
+        ]
+      },
+      {
+        "text": "Save  (Ctrl+S)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          44.968553459119498
+        ]
+      },
+      {
+        "text": "Save As...  (Shift+Ctrl+S)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          51.886792452830186
+        ]
+      },
+      {
+        "text": "Save as Template...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          58.80503144654088
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          63.836477987421382
+        ]
+      },
+      {
+        "text": "Restore from Backup...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          68.867924528301884
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          73.899371069182394
+        ]
+      },
+      {
+        "text": "Import Audio...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          78.930817610062888
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          83.962264150943398
+        ]
+      },
+      {
+        "text": "Export Audio...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          88.993710691823892
+        ]
+      },
+      {
+        "text": "Export Project Bundle...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.8068669527897,
+          95.911949685534594
+        ]
+      }
+    ]
+  },
+  "Edit Menu": {
+    "menurows": [
+      {
+        "text": "Undo  (Ctrl+Z)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.714285714285714,
+          9.701492537313433
+        ]
+      },
+      {
+        "text": "Redo  (Ctrl+Alt+Z)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.714285714285714,
+          26.119402985074625
+        ]
+      },
+      {
+        "text": "History...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.714285714285714,
+          42.537313432835823
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.714285714285714,
+          54.477611940298509
+        ]
+      },
+      {
+        "text": "New Tab",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.714285714285714,
+          66.417910447761187
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.714285714285714,
+          78.358208955223887
+        ]
+      },
+      {
+        "text": "New Automation Clip",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.714285714285714,
+          90.298507462686572
+        ]
+      }
+    ]
+  },
+  "Pattern Menu": {
+    "menurows": [
+      {
+        "text": "Rename / Color  (F2)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          7.303370786516854
+        ]
+      },
+      {
+        "text": "Find Next Empty Pattern  (F3)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          19.662921348314608
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          28.651685393258425
+        ]
+      },
+      {
+        "text": "Insert One  (Shift+Ctrl+Ins)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          37.640449438202246
+        ]
+      },
+      {
+        "text": "Clone  (Alt+C)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          50.0
+        ]
+      },
+      {
+        "text": "Delete",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          62.359550561797754
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          71.348314606741567
+        ]
+      },
+      {
+        "text": "Move Up  (Shift+Ctrl+Up)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          80.337078651685388
+        ]
+      },
+      {
+        "text": "Move Down  (Shift+Ctrl+Down)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.117647058823529,
+          92.696629213483149
+        ]
+      }
+    ]
+  },
+  "View Menu": {
+    "menurows": [
+      {
+        "text": "Show Builder  (F5)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          7.222222222222222
+        ]
+      },
+      {
+        "text": "Show Mixer  (F6)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          19.444444444444443
+        ]
+      },
+      {
+        "text": "Show Player (Most Recent)  (F7)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          31.666666666666668
+        ]
+      },
+      {
+        "text": "Show Effects Rack (Most Recent)  (F8)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          43.888888888888886
+        ]
+      },
+      {
+        "text": "Show Effect Panel (Most Recent)  (F9)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          56.111111111111114
+        ]
+      },
+      {
+        "text": "Show Piano Roll (Most Recent)  (F10)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          68.333333333333329
+        ]
+      },
+      {
+        "text": "Show Drum Kit (Most Recent)  (F11)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          80.555555555555557
+        ]
+      },
+      {
+        "text": "Show Event Editor (Most Recent)  (F12)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.404255319148936,
+          92.777777777777771
+        ]
+      }
+    ]
+  },
+  "Options Menu": {
+    "menurows": [
+      {
+        "text": "General",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          7.303370786516854
+        ]
+      },
+      {
+        "text": "File Settings...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          19.662921348314608
+        ]
+      },
+      {
+        "text": "Audio Settings...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          32.022471910112358
+        ]
+      },
+      {
+        "text": "Plugins...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          44.382022471910112
+        ]
+      },
+      {
+        "text": "Get Sound Content...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          56.741573033707866
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          65.730337078651687
+        ]
+      },
+      {
+        "text": "Undo History Size",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          74.719101123595507
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          83.707865168539328
+        ]
+      },
+      {
+        "text": "MIDI is Omni (all devices)  -  Read Only",
+        "sep": false,
+        "header": false,
+        "dot": [
+          3.393939393939394,
+          92.696629213483149
+        ]
+      }
+    ]
+  },
+  "Help Menu": {
+    "menurows": [
+      {
+        "text": "Help Index  (F1)",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          12.745098039215685
+        ]
+      },
+      {
+        "text": "Key Binds...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          34.313725490196077
+        ]
+      },
+      {
+        "text": "View Projects MidiMap",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          55.882352941176471
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          71.568627450980387
+        ]
+      },
+      {
+        "text": "About BaySickDAW v1.0",
+        "sep": false,
+        "header": false,
+        "dot": [
+          5.090909090909091,
+          87.254901960784309
+        ]
+      }
+    ]
+  },
+  "RightClick Knob or Slider": {
+    "menurows": [
+      {
+        "text": "Automate: Mx Master - Fader",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.392156862745098,
+          16.25
+        ]
+      },
+      {
+        "text": "Type in value...",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.392156862745098,
+          43.75
+        ]
+      },
+      {
+        "text": "",
+        "sep": true,
+        "header": false,
+        "dot": [
+          4.392156862745098,
+          63.75
+        ]
+      },
+      {
+        "text": "MIDI Learn",
+        "sep": false,
+        "header": false,
+        "dot": [
+          4.392156862745098,
+          83.75
+        ]
       }
     ]
   }
