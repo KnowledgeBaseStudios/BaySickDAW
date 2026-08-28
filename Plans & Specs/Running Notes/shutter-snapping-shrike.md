@@ -238,3 +238,23 @@ Fix pass: the walk found only supplements at first - a headless root
 never gets setVisible(true) (snapshots paint regardless), so the
 visibility gate now exempts the root and prunes children only. Gate six
 zeros + four links x3 (dump, defText, root-visible fix).
+
+## 2026-08-28 - Tasks 5-7 - control blurbs (all three groups, one commit)
+
+Task 5's Shell group has ZERO stamped controls (Builder, Piano Roll,
+transport and the kit grid carry no APVTS-attached widgets), so the
+Shell blurb pass is a no-op - folded into this commit rather than
+minting an empty one. Tasks 6 (Instrument) + 7 (Mixing & Effects)
+authored together in control-blurbs.py: 250-odd keys, every one
+verb-first, effect-first, 3-9 words, numbers left to the Default/Range
+columns. Coverage check: the regenerated manual renders 284 table rows
+and every row carries a blurb.
+
+Generator refinements that surfaced while authoring: id-less same-label
+knobs on sibling chain stages (the Vocal Chain's six Vol/Thresh/...
+sets have empty paramIds headless - the editor wires their automation
+prefix at page-show) now key with a '#n' ordinal instead of collapsing
+into the first stage's row, and identical clone rows (six identical
+stage Vols, per-strip Pan) still document once. The blurb lookup keys
+on the suffixed key, and the stage order note lives in the blurbs file
+so the ordinals stay legible.

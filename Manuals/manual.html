@@ -3751,15 +3751,15 @@ implementation rather than to whatever claims the extension first &mdash; see
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>A/B Slot</td><td></td><td>A</td><td>A, B</td></tr>
-<tr><td>Pitch Realtime Bypass</td><td></td><td>On</td><td>on / off</td></tr>
-<tr><td>Pitch Root</td><td></td><td>C</td><td>C, C#, D, D#, E, F, F#, G, G#, A, A#, B</td></tr>
-<tr><td>Pitch Scale</td><td></td><td>Chromatic</td><td>Chromatic, Major, Minor, Dorian, Phrygian, Lydian, Mixolydian, Locrian, Harm. Minor, Mel. Minor, Pentatonic Maj, Pentatonic Min, Blues</td></tr>
-<tr><td>Retune Speed ms</td><td></td><td>60</td><td>0 to 100</td></tr>
-<tr><td>Pitch Strength</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Humanize cents</td><td></td><td>0</td><td>0 to 20</td></tr>
-<tr><td>Throat Shift semis</td><td></td><td>0</td><td>-12 to 12</td></tr>
-<tr><td>Formant Preserve</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>A/B Slot</td><td>Switches between the A and B settings slots.</td><td>A</td><td>A, B</td></tr>
+<tr><td>Pitch Realtime Bypass</td><td>Turns realtime pitch correction on.</td><td>On</td><td>on / off</td></tr>
+<tr><td>Pitch Root</td><td>Picks the root note correction pulls to.</td><td>C</td><td>C, C#, D, D#, E, F, F#, G, G#, A, A#, B</td></tr>
+<tr><td>Pitch Scale</td><td>Picks the scale correction snaps to.</td><td>Chromatic</td><td>Chromatic, Major, Minor, Dorian, Phrygian, Lydian, Mixolydian, Locrian, Harm. Minor, Mel. Minor, Pentatonic Maj, Pentatonic Min, Blues</td></tr>
+<tr><td>Retune Speed ms</td><td>Sets how fast pitch snaps to the note.</td><td>60</td><td>0 to 100</td></tr>
+<tr><td>Pitch Strength</td><td>Sets how hard correction pulls the pitch.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Humanize cents</td><td>Adds small random wobble after correction.</td><td>0</td><td>0 to 20</td></tr>
+<tr><td>Throat Shift semis</td><td>Shifts vocal resonance apart from pitch.</td><td>0</td><td>-12 to 12</td></tr>
+<tr><td>Formant Preserve</td><td>Keeps the voice&#x27;s character while shifting.</td><td>Off</td><td>on / off</td></tr>
 </tbody></table>
 <p>The Vox page is the live pitch corrector: it listens to the voice on this
 channel, works out what note is being sung, and pulls it gently - or
@@ -4082,28 +4082,33 @@ vocal setup - chain settings and all - as one preset.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Vol</td><td></td><td>0</td><td>-24 to 12</td></tr>
-<tr><td>Thresh</td><td></td><td>-80</td><td>-80 to 0</td></tr>
-<tr><td>Range</td><td></td><td>-60</td><td>-80 to 0</td></tr>
-<tr><td>Attack</td><td></td><td>1</td><td>0.1 to 100</td></tr>
-<tr><td>Hold</td><td></td><td>50</td><td>0 to 500</td></tr>
-<tr><td>Release</td><td></td><td>100</td><td>5 to 2000</td></tr>
-<tr><td>Reduce</td><td></td><td>50</td><td>0 to 100</td></tr>
-<tr><td>Tail</td><td></td><td>400</td><td>100 to 1000</td></tr>
-<tr><td>Mix</td><td></td><td>100</td><td>0 to 100</td></tr>
-<tr><td>Detect</td><td></td><td>50</td><td>0 to 100</td></tr>
-<tr><td>Mode</td><td></td><td>0</td><td>0 to 100</td></tr>
-<tr><td>Ratio</td><td></td><td>4</td><td>0.4 to 30</td></tr>
-<tr><td>Gain</td><td></td><td>0</td><td>-30 to 30</td></tr>
-<tr><td>Drive</td><td></td><td>3</td><td>0 to 10</td></tr>
-<tr><td>Color</td><td></td><td>3</td><td>0 to 10</td></tr>
-<tr><td>Output</td><td></td><td>0</td><td>-18 to 18</td></tr>
-<tr><td>InGain</td><td></td><td>0</td><td>-12 to 24</td></tr>
-<tr><td>Ceil</td><td></td><td>-0.3</td><td>-24 to 12</td></tr>
-<tr><td>SatTh</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>Atk</td><td></td><td>1</td><td>0.1 to 20</td></tr>
-<tr><td>Rel</td><td></td><td>100</td><td>10 to 1000</td></tr>
-<tr><td>Sustain</td><td></td><td>0</td><td>0 to 1000</td></tr>
+<tr><td>Vol</td><td>Sets this stage&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Thresh</td><td>Closes the gate below this level.</td><td>-80</td><td>-80 to 0</td></tr>
+<tr><td>Range</td><td>Sets how deep the closed gate cuts.</td><td>-60</td><td>-80 to 0</td></tr>
+<tr><td>Attack</td><td>Sets how fast the gate opens.</td><td>1</td><td>0.1 to 100</td></tr>
+<tr><td>Hold</td><td>Holds the gate open after signal drops.</td><td>50</td><td>0 to 500</td></tr>
+<tr><td>Release</td><td>Sets how fast the gate closes.</td><td>100</td><td>5 to 2000</td></tr>
+<tr><td>Reduce</td><td>Suppresses the recorded room tail.</td><td>50</td><td>0 to 100</td></tr>
+<tr><td>Tail</td><td>Matches the modeled tail to the room.</td><td>400</td><td>100 to 1000</td></tr>
+<tr><td>Mix</td><td>Blends the de-reverbed signal in.</td><td>100</td><td>0 to 100</td></tr>
+<tr><td>Detect</td><td>Widens what counts as an S sound.</td><td>50</td><td>0 to 100</td></tr>
+<tr><td>Thresh</td><td>Triggers de-essing above this level.</td><td>-24</td><td>-80 to 0</td></tr>
+<tr><td>Range</td><td>Caps how much the de-esser pulls down.</td><td>-12</td><td>-48 to 0</td></tr>
+<tr><td>Mode</td><td>Morphs from wide ducking to split-band.</td><td>0</td><td>0 to 100</td></tr>
+<tr><td>Thresh</td><td>Compresses signal above this level.</td><td>-12</td><td>-60 to 0</td></tr>
+<tr><td>Ratio</td><td>Sets how hard compression squeezes.</td><td>4</td><td>0.4 to 30</td></tr>
+<tr><td>Gain</td><td>Makes up level after compression.</td><td>0</td><td>-30 to 30</td></tr>
+<tr><td>Attack</td><td>Sets how fast compression clamps.</td><td>10</td><td>0 to 400</td></tr>
+<tr><td>Release</td><td>Sets how fast compression lets go.</td><td>100</td><td>1 to 4000</td></tr>
+<tr><td>Drive</td><td>Pushes the preamp into saturation.</td><td>3</td><td>0 to 10</td></tr>
+<tr><td>Color</td><td>Adds transformer-style second harmonic.</td><td>3</td><td>0 to 10</td></tr>
+<tr><td>Output</td><td>Sets the saturation stage&#x27;s output level.</td><td>0</td><td>-18 to 18</td></tr>
+<tr><td>InGain</td><td>Sets the level hitting the limiter.</td><td>0</td><td>-12 to 24</td></tr>
+<tr><td>Ceil</td><td>Caps the loudest output level.</td><td>-0.3</td><td>-24 to 12</td></tr>
+<tr><td>SatTh</td><td>Softens peaks before hard limiting.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Atk</td><td>Sets how fast the limiter clamps.</td><td>1</td><td>0.1 to 20</td></tr>
+<tr><td>Rel</td><td>Sets how fast the limiter lets go.</td><td>100</td><td>10 to 1000</td></tr>
+<tr><td>Sustain</td><td>Holds gain reduction to release musically.</td><td>0</td><td>0 to 1000</td></tr>
 </tbody></table>
 <p>The Vocal Chain is six studio processors in a fixed order - Gate,
 De-reverb, De-esser, Compressor, Saturation, Limiter - that every vocal on
@@ -4749,13 +4754,13 @@ to decide before it has heard the end of the word.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Trim</td><td></td><td>440</td><td>436 to 445</td></tr>
-<tr><td>Dist</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Low</td><td></td><td>0</td><td>-15 to 15</td></tr>
-<tr><td>Mid Hz</td><td></td><td>800</td><td>200 to 5000</td></tr>
-<tr><td>Mid dB</td><td></td><td>0</td><td>-15 to 15</td></tr>
-<tr><td>High</td><td></td><td>0</td><td>-15 to 15</td></tr>
-<tr><td>Level</td><td></td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Trim</td><td>Fine-trims the tuner&#x27;s reference pitch.</td><td>440</td><td>436 to 445</td></tr>
+<tr><td>Dist</td><td>Adds cascading hard-clip distortion.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Low</td><td>Cuts or boosts the low shelf.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Mid Hz</td><td>Moves the mid peak&#x27;s frequency.</td><td>800</td><td>200 to 5000</td></tr>
+<tr><td>Mid dB</td><td>Cuts or boosts the mid peak.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>High</td><td>Cuts or boosts the high shelf.</td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Level</td><td>Sets the pedal&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
 </tbody></table>
 <p>The pedalboard works like the floor in front of a guitarist: eight
 stompboxes in a row, the signal walking through them left to right on its
@@ -5313,17 +5318,17 @@ whole instrument setup as one preset.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Input Gain</td><td></td><td>0</td><td>-24 to 24</td></tr>
-<tr><td>Gate Threshold</td><td></td><td>-50</td><td>-60 to 0</td></tr>
-<tr><td>Gate Release</td><td></td><td>100</td><td>5 to 500</td></tr>
-<tr><td>Low Cut</td><td></td><td>20</td><td>20 to 500</td></tr>
-<tr><td>High Cut</td><td></td><td>20000</td><td>3000 to 20000</td></tr>
-<tr><td>Cabinet Mix</td><td></td><td>100</td><td>0 to 100</td></tr>
-<tr><td>Master Output</td><td></td><td>0</td><td>-24 to 12</td></tr>
-<tr><td>Mix</td><td></td><td>100</td><td>0 to 100</td></tr>
-<tr><td>Distance</td><td></td><td>30</td><td>1 to 150</td></tr>
-<tr><td>Angle</td><td></td><td>0</td><td>-90 to 90</td></tr>
-<tr><td>Height</td><td></td><td>0</td><td>-30 to 30</td></tr>
+<tr><td>Input Gain</td><td>Sets the level hitting the amp model.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Gate Threshold</td><td>Silences signal below this level.</td><td>-50</td><td>-60 to 0</td></tr>
+<tr><td>Gate Release</td><td>Sets how fast the gate closes.</td><td>100</td><td>5 to 500</td></tr>
+<tr><td>Low Cut</td><td>Tightens the low end before the cab.</td><td>20</td><td>20 to 500</td></tr>
+<tr><td>High Cut</td><td>Tames fizz before the cab.</td><td>20000</td><td>3000 to 20000</td></tr>
+<tr><td>Cabinet Mix</td><td>Blends the cabinet simulation in.</td><td>100</td><td>0 to 100</td></tr>
+<tr><td>Master Output</td><td>Sets the final output level.</td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Mix</td><td>Blends the mic simulation in.</td><td>100</td><td>0 to 100</td></tr>
+<tr><td>Distance</td><td>Moves the virtual mic closer or farther.</td><td>30</td><td>1 to 150</td></tr>
+<tr><td>Angle</td><td>Turns the virtual mic off axis.</td><td>0</td><td>-90 to 90</td></tr>
+<tr><td>Height</td><td>Raises the virtual mic off cone center.</td><td>0</td><td>-30 to 30</td></tr>
 </tbody></table>
 <p>The NAM/IR window is the amp room. NAM stands for Neural Amp Modeler - a
 real amplifier, captured as a model that behaves like the original, drive
@@ -5840,94 +5845,94 @@ window says so, and the cabinet stage should be bypassed for those.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Filter 1 Type</td><td></td><td>LP</td><td>LP, HP, BP, Notch</td></tr>
-<tr><td>Filter Env Amount</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Filter Cutoff</td><td></td><td>20000</td><td>20 to 20000</td></tr>
-<tr><td>Filter Resonance</td><td></td><td>0.707</td><td>0.1 to 1</td></tr>
-<tr><td>Flt1 KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Filter 2 Type</td><td></td><td>Notch</td><td>LP, HP, BP, Notch</td></tr>
-<tr><td>Filter 2 Env</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Filter 2 Cutoff</td><td></td><td>20000</td><td>20 to 20000</td></tr>
-<tr><td>Filter 2 Res</td><td></td><td>0.707</td><td>0.1 to 1</td></tr>
-<tr><td>Flt2 KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>RM Sub</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>RM Prot</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>RM Clip</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>RM FX</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>RM Vol</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>RM Env</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>Mod X</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Mod Y</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Mod Z</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Tk Lay 1 Harm Volume Mod0 Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Tk Lay 1 Harm Volume Mod0 Length</td><td></td><td></td><td>1/8 beats to 32 beats</td></tr>
-<tr><td>Timbre Blend</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Part A Level</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>Part B Level</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Brownian Amount</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>Blur Size</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Blur Time</td><td></td><td>1</td><td>0 to 2</td></tr>
-<tr><td>Blur Harm</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Prism Amount</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Prism Mode</td><td></td><td>0</td><td>0 to 2</td></tr>
-<tr><td>Trem Depth</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Trem Speed</td><td></td><td>3</td><td>0.1 to 20</td></tr>
-<tr><td>Trem Gap</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Vib Depth</td><td></td><td>0</td><td>0 to 2</td></tr>
-<tr><td>Vib Speed</td><td></td><td>5</td><td>0.1 to 20</td></tr>
-<tr><td>Vib Env</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Glide Time</td><td></td><td>0</td><td>0 to 2</td></tr>
-<tr><td>Legato Limit</td><td></td><td>0.5</td><td>0.001 to 1</td></tr>
-<tr><td>Flt1 Cutoff Offset</td><td></td><td>0</td><td>-24 to 24</td></tr>
-<tr><td>Flt2 Cutoff Offset</td><td></td><td>0</td><td>-24 to 24</td></tr>
-<tr><td>Filter Mask Cutoff</td><td></td><td>5000</td><td>20 to 20000</td></tr>
-<tr><td>Filter Mask Cutoff (B)</td><td></td><td>5000</td><td>20 to 20000</td></tr>
-<tr><td>Filter Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
-<tr><td>Filter Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
-<tr><td>Filter Sustain</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Filter Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
-<tr><td>Flt2 Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
-<tr><td>Flt2 Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
-<tr><td>Flt2 Sustain</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Flt2 Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
-<tr><td>LFO Rate</td><td></td><td>7</td><td>0 to 12</td></tr>
-<tr><td>LFO Shape</td><td></td><td>0</td><td>0 to 3</td></tr>
-<tr><td>Legato</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Unison Voices</td><td></td><td>1</td><td>1 to 9</td></tr>
-<tr><td>Unison Type</td><td></td><td>0</td><td>0 to 3</td></tr>
-<tr><td>Unison Alt</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Unison Spread</td><td></td><td>0.7</td><td>0 to 1</td></tr>
-<tr><td>Unison Detune</td><td></td><td>15</td><td>0 to 100</td></tr>
-<tr><td>Unison Phase</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Pluck Decay</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Out Phaser Mix</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Out Phaser Depth</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Out Phaser Rate</td><td></td><td>1</td><td>0.01 to 10</td></tr>
-<tr><td>Out Phaser Width</td><td></td><td>0.5</td><td>0 to 0.95</td></tr>
-<tr><td>Out Phaser Offset</td><td></td><td>1000</td><td>200 to 2000</td></tr>
-<tr><td>Phaser Mask Rate</td><td></td><td>1</td><td>0.1 to 10</td></tr>
-<tr><td>Out EQ Mix</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Pluck Blur</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Pitch Semitones</td><td></td><td>0</td><td>-24 st to +24 st</td></tr>
-<tr><td>Pitch Cents</td><td></td><td>0</td><td>-100 to 100</td></tr>
-<tr><td>Pitch Fraction</td><td></td><td>0</td><td>0 to 6</td></tr>
-<tr><td>Volume</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Vel Link</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Cut Self</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Cut Self Mode</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Amp Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
-<tr><td>Amp Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
-<tr><td>Amp Sustain</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Amp Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
-<tr><td>Phase Start</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Phase Rand</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>LFO Vel Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>LFO Vol Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>LFO Pitch Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Strum Dir</td><td></td><td>0</td><td>0 to 2</td></tr>
-<tr><td>Strum Time</td><td></td><td>0</td><td>0 to 0.5</td></tr>
-<tr><td>Strum Tension</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Filter 1 Type</td><td>Picks filter 1&#x27;s shape.</td><td>LP</td><td>LP, HP, BP, Notch</td></tr>
+<tr><td>Filter Env Amount</td><td>Sets how far the envelope moves filter 1.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Filter Cutoff</td><td>Sets filter 1&#x27;s corner frequency.</td><td>20000</td><td>20 to 20000</td></tr>
+<tr><td>Filter Resonance</td><td>Boosts filter 1&#x27;s corner for bite.</td><td>0.707</td><td>0.1 to 1</td></tr>
+<tr><td>Flt1 KB Track</td><td>Raises filter 1&#x27;s cutoff with higher keys.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Filter 2 Type</td><td>Picks filter 2&#x27;s shape.</td><td>Notch</td><td>LP, HP, BP, Notch</td></tr>
+<tr><td>Filter 2 Env</td><td>Sets how far the envelope moves filter 2.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Filter 2 Cutoff</td><td>Sets filter 2&#x27;s corner frequency.</td><td>20000</td><td>20 to 20000</td></tr>
+<tr><td>Filter 2 Res</td><td>Boosts filter 2&#x27;s corner for bite.</td><td>0.707</td><td>0.1 to 1</td></tr>
+<tr><td>Flt2 KB Track</td><td>Raises filter 2&#x27;s cutoff with higher keys.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM Sub</td><td>Routes the sub oscillator into the mix.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM Prot</td><td>Routes the protect stage into the mix.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM Clip</td><td>Routes the clip stage into the mix.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM FX</td><td>Routes the FX stage into the mix.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>RM Vol</td><td>Routes the volume stage into the mix.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>RM Env</td><td>Routes the envelope stage into the mix.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Mod X</td><td>Drives the modulation pad&#x27;s X axis.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mod Y</td><td>Drives the modulation pad&#x27;s Y axis.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mod Z</td><td>Drives the modulation pad&#x27;s Z axis.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Tk Lay 1 Harm Volume Mod0 Depth</td><td>Sets the modulation envelope&#x27;s strength.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Tk Lay 1 Harm Volume Mod0 Length</td><td>Sets the modulation envelope&#x27;s play length.</td><td></td><td>1/8 beats to 32 beats</td></tr>
+<tr><td>Timbre Blend</td><td>Crossfades Part A toward Part B.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Part A Level</td><td>Sets Part A&#x27;s level.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Part B Level</td><td>Sets Part B&#x27;s level.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Brownian Amount</td><td>Rolls the spectrum off toward brown noise.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Blur Size</td><td>Smears the spectrum for a washed tone.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Blur Time</td><td>Widens the blur kernel over time.</td><td>1</td><td>0 to 2</td></tr>
+<tr><td>Blur Harm</td><td>Biases the blur along the harmonic axis.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Prism Amount</td><td>Spreads partials away from harmonic pitch.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Prism Mode</td><td>Picks how prism scatters the partials.</td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Trem Depth</td><td>Sets how deep the volume pulses.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Trem Speed</td><td>Sets how fast the volume pulses.</td><td>3</td><td>0.1 to 20</td></tr>
+<tr><td>Trem Gap</td><td>Widens the dead zone between pulses.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vib Depth</td><td>Sets how far the pitch wobbles.</td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Vib Speed</td><td>Sets how fast the pitch wobbles.</td><td>5</td><td>0.1 to 20</td></tr>
+<tr><td>Vib Env</td><td>Delays vibrato onset after note start.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide Time</td><td>Slides pitch between consecutive notes.</td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Legato Limit</td><td>Caps the longest glide time.</td><td>0.5</td><td>0.001 to 1</td></tr>
+<tr><td>Flt1 Cutoff Offset</td><td>Offsets filter 1&#x27;s cutoff in semitones.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Flt2 Cutoff Offset</td><td>Offsets filter 2&#x27;s cutoff in semitones.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Filter Mask Cutoff</td><td>Caps which harmonics Part A passes.</td><td>5000</td><td>20 to 20000</td></tr>
+<tr><td>Filter Mask Cutoff (B)</td><td>Caps which harmonics Part B passes.</td><td>5000</td><td>20 to 20000</td></tr>
+<tr><td>Filter Attack</td><td>Sets filter 1 envelope&#x27;s rise time.</td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Decay</td><td>Sets filter 1 envelope&#x27;s fall time.</td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Sustain</td><td>Holds filter 1&#x27;s envelope at this level.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Filter Release</td><td>Sets filter 1 envelope&#x27;s release time.</td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Flt2 Attack</td><td>Sets filter 2 envelope&#x27;s rise time.</td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Flt2 Decay</td><td>Sets filter 2 envelope&#x27;s fall time.</td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Flt2 Sustain</td><td>Holds filter 2&#x27;s envelope at this level.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Flt2 Release</td><td>Sets filter 2 envelope&#x27;s release time.</td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>LFO Rate</td><td>Sets the cycle length every LFO target shares.</td><td>7</td><td>0 to 12</td></tr>
+<tr><td>LFO Shape</td><td>Picks the shared LFO waveform.</td><td>0</td><td>0 to 3</td></tr>
+<tr><td>Legato</td><td>Retriggers nothing on overlapped notes.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Unison Voices</td><td>Stacks copies of the voice for thickness.</td><td>1</td><td>1 to 9</td></tr>
+<tr><td>Unison Type</td><td>Picks how the stacked voices detune.</td><td>0</td><td>0 to 3</td></tr>
+<tr><td>Unison Alt</td><td>Alternates unison phases per note.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Unison Spread</td><td>Spreads the stacked voices across stereo.</td><td>0.7</td><td>0 to 1</td></tr>
+<tr><td>Unison Detune</td><td>Spreads the stacked voices in cents.</td><td>15</td><td>0 to 100</td></tr>
+<tr><td>Unison Phase</td><td>Offsets the stacked voices&#x27; start phase.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pluck Decay</td><td>Speeds the decay of high partials.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Out Phaser Mix</td><td>Blends the output phaser in.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Out Phaser Depth</td><td>Deepens the output phaser&#x27;s sweep.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Out Phaser Rate</td><td>Sets the output phaser&#x27;s sweep speed.</td><td>1</td><td>0.01 to 10</td></tr>
+<tr><td>Out Phaser Width</td><td>Feeds the phaser back into itself.</td><td>0.5</td><td>0 to 0.95</td></tr>
+<tr><td>Out Phaser Offset</td><td>Centers the phaser&#x27;s sweep frequency.</td><td>1000</td><td>200 to 2000</td></tr>
+<tr><td>Phaser Mask Rate</td><td>Spaces the phaser&#x27;s spectral notches.</td><td>1</td><td>0.1 to 10</td></tr>
+<tr><td>Out EQ Mix</td><td>Blends the output tilt EQ in.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pluck Blur</td><td>Softens the pluck with spectral blur.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Pitch Semitones</td><td>Shifts pitch in semitone steps.</td><td>0</td><td>-24 st to +24 st</td></tr>
+<tr><td>Pitch Cents</td><td>Offsets pitch in cents.</td><td>0</td><td>-100 to 100</td></tr>
+<tr><td>Pitch Fraction</td><td>Multiplies or divides the pitch by octaves.</td><td>0</td><td>0 to 6</td></tr>
+<tr><td>Volume</td><td>Sets this engine&#x27;s output level.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Pan</td><td>Places the sound left or right.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Vel Link</td><td>Links note velocity into the mod chain.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self</td><td>Cuts the prior voice on the same note.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self Mode</td><td>Picks what a retrigger cuts.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Amp Attack</td><td>Sets how fast a note fades in.</td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Decay</td><td>Sets the fall time after the attack peak.</td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Sustain</td><td>Holds this level while the key is down.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Amp Release</td><td>Sets the fade-out after the key lifts.</td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Phase Start</td><td>Sets where the wave cycle starts.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Phase Rand</td><td>Randomizes the start phase per note.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>LFO Vel Depth</td><td>Scales LFO depth by note velocity.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>LFO Vol Depth</td><td>Sends the shared LFO to volume.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>LFO Pitch Depth</td><td>Sends the shared LFO to pitch.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Strum Dir</td><td>Picks which way chords strum.</td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Strum Time</td><td>Staggers chord notes across this time.</td><td>0</td><td>0 to 0.5</td></tr>
+<tr><td>Strum Tension</td><td>Curves the strum toward start or end.</td><td>0</td><td>-1 to 1</td></tr>
 </tbody></table>
 <p>Harmless builds sound the opposite way from the other synth: instead of
 starting with a bright wave and filtering it down, it adds the sound up out
@@ -6367,14 +6372,14 @@ included.</p>
   </div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Vel Track</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Transpose</td><td></td><td>0</td><td>-24 to 24</td></tr>
-<tr><td>Modifier</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Noise</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Glide</td><td></td><td>0.08</td><td>0 to 2</td></tr>
-<tr><td>Out Vol</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Mod Wheel Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>KB Track</td><td>Raises the cutoff with higher keys.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel Track</td><td>Opens the filter with harder velocity.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Transpose</td><td>Shifts pitch in semitone steps.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Modifier</td><td>Shapes the wave; meaning follows the waveform mode.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Noise</td><td>Blends noise into the oscillator.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide</td><td>Slides pitch between consecutive notes.</td><td>0.08</td><td>0 to 2</td></tr>
+<tr><td>Out Vol</td><td>Sets this engine&#x27;s output level.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Mod Wheel Amount</td><td>Scales how far the mod wheel reaches.</td><td>0</td><td>0 to 1</td></tr>
 </tbody></table>
 <p>BaySickSynth and BaySickBass are two versions of the same instrument. The
 synth lives on <b>Layers</b> tabs and the bass on <b>Bass</b> tabs, but open
@@ -6409,14 +6414,14 @@ text says so.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Vel Track</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Transpose</td><td></td><td>0</td><td>-24 to 24</td></tr>
-<tr><td>Modifier</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Noise</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Glide</td><td></td><td>0.08</td><td>0 to 2</td></tr>
-<tr><td>Out Vol</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Mod Wheel Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>KB Track</td><td>Raises the cutoff with higher keys.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel Track</td><td>Opens the filter with harder velocity.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Transpose</td><td>Shifts pitch in semitone steps.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Modifier</td><td>Shapes the wave; meaning follows the waveform mode.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Noise</td><td>Blends noise into the oscillator.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide</td><td>Slides pitch between consecutive notes.</td><td>0.08</td><td>0 to 2</td></tr>
+<tr><td>Out Vol</td><td>Sets this engine&#x27;s output level.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Mod Wheel Amount</td><td>Scales how far the mod wheel reaches.</td><td>0</td><td>0 to 1</td></tr>
 </tbody></table>
 <p>The strip across the top of the BaySickSynth and BaySickBass windows -
 the same three controls on both. The accent color (synth blue, bass green)
@@ -6576,12 +6581,12 @@ but the live instrument is gone.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Transpose</td><td></td><td>0</td><td>-24 to 24</td></tr>
-<tr><td>Modifier</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Noise</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Glide</td><td></td><td>0</td><td>0 to 2</td></tr>
-<tr><td>Out Vol</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Mod Wheel Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Transpose</td><td>Shifts pitch in semitone steps.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Modifier</td><td>Shapes the wave; meaning follows the waveform mode.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Noise</td><td>Blends noise into the oscillator.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide</td><td>Slides pitch between consecutive notes.</td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Out Vol</td><td>Sets this engine&#x27;s output level.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Mod Wheel Amount</td><td>Scales how far the mod wheel reaches.</td><td>0</td><td>0 to 1</td></tr>
 </tbody></table>
 <p>The Oscillator panel is where the sound is born. An oscillator is the part
 of a synth that actually vibrates - everything else in the instrument only
@@ -7109,16 +7114,16 @@ defaults and its own accent color; every control exists on both.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Amp Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
-<tr><td>Amp Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
-<tr><td>Amp Sustain</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Amp Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
-<tr><td>Vel to Amp</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>Pitch Env Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
-<tr><td>Pitch Env Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
-<tr><td>Pitch Env Sustain</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Pitch Env Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
-<tr><td>Pitch Env Amount</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Amp Attack</td><td>Sets how fast a note fades in.</td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Decay</td><td>Sets the fall time after the attack peak.</td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Sustain</td><td>Holds this level while the key is down.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Amp Release</td><td>Sets the fade-out after the key lifts.</td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Vel to Amp</td><td>Maps key velocity onto note volume.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Pitch Env Attack</td><td>Sets the pitch envelope&#x27;s rise time.</td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Pitch Env Decay</td><td>Sets the pitch envelope&#x27;s fall time.</td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Pitch Env Sustain</td><td>Holds the pitch offset while the key is down.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pitch Env Release</td><td>Sets the pitch envelope&#x27;s release time.</td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Pitch Env Amount</td><td>Sets how far the envelope bends pitch.</td><td>0</td><td>-24 to 24</td></tr>
 </tbody></table>
 <p>Press a piano key and the sound is not a flat block: it jumps out, settles,
 holds while your finger stays down, and rings away when you let go. An
@@ -7293,8 +7298,8 @@ float AdsrEnvelope::calcCoef (float timeSec, double sampleRate)
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Vel Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>KB Track</td><td>Raises the cutoff with higher keys.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel Track</td><td>Opens the filter with harder velocity.</td><td>0</td><td>0 to 1</td></tr>
 </tbody></table>
 <p>A filter is a tone control: it lets some of a sound's frequencies through
 and holds others back. Every sound is a stack of frequencies - lows that you
@@ -7453,11 +7458,11 @@ void SynthFilter::reset()
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Filter Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
-<tr><td>Filter Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
-<tr><td>Filter Sustain</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Filter Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
-<tr><td>Filter Env Amount</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Filter Attack</td><td>Sets the filter envelope&#x27;s rise time.</td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Decay</td><td>Sets the filter envelope&#x27;s fall time.</td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Sustain</td><td>Holds the filter envelope at this level.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Filter Release</td><td>Sets the filter envelope&#x27;s release time.</td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Env Amount</td><td>Sets how far the envelope moves the cutoff.</td><td>0</td><td>-1 to 1</td></tr>
 </tbody></table>
 <p>This panel makes each note's <em>brightness</em> move. An envelope is a
 shape the synth follows automatically over the life of every note - four
@@ -7510,8 +7515,8 @@ pluck.)</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>LFO Rate</td><td></td><td>1</td><td>0.01 to 30</td></tr>
-<tr><td>LFO Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>LFO Rate</td><td>Sets the LFO&#x27;s cycle speed.</td><td>1</td><td>0.01 to 30</td></tr>
+<tr><td>LFO Amount</td><td>Sets how deep the LFO modulates.</td><td>0</td><td>0 to 1</td></tr>
 </tbody></table>
 <p>An LFO - low-frequency oscillator - is a wave that runs too slowly to
 hear as a tone, used instead as an invisible hand that turns another control
@@ -7662,15 +7667,15 @@ void LFO::reset() { mPhase = 0.0f; }</code></pre></details>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Transient Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Transient Duration</td><td></td><td>5</td><td>0 to 20</td></tr>
-<tr><td>Transient Colour</td><td></td><td>5000</td><td>200 to 10000</td></tr>
-<tr><td>Unison Voices</td><td></td><td>1</td><td>1 to 7</td></tr>
-<tr><td>Unison Detune</td><td></td><td>0.2</td><td>0 to 1</td></tr>
-<tr><td>Unison Spread</td><td></td><td>0.8</td><td>0 to 1</td></tr>
-<tr><td>Analog Drift</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Burst Count</td><td></td><td>4</td><td>1 to 8</td></tr>
-<tr><td>Burst Spacing</td><td></td><td>20</td><td>1 to 100</td></tr>
+<tr><td>Transient Amount</td><td>Adds a click of noise at note start.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Transient Duration</td><td>Sets how long the start click lasts.</td><td>5</td><td>0 to 20</td></tr>
+<tr><td>Transient Colour</td><td>Brightens or darkens the start click.</td><td>5000</td><td>200 to 10000</td></tr>
+<tr><td>Unison Voices</td><td>Stacks copies of the voice for thickness.</td><td>1</td><td>1 to 7</td></tr>
+<tr><td>Unison Detune</td><td>Spreads the stacked voices in pitch.</td><td>0.2</td><td>0 to 1</td></tr>
+<tr><td>Unison Spread</td><td>Spreads the stacked voices across stereo.</td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Analog Drift</td><td>Adds slow per-voice pitch wander.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Burst Count</td><td>Fires this many retriggers per note.</td><td>4</td><td>1 to 8</td></tr>
+<tr><td>Burst Spacing</td><td>Sets the gap between burst retriggers.</td><td>20</td><td>1 to 100</td></tr>
 </tbody></table>
 <p>The Mod panel is the character drawer - five independent machines that
 each add one kind of personality to the sound. Most patches use one or two
@@ -7800,36 +7805,36 @@ alternating signs.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Sample Start</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Stretch</td><td></td><td>1</td><td>0.5 to 2</td></tr>
-<tr><td>Reverse</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Cut Self</td><td></td><td>Off</td><td>on / off</td></tr>
-<tr><td>Cut Self Mode</td><td></td><td>On</td><td>on / off</td></tr>
-<tr><td>Tune</td><td></td><td>0</td><td>-24 to 24</td></tr>
-<tr><td>Voice Cap</td><td></td><td>16</td><td>1 to 16</td></tr>
-<tr><td>Unison Voices</td><td></td><td>1</td><td>1 to 8</td></tr>
-<tr><td>Detune</td><td></td><td>0</td><td>-100 to 100</td></tr>
-<tr><td>Unison Spread</td><td></td><td>0</td><td>0 to 100</td></tr>
-<tr><td>Sensitivity</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>Vel-&gt;Volume</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>Vel-&gt;Muffle</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Muffle</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Vel-&gt;Hardness</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Hardness</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Attack</td><td></td><td>0.001</td><td>0.001 to 10</td></tr>
-<tr><td>Decay</td><td></td><td>0.5</td><td>0.001 to 10</td></tr>
-<tr><td>Sustain</td><td></td><td>1</td><td>0 to 1</td></tr>
-<tr><td>Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
-<tr><td>Vibrato Rate</td><td></td><td>5.5</td><td>0.1 to 20</td></tr>
-<tr><td>Vibrato Depth</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Cutoff</td><td></td><td>20000</td><td>20 to 20000</td></tr>
-<tr><td>Resonance</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Reduct</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Stereo</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Treble</td><td></td><td>0</td><td>-12 to 12</td></tr>
-<tr><td>Drive</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Volume</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Sample Start</td><td>Skips into the sample before playback.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Stretch</td><td>Speeds up or slows down playback.</td><td>1</td><td>0.5 to 2</td></tr>
+<tr><td>Reverse</td><td>Plays the sample backwards.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self</td><td>Cuts the prior voice on the same note.</td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self Mode</td><td>Picks what a retrigger cuts.</td><td>On</td><td>on / off</td></tr>
+<tr><td>Tune</td><td>Shifts pitch in semitone steps.</td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Voice Cap</td><td>Caps how many notes sound at once.</td><td>16</td><td>1 to 16</td></tr>
+<tr><td>Unison Voices</td><td>Stacks copies of the voice for thickness.</td><td>1</td><td>1 to 8</td></tr>
+<tr><td>Detune</td><td>Offsets pitch in cents.</td><td>0</td><td>-100 to 100</td></tr>
+<tr><td>Unison Spread</td><td>Spreads the stacked voices in pitch.</td><td>0</td><td>0 to 100</td></tr>
+<tr><td>Sensitivity</td><td>Shapes how velocity maps to response.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Vel-&gt;Volume</td><td>Maps key velocity onto note volume.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Vel-&gt;Muffle</td><td>Maps key velocity onto muffle.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Muffle</td><td>Darkens the sample with a low-pass.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel-&gt;Hardness</td><td>Maps key velocity onto hardness.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Hardness</td><td>Adds filter resonance for bite.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Attack</td><td>Sets how fast a note fades in.</td><td>0.001</td><td>0.001 to 10</td></tr>
+<tr><td>Decay</td><td>Sets the fall time after the attack peak.</td><td>0.5</td><td>0.001 to 10</td></tr>
+<tr><td>Sustain</td><td>Holds this level while the key is down.</td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Release</td><td>Sets the fade-out after the key lifts.</td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Vibrato Rate</td><td>Sets how fast the pitch wobbles.</td><td>5.5</td><td>0.1 to 20</td></tr>
+<tr><td>Vibrato Depth</td><td>Sets how far the pitch wobbles.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Cutoff</td><td>Sets the filter&#x27;s corner frequency.</td><td>20000</td><td>20 to 20000</td></tr>
+<tr><td>Resonance</td><td>Boosts the filter&#x27;s corner for bite.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Reduct</td><td>Adds lo-fi sample-rate grit.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pan</td><td>Places the sound left or right.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Stereo</td><td>Narrows or widens the stereo image.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Treble</td><td>Cuts or boosts the high shelf.</td><td>0</td><td>-12 to 12</td></tr>
+<tr><td>Drive</td><td>Adds overdrive saturation.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Volume</td><td>Sets this engine&#x27;s output level.</td><td>0.8</td><td>0 to 1</td></tr>
 </tbody></table>
 <p>BaySickPlayer plays audio files as an instrument: load a sound - a note,
 a drum, a chunk of a song - and the keyboard replays it at different
@@ -11363,13 +11368,13 @@ void BassGraphicEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Mixer Master Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Bass Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Fx Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Bass 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Width</td><td></td><td>1</td><td>0 to 2</td></tr>
-<tr><td>Mute</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Pan</td><td>Places the strip left or right.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mixer Master Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Fx Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass 0 Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Width</td><td>Narrows or widens the strip&#x27;s stereo image.</td><td>1</td><td>0 to 2</td></tr>
+<tr><td>Mute</td><td>Silences the strip.</td><td>Off</td><td>on / off</td></tr>
 </tbody></table>
 <p>The Mixer is where everything meets: every tab and bus in the project as
 a vertical strip, the Master pinned at the left, and the routing between
@@ -11658,15 +11663,15 @@ so one fader rides all the vocals and one rack processes them together.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Mixer Master Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Bass Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Fx Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Voxbus Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Instbus Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Bass 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Vox 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
-<tr><td>Mixer Inst 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Pan</td><td>Places the strip left or right.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mixer Master Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Fx Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Voxbus Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Instbus Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass 0 Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Vox 0 Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Inst 0 Fader</td><td>Sets the strip&#x27;s level.</td><td>0</td><td>-60 to 5.6</td></tr>
 </tbody></table>
 <p>Two strips side by side: an engine strip (<code>Bass 1</code>) and a
 live-input strip (<code>Vox 1</code>). Everything the engine strip carries
@@ -12598,11 +12603,11 @@ are added it shows the header with a greyed
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Vol</td><td></td><td>0</td><td>-24 to 12</td></tr>
-<tr><td>Detect</td><td></td><td>50</td><td>0 to 100</td></tr>
-<tr><td>Thresh</td><td></td><td>-12.5</td><td>-80 to 0</td></tr>
-<tr><td>Range</td><td></td><td>-14</td><td>-48 to 0</td></tr>
-<tr><td>Mode</td><td></td><td>50</td><td>0 to 100</td></tr>
+<tr><td>Vol</td><td>Sets the slot&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Detect</td><td>Widens what counts as an S sound.</td><td>50</td><td>0 to 100</td></tr>
+<tr><td>Thresh</td><td>Triggers reduction above this level.</td><td>-12.5</td><td>-80 to 0</td></tr>
+<tr><td>Range</td><td>Caps how much the de-esser pulls down.</td><td>-14</td><td>-48 to 0</td></tr>
+<tr><td>Mode</td><td>Morphs from wide ducking to split-band.</td><td>50</td><td>0 to 100</td></tr>
 </tbody></table>
 <p>An effect panel - the window a rack slot opens. Every effect in the app
 shares this frame; the knobs in the middle change per effect, the furniture
@@ -12663,29 +12668,29 @@ VU - the slow loudness needle - is its own window.</p>
   </div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Vol</td><td></td><td>0</td><td>-24 to 12</td></tr>
-<tr><td>Room</td><td></td><td>0.6</td><td>0 to 2</td></tr>
-<tr><td>Decay</td><td></td><td>2</td><td>0.1 to 20</td></tr>
-<tr><td>HFRatio</td><td></td><td>0.7</td><td>0.3 to 2</td></tr>
-<tr><td>Diffuse</td><td></td><td>0.5</td><td>0 to 1</td></tr>
-<tr><td>PreDly</td><td></td><td>10</td><td>0 to 200</td></tr>
-<tr><td>WetTone</td><td></td><td>0</td><td>-12 to 12</td></tr>
-<tr><td>Wet</td><td></td><td>0.3</td><td>0 to 1</td></tr>
-<tr><td>Dry</td><td></td><td>0.7</td><td>0 to 1</td></tr>
-<tr><td>LoCut</td><td></td><td>80</td><td>20 to 800</td></tr>
-<tr><td>HiCut</td><td></td><td>18000</td><td>1000 to 20000</td></tr>
-<tr><td>BassMlt</td><td></td><td>1.2</td><td>0.5 to 3</td></tr>
-<tr><td>BassX</td><td></td><td>250</td><td>20 to 800</td></tr>
-<tr><td>TailDep</td><td></td><td>0.3</td><td>0 to 1.5</td></tr>
-<tr><td>TailRt</td><td></td><td>0.35</td><td>0.05 to 2</td></tr>
-<tr><td>Stereo</td><td></td><td>100</td><td>0 to 200</td></tr>
-<tr><td>HiDamp</td><td></td><td>8000</td><td>500 to 20000</td></tr>
-<tr><td>ER</td><td></td><td>-6</td><td>-60 to 12</td></tr>
-<tr><td>Master 621E60Bbafc540Aaae7E8Ecb187602Af Freeze</td><td></td><td></td><td>on / off</td></tr>
-<tr><td>Duck</td><td></td><td>0</td><td>0 to 100</td></tr>
-<tr><td>DkThr</td><td></td><td>-24</td><td>-60 to 0</td></tr>
-<tr><td>DkAtt</td><td></td><td>10</td><td>1 to 200</td></tr>
-<tr><td>DkRel</td><td></td><td>200</td><td>10 to 1000</td></tr>
+<tr><td>Vol</td><td>Sets the slot&#x27;s output level.</td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Room</td><td>Scales the modeled room&#x27;s size.</td><td>0.6</td><td>0 to 2</td></tr>
+<tr><td>Decay</td><td>Sets how long the tail rings.</td><td>2</td><td>0.1 to 20</td></tr>
+<tr><td>HFRatio</td><td>Shortens or extends the high tail.</td><td>0.7</td><td>0.3 to 2</td></tr>
+<tr><td>Diffuse</td><td>Thickens the reverb&#x27;s early density.</td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>PreDly</td><td>Delays the reverb after the dry sound.</td><td>10</td><td>0 to 200</td></tr>
+<tr><td>WetTone</td><td>Tilts the wet signal warm or bright.</td><td>0</td><td>-12 to 12</td></tr>
+<tr><td>Wet</td><td>Sets the reverb level.</td><td>0.3</td><td>0 to 1</td></tr>
+<tr><td>Dry</td><td>Sets the untouched signal&#x27;s level.</td><td>0.7</td><td>0 to 1</td></tr>
+<tr><td>LoCut</td><td>Cuts lows entering the reverb.</td><td>80</td><td>20 to 800</td></tr>
+<tr><td>HiCut</td><td>Cuts highs entering the reverb.</td><td>18000</td><td>1000 to 20000</td></tr>
+<tr><td>BassMlt</td><td>Lengthens or shortens the bass tail.</td><td>1.2</td><td>0.5 to 3</td></tr>
+<tr><td>BassX</td><td>Sets where the bass tail takes over.</td><td>250</td><td>20 to 800</td></tr>
+<tr><td>TailDep</td><td>Deepens the tail&#x27;s slow movement.</td><td>0.3</td><td>0 to 1.5</td></tr>
+<tr><td>TailRt</td><td>Sets the tail movement&#x27;s speed.</td><td>0.35</td><td>0.05 to 2</td></tr>
+<tr><td>Stereo</td><td>Separates the reverb&#x27;s left and right.</td><td>100</td><td>0 to 200</td></tr>
+<tr><td>HiDamp</td><td>Darkens the tail above this frequency.</td><td>8000</td><td>500 to 20000</td></tr>
+<tr><td>ER</td><td>Sets the early reflections&#x27; level.</td><td>-6</td><td>-60 to 12</td></tr>
+<tr><td>Master 621E60Bbafc540Aaae7E8Ecb187602Af Freeze</td><td>Holds the current tail forever.</td><td></td><td>on / off</td></tr>
+<tr><td>Duck</td><td>Ducks the wet under the trigger signal.</td><td>0</td><td>0 to 100</td></tr>
+<tr><td>DkThr</td><td>Starts ducking above this trigger level.</td><td>-24</td><td>-60 to 0</td></tr>
+<tr><td>DkAtt</td><td>Sets how fast the wet ducks.</td><td>10</td><td>1 to 200</td></tr>
+<tr><td>DkRel</td><td>Sets how fast the wet recovers.</td><td>200</td><td>10 to 1000</td></tr>
 </tbody></table>
 <p>Nine effects come with a Visual window - a live moving picture of what
 the processing is doing: Chorus, Compressor, Delay, Flanger, Limiter,
@@ -12774,24 +12779,24 @@ Plugin</b> appears only while a hosted plugin is down.</p>
 </tbody></table></div>
   <div class="l2"><h4 class="ctrlhead">Controls</h4>
 <table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
-<tr><td>Pre EQ B2 Gain</td><td></td><td>0</td><td>-30 to 30</td></tr>
-<tr><td>Pre EQ B2 Sat</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Pre EQ B2 Place</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Pre EQ B2 Threshold</td><td></td><td>0</td><td>-60 to 0</td></tr>
-<tr><td>Pre EQ B2 Ratio</td><td></td><td>2</td><td>1 to 20</td></tr>
-<tr><td>Pre EQ B2 Attack</td><td></td><td>10</td><td>0.1 to 500</td></tr>
-<tr><td>Pre EQ B2 Release</td><td></td><td>100</td><td>1 to 2000</td></tr>
-<tr><td>Pre EQ B2 ThresholdB</td><td></td><td>-60</td><td>-60 to 0</td></tr>
-<tr><td>Pre EQ B2 RatioB</td><td></td><td>2</td><td>1 to 20</td></tr>
-<tr><td>Pre EQ B2 RangeB</td><td></td><td>0</td><td>-30 to 30</td></tr>
-<tr><td>Pre EQ B2 Onset</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Pre EQ B2 LFO Rate</td><td></td><td>2</td><td>0.02 to 20</td></tr>
-<tr><td>Pre EQ B2 LFO Depth</td><td></td><td>0</td><td>0 to 1</td></tr>
-<tr><td>Pre EQ B2 Env Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
-<tr><td>Pre EQ B2 Freq</td><td></td><td>100</td><td>20 to 20000</td></tr>
-<tr><td>Pre EQ B2 Q</td><td></td><td>0.707</td><td>0.1 to 30</td></tr>
-<tr><td>Pre EQ B2 Type</td><td></td><td>0</td><td>0 to 8</td></tr>
-<tr><td>Pre EQ B2 Slope</td><td></td><td>12</td><td>1 to 97</td></tr>
+<tr><td>Pre EQ B2 Gain</td><td>Sets this band&#x27;s boost or cut.</td><td>0</td><td>-30 to 30</td></tr>
+<tr><td>Pre EQ B2 Sat</td><td>Saturates just this band&#x27;s slice.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pre EQ B2 Place</td><td>Pans this band&#x27;s effect across stereo.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Pre EQ B2 Threshold</td><td>Engages the band above this level.</td><td>0</td><td>-60 to 0</td></tr>
+<tr><td>Pre EQ B2 Ratio</td><td>Sets how hard the band moves past threshold.</td><td>2</td><td>1 to 20</td></tr>
+<tr><td>Pre EQ B2 Attack</td><td>Sets the detector&#x27;s reaction speed.</td><td>10</td><td>0.1 to 500</td></tr>
+<tr><td>Pre EQ B2 Release</td><td>Sets the detector&#x27;s recovery speed.</td><td>100</td><td>1 to 2000</td></tr>
+<tr><td>Pre EQ B2 ThresholdB</td><td>Engages the below stage under this level.</td><td>-60</td><td>-60 to 0</td></tr>
+<tr><td>Pre EQ B2 RatioB</td><td>Sets how hard the below stage moves.</td><td>2</td><td>1 to 20</td></tr>
+<tr><td>Pre EQ B2 RangeB</td><td>Sets the below stage&#x27;s travel and direction.</td><td>0</td><td>-30 to 30</td></tr>
+<tr><td>Pre EQ B2 Onset</td><td>Focuses the detector on attacks only.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pre EQ B2 LFO Rate</td><td>Sets the band LFO&#x27;s speed.</td><td>2</td><td>0.02 to 20</td></tr>
+<tr><td>Pre EQ B2 LFO Depth</td><td>Sets how far the LFO swings the band.</td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pre EQ B2 Env Depth</td><td>Rides or ducks the band with its level.</td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Pre EQ B2 Freq</td><td>Sets the band&#x27;s center frequency.</td><td>100</td><td>20 to 20000</td></tr>
+<tr><td>Pre EQ B2 Q</td><td>Narrows or widens the band.</td><td>0.707</td><td>0.1 to 30</td></tr>
+<tr><td>Pre EQ B2 Type</td><td>Picks the band&#x27;s curve shape.</td><td>0</td><td>0 to 8</td></tr>
+<tr><td>Pre EQ B2 Slope</td><td>Steepens the pass filter&#x27;s rolloff.</td><td>12</td><td>1 to 97</td></tr>
 </tbody></table>
 ﻿<p>An equalizer - EQ - turns parts of the frequency range up or down: more
 bass, less harshness, air on top. This one gives you up to ninety-six

@@ -83,9 +83,14 @@ def controls_table(code):
                 continue
             key = rid or (fig + '|' + name)
             if key in seen:
-                continue
+                if rid:
+                    continue          # same param shot in two figures
+                n = 2                 # same-label knobs on sibling stages
+                while (key + '#' + str(n)) in seen:
+                    n += 1
+                key = key + '#' + str(n)
             seen.add(key)
-            blurb = BLURBS.get(rid) or BLURBS.get(fig + '|' + name) or ''
+            blurb = BLURBS.get(rid) or BLURBS.get(key) or ''
             choices = param.get('choices') or row.get('choices') or []
             if choices:
                 rng = ", ".join(choices)
