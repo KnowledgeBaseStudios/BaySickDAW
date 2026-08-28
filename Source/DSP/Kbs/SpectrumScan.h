@@ -1,4 +1,4 @@
-// KBS EQ Pro / BaySickDAW — offline spectrum accumulator (QA-EqFlagship W-22).
+// KBS EQ Pro / BaySickDAW - offline spectrum accumulator (QA-EqFlagship W-22).
 //
 // The Match panel's live capture averages analyser frames while the user
 // plays.  A track SCAN renders the timeline offline and pushes the strip's

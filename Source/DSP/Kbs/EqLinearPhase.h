@@ -147,8 +147,8 @@ public:
     //
     // The FIR need not be zero-phase: sampling a COMPLEX response (magnitude
     // plus an excess phase) with conjugate symmetry still yields a real
-    // impulse response, and the same rotate-to-centre + Kaiser pipeline
-    // holds.  The centre delay - the one latency the engine reports - is
+    // impulse response, and the same rotate-to-center + Kaiser pipeline
+    // holds.  The center delay - the one latency the engine reports - is
     // unchanged; what moves is where each band's energy sits around it
     // (minimum-phase content leans forward, killing its pre-ring).
     void setResponse (const std::function<std::complex<float> (int bin, int fftSizeN)>& at)
@@ -344,8 +344,8 @@ private:
         fft->transform (design.data(), true);
 
         // NOT the Kaiser: a phase-blended response is no longer symmetric
-        // about the centre - minimum-phase content starts AT the centre and
-        // tails rightward - so a centre-peaked window eats the tail and the
+        // about the center - minimum-phase content starts AT the center and
+        // tails rightward - so a center-peaked window eats the tail and the
         // magnitude with it (a low bell lost 3 dB to it).  A flat window
         // with raised-cosine edge tapers keeps whatever the blend put where
         // it put it; the pure-linear path keeps its proven Kaiser.

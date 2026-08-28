@@ -1,7 +1,7 @@
-﻿<p>Twenty-four bands, each with a type, frequency, gain and Q. One function
-designs a band's filter sections; the audio path installs them, the drawn
-curve evaluates them, and the linear-phase designer samples them - so the
-picture and the sound cannot disagree, because they are the same
+﻿<p>A pool of ninety-six bands, each with a type, frequency, gain and Q. One
+function designs a band's filter sections; the audio path installs them, the
+drawn curve evaluates them, and the linear-phase designer samples them - so
+the picture and the sound cannot disagree, because they are the same
 arithmetic.</p>
 
 <div class="codeblock"><div class="codehead">- Source/DSP/Kbs/ParametricEq.h (ParametricEq::designBiquads - one design path for every gain type)</div><pre><code>// gainDb is an argument rather than read from the params so the dynamic
@@ -61,11 +61,16 @@ if (env &gt;= kDetectorFloor &amp;&amp; std::abs (p.rangeDb) &gt; 0.0f)
         grDb = p.rangeDb &gt; 0.0f ? mag : -mag;
     }
 }</code></pre></div>
-<pre class="formulas">- The engine is the vendored KBS core (`kbs::ParametricEq`, Source/DSP/Kbs/), JUCE-free, 24 bands (`kMaxBands`), taken back from KBS EQ Pro at QA-EqPro with the DAW&#x27;s two extensions (per-domain linear phase, four-slot sidechain).
+<pre class="formulas">- The engine is the vendored KBS core (`kbs::ParametricEq`, Source/DSP/Kbs/), JUCE-free, 96 pre-allocated bands (`kEqMaxBands` - storage never grows under a running audio thread), taken back from KBS EQ Pro at QA-EqPro and grown at QA-EqFlagship (per-domain linear phase, four-slot sidechain, and the whole flagship set below).
 - Bell in Natural mode uses the Orfanidis 1997 decramped design: the digital magnitude matches the analogue prototype at Nyquist instead of pinching to unity - analog-shaped highs at zero latency.
 - LP/HP/BP run on TPT state-variable cascades at Butterworth section Qs COMPUTED from the pole angles (`butterworthQ`), never tabulated - the engine this replaced kept the table in three places and they disagreed.
 - Dynamics: the detector is a band-pass at the band&#x27;s freq/Q over a PRE-EQ snapshot (parallel model - a band&#x27;s own cut never starves its own detector) or a picked sidechain line; envelopes run per sample; the commanded gain rebuilds the band&#x27;s section every 32 samples (0.7 ms at 48k) with a ~1.5 ms smoother between updates - the old engine applied it once per host block.
 - Travel is bounded by `min(|threshold| x slope, |range|)` - the SAME expression the dotted extent line is drawn from (`bandExtentMagnitudeAt`), so the live curve mathematically cannot cross it.  THR at 0 dB: nothing engages; the direction (DOWN/UP) rides the range parameter&#x27;s sign.
 - Parameter glides walk freq/gain/Q toward their targets once per 32-sample chunk (~15 ms to target), so automation sweeps instead of stepping at block rate.
-- Every claim is pinned by Tools/EqTests (`run_eq_tests.bat`, 54 checks): flat = bit-exact, measured equals drawn within 0.1 dB, attack lands at chunk rate, silence releases.</pre>
+- Continuous slopes: integer poles run as SVF cascades at computed Butterworth Qs; the FRACTIONAL remainder runs as a pole/zero ladder of first-order pairs (`designSlopeLadder`), so 17 dB/oct is a real filter - and the linear modes realize the exact fractional Butterworth `|H|^2 = 1/(1 + Om^2n)` for any real n.  All Pass is an RBJ second-order phase rotator, unity magnitude, deliberately inert in linear modes.
+- The SECOND dynamics stage engages when the detector drops UNDER `thresholdB`, by the shortfall times its own slope; ONSET reshapes the detector toward transients (symmetric fast/slow one-poles on the smoothed magnitude, fast pole slower than a carrier half-cycle).  SPECTRAL bands (linear modes) analyze per-bin inside the FFT frame - frequency-domain Hann detector view, frequency-proportional neighborhoods, footprint-energy gate - and move only bins standing over their own neighborhood.
+- The color stage (`EqCharacter.h`): cubic (Smooth) and asymmetric-tanh (Warm) shapers at unity small-signal gain with a 10 ms program-dependent drive follower; Changed captures the dry block and colors only the EQ&#x27;s own difference - it nulls bit-near on a flat EQ, pinned by test.  Per-band SAT folds a shaped copy of the band&#x27;s own slice back in.
+- Per-band modulators (IIR modes): LFO phase and a 30 ms envelope follower advance per 32-sample control tick and FOLD INTO the same glide targets dynamics uses (freq x 2^(sum/2), gain + 6 dB x sum, Q x 2^sum) - one smoothing system, so modulation always sweeps.  A linear-phase FIR is a rebuilt snapshot, so there the depths are inert by design.
+- Whole-curve transforms ride ONE pair of choke functions (`xfFreq`/`xfGain`) that every design and query reads - scale (negative inverts) and semitone shift cannot make the audio and the drawn curve disagree.  Delta listen subtracts the latency-aligned input from the output through a ring sized once at prepare; band listen is loudness-matched by paired 200 ms power followers (+-24 dB cap).
+- Every claim is pinned by Tools/EqTests (`run_eq_tests.bat`, 128 checks): flat = bit-exact, measured equals drawn within 0.1 dB, attack lands at chunk rate, silence releases, scale -100% inverts exactly, delta nulls on a flat EQ, a gain LFO measurably swings the band.</pre>
 <p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-6">The band handles</a>, <a href="manual-2.html#EQ-13">DYNAMICS</a>, <a href="manual-2.html#EQB-1">Type</a>, <a href="manual-2.html#EQB-5">Dynamic</a>.</p>

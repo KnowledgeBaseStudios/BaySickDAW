@@ -5,13 +5,14 @@ band's deeper settings.</p>
 
 <p id="EQB-1"><b>Type</b> - the same shapes as the rail's glyph grid, from
 the menu: Bell, Low Pass, High Pass, Low Shelf, High Shelf, Notch, Band
-Pass, Tilt.</p>
+Pass, Tilt, All Pass (phase only - the alignment tool).</p>
 
 <p id="EQB-2"><b>Slope</b> - filter shapes only - sets how steeply a cut
 falls away past its point: 6 dB per octave sounds natural and invisible;
 96 removes a region almost surgically; <code>Brickwall</code> is the
 absolute version and belongs to the linear-phase modes (elsewhere it
-plays as 96).</p>
+plays as 96). These are the classic landings - the rail's SLOPE number
+dials ANY steepness in between, 17 included.</p>
 
 <p id="EQB-3"><b>Channel</b> appears only in the Stereo view:
 <code>Stereo</code> (both sides, the default), <code>Left</code> or
@@ -28,13 +29,24 @@ into one that moves with the music, cutting (or boosting) only when its
 region crosses the threshold - an EQ that works only when needed, which
 is the polite way to tame a harsh frequency. <code>Auto Release</code>
 lets its recovery time follow the material: quick on transients,
-unobtrusive on sustained sound.</p>
+unobtrusive on sustained sound. <code>Spectral</code> (linear-phase
+modes) sharpens the band further: instead of one moving gain, only the
+exact frequencies standing out over their own neighborhood get pulled
+down - the note next door never flinches.</p>
 
 <p id="EQB-6"><b>Listen</b> latches the band's own audition (the
 headphone button does the same); <b>Isolate</b> mutes every band but this
-one; <b>Mute</b> silences this band's work while keeping its settings.</p>
+one; <b>Delta Listen</b> solos what this one band is CHANGING - its
+effect alone, nothing else; <b>Mute</b> silences this band's work while
+keeping its settings.</p>
 
-<p id="EQB-7"><b>Reset Band</b> returns the band to its defaults - the
+<p id="EQB-7"><b>Split to Left + Right</b> turns one stereo band into two
+identical twins, one per side, ready to diverge - the fast route to an
+asymmetric fix. <b>Link Selected Bands</b> welds a multi-selection into a
+permanent group that always moves together (saved with the project);
+<b>Unlink</b> frees a band from its group.</p>
+
+<p id="EQB-8"><b>Reset Band</b> returns the band to its defaults - the
 first eight also return to their home frequencies. <b>Delete Band</b>
 removes it entirely (also the Delete key); re-enabling later starts
 fresh, never a ghost of the old settings.</p>

@@ -1390,11 +1390,22 @@ At least one sidechain cable routed to one strip.
 - Reach: Click the red X on a loaded slot row.
 - Visible: The confirmation prompt shown before the slot is cleared.
 
-**RE-SHOOT REQUIRED (QA-EqPro, 2026-08-26):** every EQ shot below describes
-the NEW window (the KBS EQ Pro port: views + chips + rail).  The old masters
-`EQ.png` and `EQ Band Menu.png` show the retired 8-band panel and must be
-replaced; the manual's marker coordinates for `EQ` and `EQB` are approximate
-until the new masters exist.
+**RE-SHOOT REQUIRED (QA-EqPro 2026-08-26; scope grown at QA-EqFlagship
+2026-08-27):** every EQ shot below describes the NEW window (the KBS EQ Pro
+port: views + chips + rail), and the flagship pass changed the surface
+again before any re-shoot happened - so the re-shoot set now also needs:
+the paged chip row with its arrows (a >24-band project), the A/B MORPH
+strip, the rail's SLOPE/PHASE/SAT numbers + second dynamics stage (THR B /
+RATIO B / RANGE B / ONSET / DENSE) + MOD block, the 9-type grid, the
+grown window menu (Color / Whole Curve / Delta Listen / Sketch a Curve /
+Instances), the grown band menu (All Pass, Spectral, Delta Listen, Split
+to Left + Right, Link/Unlink), the grown Match panel (Scan Track /
+Selection, Stored Spectra, AMOUNT, Auto Cleanup), and one NEW master: the
+Instances panel (`EQ Instances.png` - the browser open over the graph,
+several rows with thumbnails + live mini-spectra, one row current).  The
+old masters `EQ.png` and `EQ Band Menu.png` show the retired 8-band panel
+and must be replaced; the manual's marker coordinates for `EQ` and `EQB`
+are approximate until the new masters exist.
 
 **SHOT-244 - Pre EQ and Post EQ open together (index proof)**
 - Reach: Effects > click "Pre EQ", then click "Post EQ" so both windows are open at once alongside the rack window.

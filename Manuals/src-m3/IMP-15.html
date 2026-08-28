@@ -27,7 +27,7 @@ switch (ch)
     case EqChannel::left:   xl = aOut; break;
     case EqChannel::right:  xr = aOut; break;
 }</code></pre></div>
-<div class="codeblock"><div class="codehead">- Source/DSP/StripEq.cpp (StripEq::pushBand - the audio-thread sync, one compare per untouched band)</div><pre><code>void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
+<div class="codeblock"><div class="codehead">- Source/DSP/StripEq.cpp (StripEq::pushBand - the audio-thread sync, one compare per untouched band; abridged - the shipped compare spans all 31 band fields)</div><pre><code>void StripEq::pushBand (int i, const kbs::EqBandParams&amp; p)
 {
     if (i &lt; 0 || i &gt;= kBands) return;
     auto&amp; c = mCached[(size_t) i];
@@ -50,6 +50,7 @@ switch (ch)
 <pre class="formulas">- Encode: `M = 0.5*(L + R)`, `S = 0.5*(L - R)`; decode is the exact inverse - and it happens PER SAMPLE, PER BAND, only for bands that route mid or side.  There is no engine pair anymore: the old bus EQ was TWO 8-band engines run in series (a Mid set and a Side set); one 24-band engine now covers both with half the instances and half the linear-mode latency.
 - The window&#x27;s three views map onto `EqBandParams::channel`: a band created in the Mid view is `channel = mid`, Side view `= side`, Stereo view `= stereo` (or `left`/`right` via its picker).  &quot;Move to ... view&quot; rewrites the channel in place - settings kept.  The mono content of a stereo signal IS the mid, which is why there is no separate &quot;mono&quot; option anywhere.
 - Placement (the PAN knob) splits a gain band&#x27;s decibels across L and R (`placementWeights`: full weight own side, fading on the other) - gain types in the Stereo view only, separate L/R coefficient sets when the weights differ.  The drawn curve deliberately does not move with it.
-- StripEq (Source/DSP/StripEq.h) is the strip wrapper: the audio-thread sweep reads the band&#x27;s 18 APVTS parameters from a lock-free pointer cache, builds `EqBandParams`, and `pushBand` forwards only on change.  The wrapper also owns the A/B spare bank, the state blob, the spectrum feeds, and the identity fast path - which refuses to short-circuit whenever latency &gt; 0, so a flat EQ in a linear mode still imposes its delay (the old B2 defect&#x27;s negation).
-- Per-band sidechain: `scSource` picks one of the strip&#x27;s four receive lines (copied per block into the engine&#x27;s slot buffers); -1 = the band&#x27;s own input.</pre>
+- StripEq (Source/DSP/StripEq.h) is the strip wrapper: the audio-thread sweep reads the band&#x27;s 31 APVTS parameters from a lock-free pointer cache, builds `EqBandParams`, and `pushBand` forwards only on change.  The wrapper also owns the A/B spare bank, the state blob, the spectrum feeds, and the identity fast path - which refuses to short-circuit whenever latency &gt; 0, so a flat EQ in a linear mode still imposes its delay (the old B2 defect&#x27;s negation).
+- Per-band sidechain: `scSource` picks one of the strip&#x27;s four receive lines (copied per block into the engine&#x27;s slot buffers); -1 = the band&#x27;s own input.
+- Split to Left + Right copies every field of a stereo band into a free slot and re-channels the pair - two independent bands from one gesture, one undo step.  The wrapper also carries the offline scan tap (`scanTap`): armed only around an offline render session, it feeds `kbs::SpectrumScan` the strip&#x27;s pre-EQ audio at render speed for the Match panel&#x27;s track scan.</pre>
 <p class="behind"><b>Behind:</b> <a href="manual-2.html#EQ-2">ST / MID / SIDE</a>, <a href="manual-2.html#EQ-10">GAIN and PAN</a>, <a href="manual-2.html#EQB-3">Channel</a>, <a href="manual-2.html#EQB-4">Move to</a>.</p>

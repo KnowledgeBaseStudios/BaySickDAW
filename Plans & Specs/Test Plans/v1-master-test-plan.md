@@ -3622,6 +3622,119 @@ these rows cover the app around it.
       whole contract incl. the C3 per-domain regression and the 4-slot sidechain).
       `D:__ R:__` notes:
 
+### §B.39 — QA-EqFlagship (the market pass: 96 bands, spectral + two-way dynamics, color, modulators, workflow, match, cross-instance)
+
+The flagship batch over the QA-EqPro engine: the pool grows to 96 bands
+(paged chips), continuous slopes + All Pass, per-band phase + Mixed Phase
+mode, two-way dynamics + onset, spectral dynamics (linear modes), the
+color stage + per-band saturation, per-band modulators (IIR modes),
+whole-curve transforms, delta listen, loudness-matched solo, domain
+audition, multi-select/linked groups, split L/R, EQ Sketch, note-aware
+frequency, A/B morph, Auto Cleanup, track/selection scan, stored spectra
+(.kbsref), Match Amount, and the instance browser with re-point.  The
+engine work is proven by `run_eq_tests.bat` (128 checks, sections 14-22);
+these rows cover the app around it.  §B.38 stays the regression floor.
+
+**Bands + filters:**
+
+- [ ] **EQF-1 - MUST-PASS: the 96-band pool pages.** Fill page 1 with 24 bands ("+"), keep
+      adding: the page arrows appear, page 2 chips fill 25..48, selection snaps the row to
+      the selected band's page, chips number correctly to 96.  A beginner project with
+      <= 24 bands never sees an arrow.  `D:__ R:__` notes:
+- [ ] **EQF-2 - continuous slope.** A High Pass band's rail SLOPE number drags smoothly
+      (1..96 dB/oct, any value); the drawn skirt follows CONTINUOUSLY (17 sits between 12
+      and 24); menu detents still land the classics; Brickwall stays a linear-modes cliff.
+      `D:__ R:__` notes:
+- [ ] **EQF-3 - All Pass.** An All Pass band: flat magnitude everywhere, the phase overlay
+      rotates at freq/Q, audible on layered material as alignment; in linear modes it is
+      deliberately inert.  `D:__ R:__` notes:
+
+**Phase + modes:**
+
+- [ ] **EQF-4 - per-band phase + Mixed.** In a linear mode, drag a low bell's PHASE number
+      0 -> 100%: the pre-ring audibly leaves the low end and the phase overlay bends at
+      that band only.  Mixed Phase mode: lows behave minimum-phase, highs linear, one
+      latency figure in the menu.  `D:__ R:__` notes:
+
+**Dynamics II:**
+
+- [ ] **EQF-5 - MUST-PASS: two-way stages + onset.** On a drum loop: DOWN stage ducks the
+      hits (THR/RATIO/RANGE as before); the second stage (THR B / RATIO B / RANGE B) lifts
+      the quiet tails UPWARD with a positive Range B; ONSET at 100% makes the band react
+      to the hit's attack and ignore its ring.  GR meter + breathing curve tell the same
+      story.  `D:__ R:__` notes:
+- [ ] **EQF-6 - spectral dynamics.** Linear mode, a harsh vocal (or a resonant synth): arm
+      Spectral on a wide bell over the harsh region - only the poking bins duck (the
+      bright breathing line), the rest of the band's region passes; DENSE narrows or
+      broadens what counts as a poke.  Outside linear modes the band is its plain dynamic
+      self.  `D:__ R:__` notes:
+
+**Color + modulators:**
+
+- [ ] **EQF-7 - the color stage.** Options > Color: None is bit-clean; Smooth and Warm add
+      audible harmonic character that backs off as the material gets loud; Changed colors
+      ONLY what the EQ altered (flat EQ = dead silent null - flip polarity against the dry
+      to prove it); the amounts scale it.  Per-band SAT drives just that band's region.
+      `D:__ R:__` notes:
+- [ ] **EQF-8 - modulator wobble.** IIR mode: LFO depth on a bell's freq - the drawn curve
+      breathes and the sweep is audible at RATE; env depth POSITIVE on gain follows the
+      material, NEGATIVE ducks against it; targets F/G/Q each work; in a linear mode the
+      modulators are deliberately inert (static curve).  Automation lanes exist for all
+      five (sub-spec 2a).  `D:__ R:__` notes:
+
+**Workflow:**
+
+- [ ] **EQF-9 - MUST-PASS: sketch a curve.** Menu > Sketch a Curve, draw a smiley across
+      the graph: bells + edge shelves appear where drawn (steep stroke = narrow Q), ONE
+      Ctrl+Z removes them all.  Right-click cancels sketch mode.  `D:__ R:__` notes:
+- [ ] **EQF-10 - note-aware frequency.** Piano strip on: click a key - the selected band
+      snaps to that note (no band selected: one is born there); the FREQ caption reads the
+      live note name; typing "A4" or "C#2+13" into FREQ lands exactly; the drag readout
+      still shows the note.  `D:__ R:__` notes:
+- [ ] **EQF-11 - multi-select + linked groups.** Rubber-band three bands on empty space
+      (or Ctrl+click them): dragging any selected dot moves the shape (freq as a ratio,
+      gain as an offset); Alt+drag scales the gains proportionally; band menu > Link
+      Selected Bands survives deselection AND a save/reload (view tree); Unlink frees one.
+      `D:__ R:__` notes:
+- [ ] **EQF-12 - split to L/R.** A Stereo-view stereo band's menu > Split to Left + Right:
+      two bands, identical settings, one Left one Right, one undo step.  `D:__ R:__` notes:
+- [ ] **EQF-13 - delta + matched solo + domain hold.** Options > Delta Listen on a boosted
+      mix: you hear ONLY what the EQ adds/removes (flat EQ = silence), correctly aligned
+      in linear modes; band menu > Delta Listen solos one band's effect.  Band Listen now
+      holds the program's loudness (a narrow slice is no longer a level drop).  HOLDING
+      the MID or SIDE view button auditions that domain alone; release restores; a quick
+      click still just switches views.  `D:__ R:__` notes:
+- [ ] **EQF-14 - whole curve + morph.** Options > Whole Curve: Scale -100% mirrors the
+      curve (handles stay put - the curve moves), Shift +12 st moves it an octave, Reset
+      restores; both automate.  The chip row's morph strip drags the whole setup toward
+      the B bank and back, one undo step, thumb springs back.  `D:__ R:__` notes:
+
+**Match cluster:**
+
+- [ ] **EQF-15 - Auto Cleanup.** On a boxy guitar (or any resonant source): capture or
+      scan Current, Auto Cleanup - static cuts land ON the resonances, problems that come
+      and go arrive as dynamic bands, the status reports the tally, ONE undo step removes
+      them all, AMOUNT scales how hard they cut.  `D:__ R:__` notes:
+- [ ] **EQF-16 - MUST-PASS: track scan + match.** With clips on the timeline: Scan Track /
+      Selection reads the strip offline (progress + cancel), reports "Scanned: whole song,
+      m:ss" (make a ruler selection: "selection, m:ss" wins); Match then fits against a
+      reference exactly as a live capture would, Amount at 50% goes halfway.  Stored
+      Spectra: save the Current under a name, load it later as a reference (.kbsref in
+      Presets/EQ/References - a shareable file).  `D:__ R:__` notes:
+
+**Cross-instance:**
+
+- [ ] **EQF-17 - MUST-PASS: browser walk + re-point.** Options > Instances...: every EQ
+      point (buses + strips, pre + post) with name, curve thumbnail, live mini-spectrum.
+      Click a row: THIS window re-points (title, tabs, bands, rail all follow; undo still
+      lands on the right strip).  Double-click opens that point's own window.  Row menu:
+      Match Reference feeds the Match panel from that instance; Collision Reference drives
+      the collision view with no sidechain routed; picking again clears.  `D:__ R:__` notes:
+- [ ] **EQF-18 - the B.38 floor.** The full §B.38 walk (EQ-1..EQ-17) stays green on this
+      build - especially EQ-5 (picture = sound), EQ-8 (linear alignment) and EQ-16
+      (touch-lazy params).  `D:__ R:__` notes:
+
+
 ## §C — Deferred re-verify ledger
 
 Parked items from closed batches. Lands INSIDE QA-J-Verify's §B section when that section is

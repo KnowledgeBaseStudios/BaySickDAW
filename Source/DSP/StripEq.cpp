@@ -336,8 +336,6 @@ void StripEq::setStateInformation (const void* data, int sz)
 
     mViewingSpare = xml->getBoolAttribute ("viewingSpare", false);
     mEq.setMode ((kbs::EqMode) juce::jlimit (0, 7, xml->getIntAttribute ("mode", 0)));
-    mEq.setCharacter ((kbs::EqCharMode) juce::jlimit (0, 3, xml->getIntAttribute ("charMode", 0)),
-                      (float) xml->getDoubleAttribute ("charAmt", 0.5));
     mEq.setOversampling (xml->getBoolAttribute ("os", false));
     pushGlobals (xml->getBoolAttribute ("propQ", true),
                  xml->getBoolAttribute ("autoGain", false),

@@ -123,6 +123,7 @@ public:
     {
         stripPrefix = newPrefix;
         bank = newBank;
+        if (sketchMode) setSketchMode (false);
         listenLatched = false;
         holdListen (false);
         selectBand (-1);
@@ -1710,7 +1711,7 @@ private:
             }
 
             // W-16: set members wear a light outer ring; linked bands a
-            // small corner dot in their own colour.
+            // small corner dot in their own color.
             if (multiSel[(size_t) b] && ! sel)
             {
                 g.setColour (cols.text.withAlpha (0.75f));

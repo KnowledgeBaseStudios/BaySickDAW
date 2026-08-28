@@ -371,3 +371,43 @@ work; the doc is the handoff's IPC half.
 Browser/re-point are UI - smoke-verified per plan; EqTests suite rerun
 green (regression); gate six zeros + four links (one self-inflicted
 duplicate declaration from a half-applied patch script, removed).
+
+## 2026-08-27 - Task 11 - docs close + the handoff + review
+
+Test plan section B.39 added (EQF-1..EQF-18, five MUST-PASS: the paging
+walk, two-way + onset, sketch, track scan + match, browser + re-point;
+EQF-18 formally carries the B.38 regression floor). System Reference
+EQ.md updated to the flagship surface by targeted section edits (purpose,
+engine, window, graph gestures, band menu, rail, dynamics, modes + phase,
+color, modulators, tools, window menu, parameters 31+9, persistence,
+not-saved, cross-refs). Callout Registry: EQ grew to 15 callouts (MOD
+block inserted as 14, menu now 15), EQB to 8 (Split/Link block as 7);
+IMP-14 topic line updated. Screenshot List: the RE-SHOOT banner's scope
+grown to the flagship surface + one NEW master (EQ Instances.png).
+Verbatim Strings: the EQ section rewritten whole (paged chips, morph,
+new rail captions, 9-type band menu, grown window menu, sketch overlay,
+Match panel with scan/cleanup/amount/spectra strings, Instances panel).
+Manual: m2 EQ.html/EQB.html + m3 IMP-14/15/16 updated, marker coords
+extended, regenerated (91 figures / 733 markers / 89 topics), all three
+PDFs reprinted via headless Edge. THE KBS HANDOFF written against the
+finished work: "Files For Claude/KBS Handoff - EQ Flagship
+(QA-EqFlagship).md" - the vendored-file ship set, the UI port map, the
+plugin-only spec (7A in-plugin undo + A/B copy both ways, the 8B IPC
+transport implementing the protocol spec, 3c naming), the sub-spec
+ledger, and the engineering notes worth not re-learning.
+
+/review-batch: NO BLOCKERS. Fixed pre-commit: the rewritten EQ.md still
+said "All 24 bands" in one spot (96 now); en-GB spellings in NEW comment
+blocks (EqLinearPhase center x4, EqGraphView color) + the em-dash in
+SpectrumScan.h's header; the dead double-apply of charMode/charAmt in
+StripEq::setStateInformation (pushGlobals already carries both); and
+EqGraphView::retarget now disarms sketch mode (an armed sketch would
+have drawn onto the re-pointed target). The reviewer's second NEEDS-FIX
+- confirming the W-26 Gullfoss draft reached Jeff - is answered by
+re-attaching the draft in the close report. Both gates re-run green
+after the fixes (suite 128, six zeros + four links).
+
+The Work Log entry is HELD per the open R2 question; the compiled entry
+(drafted by /draft-doc batch-close, review outcome filled) is parked
+VERBATIM at the end of this batch's plan file under "Held Work Log entry
+(R2)" - it moves to the Work Log unchanged when Jeff clears R2.

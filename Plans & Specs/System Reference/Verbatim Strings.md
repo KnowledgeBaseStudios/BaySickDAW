@@ -327,55 +327,82 @@ deliberately absent from the list.
 
 ---
 
-## THE EQ WINDOW (QA-EqPro 2026-08-26, EffectWindows.cpp + EqWindowUI/)
+## THE EQ WINDOW (QA-EqFlagship 2026-08-27, EffectWindows.cpp + EqWindowUI/)
 
 Tab pair: `Pre EQ` / `Post EQ`.  Window titles: `<Strip> - Pre EQ` /
 `<Strip> - Post EQ` (falls back to `Pre EQ` / `Post EQ` with no strip name).
 
-View row segments: `ST` / `MID` / `SIDE`.  Chip row: bands numbered `1`..`24`,
-the add control is `+`, the A/B pill reads `A` or `B`.
+View row segments: `ST` / `MID` / `SIDE`.  Chip row: bands numbered
+`1`..`96` in pages of 24 (page arrows are drawn triangles, no text), the
+morph strip's end letters are `A` / `B`, the add control is `+`, the A/B
+pill reads `A` or `B`.
 
 Rail captions: `BAND <n>` / `NO BAND`; knob captions `GAIN` `PAN`; numbers
-`FREQ` `Q`; dynamics header `DYNAMICS`; toggles `DYN` `AUTO` `EXT`; direction
-segments `DOWN` / `UP`; dyn knob captions `THR` `RATIO` `ATK` `REL`; the pan
-readout is `C` or `L<n>` / `R<n>`, the release readout shows `auto` under
-AUTO.  Slope box rows: `6 dB/oct` `12 dB/oct` `18 dB/oct` `24 dB/oct`
-`36 dB/oct` `48 dB/oct` `72 dB/oct` `96 dB/oct` `Brickwall`.
+`FREQ` (the caption becomes the live note name, e.g. `A4` / `A4 +13c`,
+while a band is selected) `Q` `SLOPE` `PHASE` `SAT`; dynamics header
+`DYNAMICS`; toggles `DYN` `AUTO` `EXT`; direction segments `DOWN` / `UP`;
+dyn knob captions `THR` `RATIO` `ATK` `REL` `THR B` `RATIO B` `RANGE B`
+`ONSET` `DENSE`; the MOD block: `RATE` `LFO` `ENV` with two `F`/`G`/`Q`
+target rows; the pan readout is `C` or `L<n>` / `R<n>`, the release
+readout shows `auto` under AUTO.  Slope menu rows: `6 dB/oct` `12 dB/oct`
+`18 dB/oct` `24 dB/oct` `36 dB/oct` `48 dB/oct` `72 dB/oct` `96 dB/oct`
+`Brickwall`.
 
 Band menu: submenus `Type` (`Bell` `Low Pass` `High Pass` `Low Shelf`
-`High Shelf` `Notch` `Band Pass` `Tilt`), `Slope` (rows above), `Channel`
-(`Stereo` `Left` `Right` - Stereo view only), `Move to` (`Stereo view`
-`Mid view` `Side view`), `Dynamic` (`Make Dynamic` / `Auto Release`); rows
-`Listen` `Isolate` `Mute`; sep; `Reset Band` `Delete Band`.
+`High Shelf` `Notch` `Band Pass` `Tilt` `All Pass`), `Slope` (rows
+above), `Channel` (`Stereo` `Left` `Right` - Stereo view only), `Move to`
+(`Stereo view` `Mid view` `Side view`), `Dynamic` (`Make Dynamic` /
+`Auto Release` / `Spectral (linear modes)`); rows `Listen` `Isolate`
+`Delta Listen` `Mute`; sep; `Split to Left + Right` (Stereo-view stereo
+bands), `Link Selected Bands` (a multi-selection exists), `Unlink` (the
+band is linked); sep; `Reset Band` `Delete Band`.
 
 Window menu: `Processing Mode` (rows `Zero Latency` `Natural Phase`
 `Linear Low` `Linear Medium` `Linear High` `Linear Very High`
-`Linear Maximum`, each suffixed `   (<n> ms (<n> sp))` computed at the
-session rate, or `   (0 ms)`); `Oversampling 2x`; `Proportional Q`;
-`Auto-Gain` (submenu: `Auto-Gain`, then `25%` `50%` `75%` `100%`);
-`Output Trim` (`Polarity Flip`, then `-12 dB` `-6 dB` `-3 dB` `0 dB`
-`+3 dB` `+6 dB` `+12 dB`); `Gain Scale` (`+/-3 dB` .. `+/-30 dB`);
-`Analyser` (`Pre` `Post` `Sidechain`; `Fast` `Medium` `Slow`;
-`Tilt 4.5 dB/oct` `Tilt 3 dB/oct` `Flat`; `Freeze` `Peak Hold`); `View`
-(`Analyser` `Spectrogram` `Phase Overlay` `Piano Strip`);
-`Keyboard & Mouse...`; `Reset All Bands`; `EQ Match...`; `Presets`
-(`Default` first, factory categories `Cleanup` `Vocals` `Drums` `Bass`
-`Master` as submenus, user presets, `Save Preset...`).
+`Linear Maximum` `Mixed Phase`, each suffixed `   (<n> ms (<n> sp))`
+computed at the session rate, or `   (0 ms)`); `Oversampling 2x`;
+`Proportional Q`; `Color` (`None` `Smooth` `Warm` `Changed`, then `25%`
+`50%` `75%` `100%`); `Auto-Gain` (submenu: `Auto-Gain`, then `25%` `50%`
+`75%` `100%`); `Output Trim` (`Polarity Flip`, then `-12 dB` .. `+12 dB`);
+`Gain Scale` (`+/-3 dB` .. `+/-30 dB`); `Analyser` (`Pre` `Post`
+`Sidechain`; `Fast` `Medium` `Slow`; `Tilt 4.5 dB/oct` `Tilt 3 dB/oct`
+`Flat`; `Freeze` `Peak Hold`); `View` (`Analyser` `Spectrogram`
+`Phase Overlay` `Piano Strip`); `Whole Curve` (`Scale -100% (invert)`
+`Scale -50%` `Scale 50%` `Scale 75%` `Scale 100%` `Scale 125%`
+`Scale 150%` `Scale 200%`; `Shift -12 st` .. `Shift +12 st`;
+`Reset Transforms`); `Delta Listen`; `Sketch a Curve...`;
+`Instances...`; `Keyboard & Mouse...`; `Reset All Bands`; `EQ Match...`;
+`Presets` (`Default` first, factory categories `Cleanup` `Vocals`
+`Drums` `Bass` `Master` as submenus, user presets, `Save Preset...`).
 
 EXT picker rows: `This band's own input`, then `Receive <n> - <source>` or
 `Receive <n> - not routed`.
 
+Sketch overlay: "Sketch: draw the curve you want. Right-click cancels."
+
 Match panel: title `EQ MATCH`; buttons `Capture Current`,
-`Capture Reference (SC)`, `Load Reference File...`, `Match`, `Close`;
-labels `SMOOTH` `BANDS`; opening status "Play the strip, capture Current.
-Feed the reference into a receive slot and capture it, or load a file.";
-capturing "Capturing... play the passage, press again to stop."; done
-`Captured.` / "Too short - nothing captured."; result recipe
-`<n> bands  -  residual <x> dB RMS (was <y>)`.
+`Load Current Export...`, `Scan Track / Selection`,
+`Capture Reference (SC)`, `Load Reference File...`, `Stored Spectra...`,
+`Match`, `Auto Cleanup`, `Close`; slider labels `DETAIL` `AMOUNT` (the
+amount readout is `<n>% of the fit`); scan status `Scanned: whole song,
+<m>:<ss>` / `Scanned: selection, <m>:<ss>`; cleanup tally `Cleanup: <n>
+cuts, <m> dynamic - ordinary bands, one undo step.` / "Nothing stands out
+over its own neighborhood - no cleanup needed."; match tally recipe
+`<n> stereo, <n> mid, <n> side, <n> dynamic  -  residual <x> dB RMS
+(was <y>)`.  Stored Spectra menu: `Save Current As...`,
+`Save Reference As...`, then the stored names.  Save prompt: title
+`Save Spectrum`, message `Name it:`.  Scan overlay title
+`Scanning for EQ Match...`.
+
+Instances panel: title `EQ INSTANCES`; subtitle "Click re-points this
+window. Right-click for more."; row tag `PRE` / `POST` (plus `MATCH REF`
+/ `COLLISION` when picked); row menu `Open in Its Own Window`,
+`Match Reference`, `Collision Reference`; `Close`.
 
 Save preset prompt: title `Save EQ Preset`, message `Name it:`, buttons
 `Save` / `Cancel`.  Keyboard card title `Keyboard & Mouse` (body is the
-twelve-line map in EffectWindows.cpp; quote from source when needed).
+seventeen-line map in EffectWindows.cpp; quote from source when needed).
 
 Empty-state and dot decorations: L/R badge letters `L` / `R`; the grab
-readout suffix is `  grab` after the Hz figure.
+readout suffix is `  grab` after the Hz figure; the drag readout carries
+the note name after the frequency.

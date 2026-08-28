@@ -1,5 +1,5 @@
 ﻿<p>An equalizer - EQ - turns parts of the frequency range up or down: more
-bass, less harshness, air on top. This one gives you up to twenty-four
+bass, less harshness, air on top. This one gives you up to ninety-six
 independent <em>bands</em> - grabbable handles on a curve, each in charge of
 its own region - drawn over a live picture of your actual sound. Every
 channel has two of these: one before its effects rack, one after.</p>
@@ -19,15 +19,20 @@ menus - the view is the decision. Whichever view you are in, the other
 views' curves stay faintly visible as a ghost, so you always see what the
 other half is doing.</p>
 
-<p id="EQ-3"><b>The band chips</b> - one numbered pill per band, all
-twenty-four in one shared pool across the views. Click selects,
-double-click mutes an active band or wakes an off one, right-click opens
-the band's menu, and <b>+</b> adds a band in the middle. A chip whose band
-lives in another view wears a tiny M or S tick.</p>
+<p id="EQ-3"><b>The band chips</b> - one numbered pill per band, twenty-four
+to a page of the ninety-six-band pool. Small arrows page the row, and they
+only appear once a page fills - with two dozen bands or fewer you never see
+them. Click selects, double-click mutes an active band or wakes an off one,
+right-click opens the band's menu, and <b>+</b> adds a band. A chip whose
+band lives in another view wears a tiny M or S tick.</p>
 
 <p id="EQ-4"><b>A/B</b> is the EQ's own compare pair - two complete
 setups to flip between while listening (B starts blank). Right-click it
-to copy A into B or to lock the pair. One Ctrl+Z undoes a flip.</p>
+to copy A into B or to lock the pair. One Ctrl+Z undoes a flip. The small
+<b>morph strip</b> beside it goes further: drag its thumb and the whole
+setup blends smoothly toward the other bank - release keeps what you
+hear, the thumb springs home, and one Ctrl+Z takes the whole morph
+back.</p>
 
 <figure data-cluster="The curve area|5,6,7,8,9">
 
@@ -42,28 +47,39 @@ cut (up-down) in one gesture. Hold Shift for fine moves, Ctrl for gain
 only, Ctrl+Shift for frequency only; the wheel over a handle sets its
 width (Q); Alt-click resets it; double-click MUTES it (delete lives in
 the menu and on the Delete key); double-click empty space adds a band
-there. The small glyph above each dot is its shape, and a dynamic band
-wears a thin second ring plus a tiny meter showing how far it has moved
-right now.</p>
+there. Drag across EMPTY space to select several bands at once (or
+Ctrl+click dots into the set): dragging any selected dot then moves them
+all as one shape, and starting that drag with Alt scales their gains
+proportionally instead. The small glyph above each dot is its shape, and
+a dynamic band wears a thin second ring plus a tiny meter showing how far
+it has moved right now. Prefer drawing to dragging? The menu's
+<b>Sketch a Curve</b> turns your next stroke across the graph into real
+bands - bumps become bells, edges become shelves - and one Ctrl+Z erases
+the lot.</p>
 
 <p id="EQ-7"><b>The live spectrum</b> draws behind the curve whenever
 sound flows, so your moves land on the actual music - you can SEE the
 harsh peak you are hunting. The menu offers a heat-mapped
 <em>spectrogram</em>, a phase overlay, a piano strip along the bottom
-(every C named, so frequency becomes pitch), analyser speeds, a display
-tilt that makes normal music read flat, freeze and peak hold.</p>
+(every C named, so frequency becomes pitch - and CLICKING a key snaps the
+selected band exactly onto that note), analyser speeds, a display tilt
+that makes normal music read flat, freeze and peak hold.</p>
 
 <p id="EQ-8"><b>The headphone button</b> beside the selected band latches
 <em>listen</em>: you hear only that band's region while you drag it -
-sweep around and find the ugly resonance by ear. Isolate (in the band
-menu) is the other audition: mute every band but this one.</p>
+sweep around and find the ugly resonance by ear, at the music's own
+loudness (the solo rides itself up to match, so a narrow band is never a
+sudden level drop). Isolate (in the band menu) is the other audition:
+mute every band but this one. And <em>Delta Listen</em> (the window menu,
+or per band) flips the question - you hear only what the EQ is CHANGING,
+so a flat EQ goes silent and every move becomes audible on its own.</p>
 
 <p id="EQ-9"><b>The crosshair</b> arms the <em>spectrum grab</em>: the
 analyser holds its peaks steady, the nearest found resonance offers
 itself under your pointer, and one click drops a ready-aimed cut on it.
 One grab per arming, so playing music never steals a click.</p>
 
-<figure data-cluster="The rail|10,11,12,13">
+<figure data-cluster="The rail|10,11,12,13,14">
 
 <p id="EQ-10"><b>GAIN and PAN</b> - the selected band's boost or cut, and
 where that boost or cut sits in the stereo picture: PAN hard left and the
@@ -73,11 +89,15 @@ not your audio, and the drawn curve deliberately stays put.</p>
 <p id="EQ-11"><b>FREQ and Q</b> - drag the numbers up and down, or
 double-click to type. Q is width: higher is narrower.</p>
 
-<p id="EQ-12"><b>The shape grid, channel and slope</b> - the band's type
-(Bell, the passes, the shelves, Notch, Band Pass, Tilt), a Stereo / L / R
-choice for Stereo-view bands, and for the filter shapes a slope from a
-gentle 6 dB per octave to a surgical 96 - plus Brickwall, which exists in
-the linear-phase modes.</p>
+<p id="EQ-12"><b>The shape grid, channel and the three numbers</b> - the
+band's type (Bell, the passes, the shelves, Notch, Band Pass, Tilt, and
+All Pass - which changes only phase, for lining layered sounds up), a
+Stereo / L / R choice for Stereo-view bands, then SLOPE (any steepness
+from 1 to 96 dB per octave, continuously - 17 is a real setting - plus
+Brickwall in the linear-phase modes), PHASE (in linear modes, how much of
+THIS band opts out of linear phase - pull it up on a low bell and the
+bass pre-ring leaves), and SAT (saturation folded into just this band's
+region).</p>
 
 <p id="EQ-13"><b>DYNAMICS</b> - DYN makes the band move with the music:
 DOWN cuts when its region crosses the threshold, UP boosts. THR decides
@@ -85,16 +105,38 @@ where it engages - at 0 nothing ever moves, and the dotted line on the
 curve IS this knob: the furthest the band can travel. RATIO is how hard,
 ATK and REL how fast (AUTO lets the release follow the material), EXT
 picks one of the channel's sidechain receive lines so another track
-drives this band - the classic "duck the bass when the kick hits". The
-meter shows the movement live.</p>
+drives this band - the classic "duck the bass when the kick hits". A
+SECOND stage (THR B / RATIO B / RANGE B) works the quiet side: when the
+region drops UNDER its threshold, a positive Range B lifts it - tails and
+air come up without touching the hits. ONSET aims the whole thing at
+transients: at 100% the band reacts to the attack of a drum and ignores
+its ring. And in the linear-phase modes, <em>Spectral</em> (the band
+menu) sharpens a dynamic band to surgical: only the exact frequencies
+poking out over their own neighborhood get moved, the notes beside them
+pass untouched - DENSE sets how picky that is. The meter shows the
+movement live.</p>
 
-<figure data-cluster="The menu|14">
+<p id="EQ-14"><b>MOD</b> - every band carries a slow LFO (RATE, LFO
+depth) and an envelope follower (ENV, push up to follow the music, pull
+down to duck against it), each aimable at the band's Frequency, Gain or
+Q. A gentle LFO on a filter's frequency is instant movement; a negative
+envelope on a boost is tone that politely gets out of the way when things
+get loud. These live in the zero-latency modes, where filters can move
+freely.</p>
 
-<p id="EQ-14"><b>The menu</b> holds the processing modes - Zero Latency,
-Natural Phase (analog-shaped highs at no cost), and five Linear Phase
-precisions with their real delays listed - plus oversampling,
-proportional Q, measured auto-gain, output trim and polarity, the gain
-scale, all the analyser and view options, the keyboard map, Reset All
-Bands, EQ Match (capture your track and a reference - or a reference
-FILE - and let the EQ fit itself to the difference), and the presets:
-Default, the factory shapes, and your own saved ones.</p>
+<figure data-cluster="The menu|15">
+
+<p id="EQ-15"><b>The menu</b> holds the processing modes - Zero Latency,
+Natural Phase (analog-shaped highs at no cost), five Linear Phase
+precisions with their real delays listed, and Mixed Phase (natural lows,
+linear highs, the mastering favorite) - plus oversampling, proportional
+Q, <b>Color</b> (three saturation characters: Smooth, Warm, and Changed,
+which colors only what the EQ altered), measured auto-gain, output trim
+and polarity, the gain scale, all the analyser and view options,
+<b>Whole Curve</b> (scale everything at once - negative flips the whole
+curve upside down - or shift it by semitones), <b>Delta Listen</b>,
+<b>Sketch a Curve</b>, <b>Instances</b> (every EQ in your whole project
+in one list - live thumbnails and spectra; click a row and THIS window
+becomes that EQ's editor; a row can also feed EQ Match or the collision
+view as a reference), the keyboard map, Reset All Bands, EQ Match, and
+the presets: Default, the factory shapes, and your own saved ones.</p>

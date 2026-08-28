@@ -536,7 +536,7 @@ reading; new topics append at the end of the namespace, never inside a block.
 | IMP-11 | Delay - Echo and Vocal Doubler modes, Spread / Pan tap offsets, sync divisions | `Source/DSP/DelayDSP` |
 | IMP-12 | Reverb - tail model, early reflections, bass multiplier | `Source/DSP/ReverbDSP` |
 | IMP-13 | De-reverb - reduction and tail estimation | `Source/DSP/DeReverbDSP` |
-| IMP-14 | The kbs EQ engine - 24 bands, one design path, the over-threshold dynamics | `Source/DSP/Kbs/ParametricEq` |
+| IMP-14 | The kbs EQ engine - the 96-band pool, one design path, two-way/onset/spectral dynamics, color, modulators | `Source/DSP/Kbs/ParametricEq` |
 | IMP-15 | Domain views + per-band routing + the StripEq wrapper | `Source/DSP/Kbs/ParametricEq`, `Source/DSP/StripEq` |
 | IMP-16 | Linear phase - overlap-save FIR + the per-domain 2x2 matrix | `Source/DSP/Kbs/EqLinearPhase` |
 ### DSP modules - pedal and amp Style models (IMP-17..IMP-34)
@@ -840,15 +840,15 @@ Roll is numbered (see PR); everything else cross-references it.
 | DKIT-10 | Row audition key - the white piano key at the row's right end; greys while held | Writing | IMP-67 | `Engine Tabs (Layers, Bass, Drums).md` |
 ### `EQ` - `EQ.png`
 
-The eight-band EQ window. All eight bands are the same control set, so each
-band control is ONE callout per the within-image rule.
+The EQ window (96-band pool, QA-EqFlagship). Every band is the same control
+set, so each band control is ONE callout per the within-image rule.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
 | EQ-1 | `Pre EQ` / `Post EQ` - which of the strip's two EQs this window is showing (QA-EqPro window) | Mixing | IMP-14 | `EQ.md` |
 | EQ-2 | `ST` / `MID` / `SIDE` - the three domain views. The view a band lives in IS its domain; the other views ghost | Mixing | IMP-15 | `EQ.md` |
-| EQ-3 | The band chips - 24 numbered pills, one shared pool across the views, plus `+` | Mixing | IMP-14 | `EQ.md` |
-| EQ-4 | The `A`/`B` pill - two complete setups; click swaps, right-click Copy A to B / Lock | Mixing | IMP-14 | `EQ.md` |
+| EQ-3 | The band chips - 24 numbered pills per PAGE of the 96-band pool (arrows appear when a page fills), one shared pool across the views, plus `+` | Mixing | IMP-14 | `EQ.md` |
+| EQ-4 | The `A`/`B` pill - two complete setups; click swaps, right-click Copy A to B / Lock. The MORPH strip beside it drags the live setup toward the other bank, one undo step | Mixing | IMP-14 | `EQ.md` |
 | EQ-5 | Grid + frequency scale - gain scale selectable 3..30 dB; 20 Hz to 20 kHz, logarithmic | Mixing | IMP-14 | `EQ.md` |
 | EQ-6 | A band handle - numbered dot, type glyph above, dynamic ring + mini GR meter, L/R badge | Mixing | IMP-14 | `EQ.md` |
 | EQ-7 | The live spectrum - pre dim / post bright / sidechain, with spectrogram, phase and piano opt-ins | Mixing | IMP-14 | `EQ.md` |
@@ -856,9 +856,10 @@ band control is ONE callout per the within-image rule.
 | EQ-9 | The crosshair - arms the spectrum grab (max-held peaks; one grab per arming) | Mixing | IMP-14 | `EQ.md` |
 | EQ-10 | Rail `GAIN` / `PAN` knobs - the band's gain and its stereo placement | Mixing | IMP-15 | `EQ.md` |
 | EQ-11 | Rail `FREQ` / `Q` drag-numbers - drag or double-click to type | Mixing | IMP-14 | `EQ.md` |
-| EQ-12 | Rail type glyph grid + `ST`/`L`/`R` + slope box (6..96 dB/oct + `Brickwall`) | Mixing | IMP-14 | `EQ.md` |
-| EQ-13 | Rail `DYNAMICS` - `DYN`/`AUTO`/`EXT`, `DOWN`/`UP`, `THR`/`RATIO`/`ATK`/`REL`, GR meter | Mixing | IMP-14 | `EQ.md` |
-| EQ-14 | The window menu - modes with computed latencies, analyser/view options, EQ Match, presets | Mixing | IMP-16 | `EQ.md` |
+| EQ-12 | Rail type glyph grid (9 incl. All Pass) + `ST`/`L`/`R` + `SLOPE` (continuous dB/oct) / `PHASE` / `SAT` numbers | Mixing | IMP-14 | `EQ.md` |
+| EQ-13 | Rail `DYNAMICS` - `DYN`/`AUTO`/`EXT`, `DOWN`/`UP`, `THR`/`RATIO`/`ATK`/`REL`, the second stage `THR B`/`RATIO B`/`RANGE B`, `ONSET`, `DENSE`, GR meter | Mixing | IMP-14 | `EQ.md` |
+| EQ-14 | Rail `MOD` block - `RATE`/`LFO`/`ENV` knobs with `F`/`G`/`Q` target rows (per-band modulators, IIR modes) | Mixing | IMP-14 | `EQ.md` |
+| EQ-15 | The window menu - modes with computed latencies, Color, Whole Curve, Delta Listen, Sketch, Instances, analyser/view options, EQ Match, presets | Mixing | IMP-16 | `EQ.md` |
 
 ### `EQB` - `EQ Band Menu.png`
 
@@ -866,13 +867,14 @@ The per-band menu. Reached from a band handle or its column chevron.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| EQB-1 | `Type` submenu - `Bell` / `Low Pass` / `High Pass` / `Low Shelf` / `High Shelf` / `Notch` / `Band Pass` / `Tilt` | Mixing | IMP-14 | `EQ.md` |
-| EQB-2 | `Slope` submenu - `6`..`96 dB/oct` + `Brickwall` (filter types only) | Mixing | IMP-16 | `EQ.md` |
+| EQB-1 | `Type` submenu - `Bell` / `Low Pass` / `High Pass` / `Low Shelf` / `High Shelf` / `Notch` / `Band Pass` / `Tilt` / `All Pass` | Mixing | IMP-14 | `EQ.md` |
+| EQB-2 | `Slope` submenu - detents `6`..`96 dB/oct` + `Brickwall` (filter types only; the rail's SLOPE number covers every value between) | Mixing | IMP-16 | `EQ.md` |
 | EQB-3 | `Channel` submenu - `Stereo` / `Left` / `Right`, Stereo view ONLY (Mid/Side are the views) | Mixing | IMP-15 | `EQ.md` |
 | EQB-4 | `Move to` submenu - `Stereo view` / `Mid view` / `Side view`, settings kept | Mixing | IMP-15 | `EQ.md` |
-| EQB-5 | `Dynamic` submenu - `Make Dynamic` / `Auto Release` (gain types + Notch) | Mixing | IMP-14 | `EQ.md` |
-| EQB-6 | `Listen` / `Isolate` / `Mute` rows | Mixing | IMP-14 | `EQ.md` |
-| EQB-7 | `Reset Band` / `Delete Band` | Mixing | IMP-14 | `EQ.md` |
+| EQB-5 | `Dynamic` submenu - `Make Dynamic` / `Auto Release` / `Spectral (linear modes)` (gain types + Notch) | Mixing | IMP-14 | `EQ.md` |
+| EQB-6 | `Listen` / `Isolate` / `Delta Listen` / `Mute` rows | Mixing | IMP-14 | `EQ.md` |
+| EQB-7 | `Split to Left + Right` / `Link Selected Bands` / `Unlink` rows (context-gated) | Mixing | IMP-15 | `EQ.md` |
+| EQB-8 | `Reset Band` / `Delete Band` | Mixing | IMP-14 | `EQ.md` |
 
 ### `FX` - `Effects Panel.png`
 
