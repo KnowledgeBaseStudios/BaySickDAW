@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EQ Feature Matrix</title>
+<style>
+  :root{--bg:#1b1b1f;--panel:#252529;--surface:#2e2e33;--line:#3a3a3e;--text:#e0e0e8;--dim:#808090;
+        --us:#00e5a0;--usbg:#0d2b22;--plan:#ffcc00;--planbg:#2b260d;--yes:#00e5a0;--part:#ffcc00;--no:#4a4a52;}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font:13px/1.4 "Segoe UI",system-ui,sans-serif;margin:0;padding:18px}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:12px}
+  .legend{display:flex;gap:18px;margin:10px 0 14px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+  .legend b{color:var(--text)}
+  .wrap{overflow:auto;max-height:calc(100vh - 130px);border:1px solid var(--line);border-radius:6px}
+  table{border-collapse:separate;border-spacing:0}
+  th,td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0;white-space:nowrap}
+  thead th{position:sticky;top:0;z-index:3;background:var(--panel);height:170px;vertical-align:bottom;min-width:52px;max-width:52px;padding:0}
+  thead th.f{z-index:5;min-width:250px;max-width:250px}
+  thead th div{writing-mode:vertical-rl;transform:rotate(180deg);height:162px;
+               display:inline-block;padding:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+               text-align:left;font-size:11.5px;font-weight:600;color:var(--dim)}
+  thead th.us div{color:var(--us)} thead th.plan div{color:var(--plan)}
+  tbody td.f{position:sticky;left:0;z-index:2;background:var(--panel);min-width:250px;max-width:250px;
+             padding:3px 10px;font-size:12px;overflow:hidden;text-overflow:ellipsis}
+  tbody tr.grp td{background:var(--surface);color:var(--text);font-weight:700;font-size:11.5px;
+                  letter-spacing:.06em;padding:5px 10px;position:sticky;left:0}
+  tbody td.c{text-align:center;font-size:12px;min-width:52px;max-width:52px;height:24px}
+  td.y{color:var(--yes);font-weight:700} td.p{color:var(--part)} td.n{color:var(--no)}
+  td.us{background:var(--usbg)} td.plan{background:var(--planbg)}
+  tbody td.t{font-size:10.5px;color:var(--dim);text-align:center;min-width:52px;max-width:52px;padding:2px 1px}
+  tbody tr:hover td{filter:brightness(1.25)}
+  .note{color:var(--dim);font-size:11.5px;margin-top:10px;max-width:1100px}
+</style>
+</head>
+<body>
+<h1>EQ Feature Matrix</h1>
+<div class="sub">Built 2026-08-27 from the full-market competitive review (official pages/manuals; see
+eq-flagship-competitive-review-2026-08-27.md for sources and caveats). Hover a cell with a dotted edge for its footnote.</div>
+<div class="legend">
+  <span><b style="color:var(--yes)">&#10003;</b> has it</span>
+  <span><b style="color:var(--part)">~</b> partial / with strings attached (hover)</span>
+  <span><b style="color:var(--no)">&mdash;</b> doesn't have it</span>
+  <span style="color:var(--us)"><b>KBS EQ Pro (now)</b> = shipped today</span>
+  <span style="color:var(--plan)"><b>KBS (QA-EqFlagship)</b> = the approved batch</span>
+</div>
+<div class="wrap"><table id="m"></table></div>
+<div class="note">Prices are 2026-08 snapshots; Waves/Plugin Alliance/Melda list prices are nominal &mdash; their sale
+prices are the real market. Stock EQs (Cubase/FL/Ableton/Logic/Reaper) cost $0 to their DAW's owners. Blank-heavy
+columns are honest: character/one-trick products genuinely do one thing.</div>
+<script>
+const F=[ // [key, label, group?]
+ ["G","PRODUCT"],
+ ["price","Price (real/street)","t"],["bands","Band count","t"],
+ ["G","BANDS + FILTERS"],
+ ["tilt","Tilt filter"],["bp","Band-pass"],["notch","Notch"],["ap","All-pass band"],["brick","Brickwall slopes"],
+ ["cslope","Continuous/variable slope"],["frac","Fractional gentle slopes (<6 dB/oct)"],
+ ["vint","Vintage-modeled filter types"],["propq","Proportional / adaptive Q"],
+ ["G","DYNAMICS"],
+ ["dyn","Per-band dynamic EQ"],["arel","Program-dependent auto release"],["twoway","Two-way (above + below) stages"],
+ ["onset","Transient/onset-selective detection"],["extsc","External sidechain"],
+ ["multisc","Per-band multi-source sidechain (>1)"],["grmeter","Per-band GR metering"],
+ ["dynlp","Dynamics work in linear phase (all precisions)"],["spectral","Spectral dynamics (per-frequency in a band)"],
+ ["extent","Dynamic extent bound drawn + enforced"],
+ ["G","PHASE"],
+ ["zl","Zero-latency minimum phase"],["nat","Natural / decramped zero-latency"],["lp","Linear phase"],
+ ["lpmulti","Multiple linear precisions"],["mixed","Mixed phase mode"],["pbphase","Per-band phase control"],
+ ["G","STEREO / MID-SIDE"],
+ ["pbms","Per-band M/S routing"],["pblr","Per-band L/R routing"],["pbpan","Per-band stereo placement (pan)"],
+ ["mslp","Per-band M/S survives linear phase"],["msone","...in ONE stage (no latency doubling)"],
+ ["views","Domain VIEWS (view = the domain, live ghosts)"],["split","Split band into L/R pair"],
+ ["domaud","Domain audition (hear mid/side alone)"],
+ ["G","EQ MATCH"],
+ ["match","EQ matching"],["matchbands","Match lands on editable bands"],["msmatch","Mid/side matching (one budget)"],
+ ["matchdyn","Match can emit DYNAMIC bands"],["library","Factory reference library (measured curves)"],
+ ["matchfile","Match from audio file"],["matchinst","Match from another instance"],
+ ["spectra","Stored / named reference spectra"],["scan","Timeline track / selection scan"],
+ ["G","ANALYZER"],
+ ["prepost","Pre + post spectrum"],["scspec","External / sidechain spectrum"],["collide","Collision / masking view"],
+ ["sgram","Spectrogram"],["grab","Spectrum grab (click a peak, get a band)"],["piano","Piano / note display"],
+ ["notesnap","Note snap / note-name entry"],["atilt","Analyzer tilt control"],["freeze","Freeze + peak hold"],
+ ["G","ASSIST"],
+ ["learn","One-shot auto-EQ / learn"],["deres","Auto de-resonate / cleanup"],["adaptive","Continuous adaptive model"],
+ ["group","Cross-instance group unmasking"],
+ ["G","WORKFLOW + OUTPUT"],
+ ["sketch","EQ Sketch (draw the curve)"],["msel","Multi-band select + group drag"],["linked","Persistent linked band groups"],
+ ["scale","Whole-curve scale / invert"],["shift","Whole-curve frequency shift"],["ab","A/B compare"],
+ ["abmorph","A/B morph"],["undo","In-plugin undo history"],["solo","Band solo / listen"],
+ ["delta","Delta listen (hear what's removed)"],["lsolo","Loudness-matched solo"],
+ ["mods","Per-band modulators (LFO/env)"],["again","MEASURED auto-gain"],["char","Character / saturation stage"],
+ ["pbsat","Per-band saturation"],["os","Oversampling control"],
+ ["browser","Cross-instance browser"],["repoint","Full-editor re-point (edit a sibling's whole editor)"],
+ ["proof","Published proof / test suite"]
+];
+// y = full, p = partial (with tooltip), strings for text rows
+const P=[
+{n:"KBS EQ Pro (now)",cls:"us",price:"$49",bands:"24",m:{tilt:"y",bp:"y",notch:"y",brick:"y",propq:"y",
+ dyn:"y",arel:"y",extsc:"y",multisc:["p","4 receive lines in the DAW; single bus in the plugin"],grmeter:"y",dynlp:"y",extent:"y",
+ zl:"y",nat:"y",lp:"y",lpmulti:"y",
+ pbms:"y",pblr:"y",pbpan:"y",mslp:"y",msone:"y",views:"y",
+ match:"y",matchbands:"y",msmatch:"y",matchdyn:"y",library:"y",matchfile:"y",scan:["p","export-bounce load today; direct scan is in the batch"],
+ prepost:"y",scspec:"y",collide:"y",sgram:"y",grab:"y",piano:["p","piano strip draws; not yet clickable"],atilt:"y",freeze:"y",
+ ab:"y",solo:"y",again:"y",os:"y",proof:"y",undo:["p","DAW rides app-wide undo; plugin history is in the batch"]}},
+{n:"KBS (QA-EqFlagship)",cls:"plan",price:"$49",bands:"96",m:{tilt:"y",bp:"y",notch:"y",ap:"y",brick:"y",cslope:"y",frac:"y",propq:"y",
+ dyn:"y",arel:"y",twoway:"y",onset:"y",extsc:"y",multisc:["p","4 receive lines in the DAW; single bus in the plugin"],grmeter:"y",dynlp:"y",spectral:"y",extent:"y",
+ zl:"y",nat:"y",lp:"y",lpmulti:"y",mixed:"y",pbphase:"y",
+ pbms:"y",pblr:"y",pbpan:"y",mslp:"y",msone:"y",views:"y",split:"y",domaud:"y",
+ match:"y",matchbands:"y",msmatch:"y",matchdyn:"y",library:"y",matchfile:"y",matchinst:"y",spectra:"y",scan:"y",
+ prepost:"y",scspec:"y",collide:"y",sgram:"y",grab:"y",piano:"y",notesnap:"y",atilt:"y",freeze:"y",
+ learn:"y",deres:"y",
+ sketch:"y",msel:"y",linked:"y",scale:"y",shift:"y",ab:"y",abmorph:"y",undo:"y",solo:"y",delta:"y",lsolo:"y",
+ mods:"y",again:"y",char:"y",pbsat:"y",os:"y",browser:"y",repoint:"y",proof:"y"}},
+{n:"FabFilter Pro-Q 4",price:"$199",bands:"24",m:{tilt:"y",bp:"y",notch:"y",ap:"y",brick:"y",cslope:"y",frac:"y",
+ dyn:"y",arel:["p","auto-default threshold/attack/release; manual override"],extsc:"y",grmeter:["p","gain bar in the dynamic ring"],
+ dynlp:["p","dynamics disabled above the High linear resolution"],spectral:"y",
+ zl:"y",nat:"y",lp:"y",lpmulti:"y",
+ pbms:"y",pblr:"y",pbpan:"y",mslp:"y",msone:["p","mixing L/R + M/S bands runs two stages and DOUBLES latency"],split:"y",
+ match:"y",matchbands:"y",matchfile:"y",matchinst:"y",spectra:"y",
+ prepost:"y",scspec:"y",collide:"y",grab:"y",piano:"y",notesnap:"y",atilt:"y",freeze:"y",
+ learn:["p","EQ Match auto-computes bands; no problem-finder"],
+ sketch:"y",msel:"y",ab:"y",undo:"y",solo:"y",delta:["p","cut/notch solo plays what is removed"],
+ again:["p","manual admits: static estimate, not measured"],char:"y",browser:"y",
+ repoint:["p","Instance List edits curves in list rows - not the sibling's full editor"]}},
+{n:"Kirchhoff-EQ",price:"$79-149",bands:"32",m:{tilt:"y",bp:"y",notch:"y",ap:"y",brick:"y",cslope:"y",vint:"y",
+ dyn:"y",twoway:"y",onset:"y",extsc:"y",grmeter:"y",dynlp:["p","dynamic bands silently degrade to minimum phase"],
+ zl:"y",nat:["p","'analog phase' mode"],lp:"y",mixed:"y",
+ pbms:"y",pblr:"y",mslp:["p","undocumented - unverified"],
+ prepost:"y",grab:"y",piano:"y",atilt:["p","display config incl. scaling"],freeze:["p","adjustable persistence"],
+ msel:"y",ab:"y",undo:"y",solo:"y",again:"y",os:"y"}},
+{n:"DMG EQuilibrium",price:"$238",bands:"32",m:{tilt:"y",bp:["p","via filter models"],notch:"y",ap:"y",cslope:["p","6-48 dB/oct range"],vint:"y",
+ zl:"y",nat:["p","analogue + zero-latency-analogue modes"],lp:"y",pbphase:"y",
+ pbms:["p","per-BANK M/S assignment, not per-band"],pblr:"y",mslp:["p","banks carry phase config"],
+ prepost:"y",sgram:"y",atilt:"y",
+ msel:["p","control linking"],ab:["p","8 banks"],solo:"y",lsolo:"y",again:["p","4 loudness weightings"]}},
+{n:"Slate Infinity EQ 2",price:"$149",bands:"unl.",m:{tilt:"y",bp:"y",notch:"y",cslope:"y",
+ dyn:"y",extsc:"y",arel:["p","auto or manual threshold"],
+ zl:"y",nat:["p","'analog-matched, zero delay' marketing"],
+ pbms:"y",pblr:"y",pbpan:["p","per-band gain pans between channels"],
+ prepost:"y",msel:"y",linked:"y",ab:"y",solo:"y"}},
+{n:"Ozone 11 EQ (+Match)",price:"$99-199",bands:"8",m:{notch:["p","surgical shapes in Digital mode"],brick:"y",vint:["p","Baxandall/vintage/resonant shelf flavors"],propq:"y",
+ zl:"y",lp:"y",pbphase:"y",
+ pbms:["p","module-wide M/S curve pair, not per-band"],pblr:["p","module-wide"],mslp:["p","no documented restriction"],
+ match:"y",matchfile:"y",spectra:["p","reference snapshots save with presets"],
+ prepost:"y",atilt:["p","phase/group-delay overlays instead"],
+ scale:["p","Amount 0-200% morphs the whole curve"],ab:"y",solo:"y",delta:"y",lsolo:["p","alt-solo bandpass audition"]}},
+{n:"Neutron 5 EQ",price:"$299 suite",bands:"12",m:{notch:"y",dyn:"y",extsc:"y",
+ zl:"y",pbms:["p","M/S or transient/sustain channel modes, module-wide"],
+ prepost:"y",collide:"y",learn:"y",char:["p","soft saturation mode"],delta:"y",solo:"y",ab:"y"}},
+{n:"sonible smart:EQ 4",price:"$79-129",bands:"n/p",m:{dyn:"y",extsc:["p","not documented"],
+ zl:"y",lp:["p","46 ms linear option"],pbms:["p","claimed, detail unpublished"],
+ match:["p","via reference-track profiles"],library:["p","learned instrument/genre profiles"],
+ prepost:"y",learn:"y",adaptive:"y",group:"y",solo:"y",again:"y",browser:["p","group view controls 10 instances"]}},
+{n:"soothe2 / 3",price:"$209-259",bands:"5 ctrl",m:{tilt:["p","control-band shapes"],
+ dyn:["p","the whole plugin is spectral suppression"],extsc:"y",spectral:"y",
+ lp:["p","soothe3 adds a linear option"],pbms:["p","per-band stereo balance + global M/S"],
+ adaptive:"y",deres:"y",delta:"y",solo:["p","per-band delta"],ab:"y",undo:["p","per-state undo"],os:"y"}},
+{n:"Gullfoss",price:"$199",bands:"0",m:{adaptive:"y",again:["p","Boost is loudness-perception based"]}},
+{n:"TDR Nova GE",price:"EUR 60",bands:"6+wide",m:{dyn:"y",twoway:"y",extsc:"y",grmeter:"y",
+ zl:"y",pbms:["p","global Sum/Diff modes only"],
+ match:["p","one-shot Smart Op"],matchbands:"y",deres:"y",learn:["p","Generate Starting Point"],
+ prepost:"y",scspec:"y",ab:"y",solo:"y",again:"y",lsolo:["p","EL TRIM equal-loudness trim"],os:["p","quality tiers"],char:["p","'+' modes add nonlinearity"]}},
+{n:"MAutoDynamicEq",price:"$52-115",bands:"7",m:{notch:"y",cslope:["p","adjustable-slope tech"],
+ dyn:"y",extsc:"y",zl:"y",
+ pbms:["p","global channel modes incl. surround/ambisonics"],
+ match:"y",matchbands:"y",matchfile:"y",deres:"y",learn:"y",
+ prepost:"y",sgram:"y",ab:["p","8 slots + XY morph"],abmorph:"y",mods:"y",again:"y",char:["p","tube sim"],os:"y",solo:"y"}},
+{n:"TB Equalizer 4",price:"EUR 35",bands:"16",m:{notch:"y",bp:"y",dyn:"y",twoway:["p","upward comp + expansion"],extsc:["p","not stated"],
+ zl:"y",vint:["p","per-band analog circuit sim"],learn:["p","content-based suggestions"],
+ prepost:"y",ab:"y",undo:"y",again:["p","per-section make-up"],char:"y",pbsat:["p","per-band analog mode"]}},
+{n:"Crave EQ",price:"$69",bands:"32",m:{tilt:"y",bp:"y",notch:"y",
+ zl:"y",nat:["p","matched-analog 48-sample mode"],lp:"y",lpmulti:["p","4 phase models"],
+ pbms:"y",pblr:"y",pbpan:["p","directional pan-able bands"],mslp:["p","undocumented"],
+ prepost:"y",piano:["p","piano keyboard input"],notesnap:"y",again:"y",solo:"y",ab:["p","not documented"]}},
+{n:"Weiss EQ1",price:"EUR 549",bands:"7",m:{dyn:["p","in Dynamic mode only"],
+ zl:"y",lp:"y",dynlp:["p","NO - linear and dynamic are exclusive modes"],
+ pbms:["p","dual-channel M/S routing mode"],prepost:"y",atilt:"y"}},
+{n:"DMG EQuick",price:"$102",bands:"32",m:{notch:"y",zl:"y",lp:"y",
+ pbms:"y",pblr:["p","per-bank"],
+ scale:["p","Range: scale/invert whole response"],shift:"y",msel:["p","control linking"],
+ prepost:"y",ab:["p","8 banks"],solo:"y",lsolo:"y"}},
+{n:"TDR SlickEQ M",price:"EUR 50",bands:"6",m:{zl:"y",
+ pbms:["p","global Sum/Diff + LF mono-ization"],
+ match:["p","Smart Op vs external reference"],deres:"y",
+ again:"y",lsolo:["p","loudness-compensated gain"],char:["p","LF/HF exciters"],ab:"y",undo:"y",os:["p","quality tiers"]}},
+{n:"Voxengo CurveEQ",price:"$100",bands:"spline",m:{lp:"y",zl:"y",
+ pbms:["p","M/S via channel groups"],
+ match:"y",matchfile:"y",spectra:"y",
+ prepost:"y",ab:"y",undo:"y",sketch:["p","freeform spline drawing"]}},
+{n:"Voxengo PrimeEQ",price:"$50",bands:"32",m:{zl:"y",prepost:"y",ab:"y",undo:"y",
+ delta:["p","differential display (visual only)"],solo:["p","narrow-band sweep"]}},
+{n:"Waves F6",price:"~$30",bands:"6",m:{dyn:"y",extsc:"y",zl:["p","marketed zero latency"],
+ pbms:["p","M/S options"],prepost:"y"}},
+{n:"EQuivocate",price:"$99",bands:"26 Mel",m:{lp:"y",
+ match:["p","live via sidechain"],matchbands:"y",
+ sketch:["p","Draw Curve across sliders"],solo:["p","multi-band solo"],ab:"y",again:"y"}},
+{n:"Blue Cat Liny EQ",price:"$99",bands:"8",m:{lp:["p","128-sample latency - lowest anywhere"],
+ pbms:["p","L/R and M/S processing"],mslp:["p","M/S linear widening is the headline"],
+ prepost:"y",sgram:"y",again:"y",abmorph:["p","Mix param automatable"]}},
+{n:"Techivation M-EQ",price:"$129",bands:"3 smart",m:{lp:"y",adaptive:["p","energy-redistributing Smart Curves"],
+ pbms:["p","LR|MS toggle + per-band balance"],pbsat:"y",char:"y",learn:["p","3.5 s Mix Assistant"],
+ solo:"y",again:["p","parameter-derived"],os:["p","8x on saturation"]}},
+{n:"Wavesfactory Equalizer",price:"EUR 99",bands:"auto",m:{adaptive:"y",tilt:"y",extsc:"y",
+ pbms:["p","M/S"],delta:["p","delta audition on cut AND boost"],again:"y",
+ sketch:["p","draw WHERE the effect applies"],zl:"y"}},
+{n:"Harrison AVA",price:"$49",bands:"31 fixed",m:{prepost:["p","3 RTA modes incl. transient Lightning"]}},
+{n:"Wavesfactory Spectre",price:"EUR 99",bands:"5",m:{pbms:"y",pblr:"y",char:"y",pbsat:"y",os:"y",
+ delta:["p","saturates ONLY the difference signal"]}},
+{n:"Pulsar Massive",price:"$89-149",bands:"4/ch",m:{vint:"y",pbms:["p","M/S encode/decode"],char:"y",again:"y",os:"y",prepost:"y"}},
+{n:"Sonnox Oxford EQ",price:"$280",bands:"5+cuts",m:{vint:["p","4 gain/Q-law Types"],zl:"y"}},
+{n:"Maag EQ4",price:"$40-115",bands:"6 fixed",m:{vint:["p","AIR band character"],zl:"y",undo:"y",ab:["p","bank selection"]}},
+{n:"oeksound bloom",price:"$209",bands:"tone ctrl",m:{adaptive:"y",pbms:["p","M/S functionality"],dyn:["p","Squash freq-dependent compression"]}},
+{n:"sonible pure:EQ",price:"$39",bands:"auto",m:{adaptive:"y",learn:["p","instrument profiles"]}},
+{n:"DDMF IIEQ Pro",price:"$39",bands:"24",m:{notch:"y",bp:"y",zl:"y",pbms:["p","2-channel L/R-M/S configs"]}},
+{n:"PSP preQursor3",price:"$29-69",bands:"4+HPF",m:{zl:"y",vint:["p","analog modeling, cross-instance grouped"],propq:["p","gain-following Q"],
+ pbms:["p","whole-plugin L/R/M/S"],prepost:["p","31-band analyzer"]}},
+{n:"MTM FUSER",price:"~GBP 59",bands:"2-track",m:{collide:["p","M/S conflict glow between two tracks"],extsc:"y",
+ group:["p","two-track unmask, one button"],learn:["p","Resolve Conflicts + auto phase rotation"]}},
+{n:"Cubase Frequency 2",price:"$0 stock",bands:"8",m:{notch:"y",brick:["p","96 dB/oct cuts"],
+ dyn:"y",extsc:["p","EIGHT external SC inputs"],multisc:"y",
+ zl:"y",lp:["p","per-band toggle - but it KILLS that band's dynamics"],
+ pbms:"y",pblr:"y",mslp:["p","allowed, static bands only"],
+ piano:["p","Keys display"],solo:["p","Auto Listen"],prepost:"y"}},
+{n:"FL Parametric EQ 2",price:"$0 stock",bands:"7",m:{notch:"y",bp:"y",
+ zl:"y",nat:["p","HQ+ decramped, no oversampling"],lp:"y",
+ prepost:"y",sgram:"y",notesnap:["p","Key menu note snap"],solo:"y",ab:"y",atilt:["p","display options"]}},
+{n:"Ableton EQ Eight",price:"$0 stock",bands:"8",m:{notch:"y",propq:["p","Adaptive Q"],
+ zl:"y",pbms:["p","global dual-curve M/S or L/R"],
+ prepost:["p","output only"],solo:"y",os:["p","2x Hi-Quality"]}},
+{n:"Logic Channel EQ",price:"$0 stock",bands:"8",m:{zl:"y",lp:["p","separate sibling plugin"],
+ pbms:["p","whole-plugin channel menu"],prepost:"y",solo:"y",os:["p","HQ anti-cramping"]}},
+{n:"Reaper ReaEQ",price:"$0 stock",bands:"unl.",m:{notch:"y",bp:"y",ap:"y",zl:"y",
+ prepost:["p","+ phase-response plot"]}}
+];
+const tbl=document.getElementById("m");
+let h='<thead><tr><th class="f"></th>';
+for(const p of P) h+='<th class="'+(p.cls||"")+'"><div>'+p.n+'</div></th>';
+h+='</tr></thead><tbody>';
+for(const f of F){
+  if(f[0]==="G"){h+='<tr class="grp"><td colspan="'+(P.length+1)+'">'+f[1]+'</td></tr>';continue;}
+  const key=f[0],txt=f[2]==="t";
+  h+='<tr><td class="f" title="'+f[1]+'">'+f[1]+'</td>';
+  for(const p of P){
+    const cls=p.cls?(" "+p.cls):"";
+    if(txt){h+='<td class="t'+cls+'">'+(p[key]||"")+'</td>';continue;}
+    const v=p.m[key];
+    if(v==null){h+='<td class="c n'+cls+'">&mdash;</td>';}
+    else if(v==="y"){h+='<td class="c y'+cls+'">&#10003;</td>';}
+    else{h+='<td class="c p'+cls+'" style="border-bottom:1px dotted var(--part)" title="'+v[1].replace(/"/g,"&quot;")+'">~</td>';}
+  }
+  h+='</tr>';
+}
+h+='</tbody>';
+tbl.innerHTML=h;
+</script>
+</body>
+</html>
