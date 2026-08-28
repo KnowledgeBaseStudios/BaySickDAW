@@ -854,9 +854,9 @@ set, so each band control is ONE callout per the within-image rule.
 | EQ-7 | The live spectrum - pre dim / post bright / sidechain, with spectrogram, phase and piano opt-ins | Mixing | IMP-14 | `EQ.md` |
 | EQ-8 | The headphone button - latches band LISTEN on the selected band | Mixing | IMP-14 | `EQ.md` |
 | EQ-9 | The crosshair - arms the spectrum grab (max-held peaks; one grab per arming) | Mixing | IMP-14 | `EQ.md` |
-| EQ-10 | Rail `GAIN` / `PAN` knobs - the band's gain and its stereo placement | Mixing | IMP-15 | `EQ.md` |
+| EQ-10 | Rail `GAIN` / `SAT` / `PAN` knobs - the band's gain, its saturation, its stereo placement | Mixing | IMP-15 | `EQ.md` |
 | EQ-11 | Rail `FREQ` / `Q` drag-numbers - drag or double-click to type | Mixing | IMP-14 | `EQ.md` |
-| EQ-12 | Rail type glyph grid (9 incl. All Pass) + `ST`/`L`/`R` + `SLOPE` (continuous dB/oct) / `PHASE` / `SAT` numbers | Mixing | IMP-14 | `EQ.md` |
+| EQ-12 | Rail type glyph grid (9 incl. All Pass) + `ST`/`L`/`R` + `SLOPE` (continuous dB/oct) / `PHASE` numbers | Mixing | IMP-14 | `EQ.md` |
 | EQ-13 | Rail `DYNAMICS` - `DYN`/`AUTO`/`EXT`, `DOWN`/`UP`, `THR`/`RATIO`/`ATK`/`REL`, the second stage `THR B`/`RATIO B`/`RANGE B`, `ONSET`, `DENSE`, GR meter | Mixing | IMP-14 | `EQ.md` |
 | EQ-14 | Rail `MOD` block - `RATE`/`LFO`/`ENV` knobs with `F`/`G`/`Q` target rows (per-band modulators, IIR modes) | Mixing | IMP-14 | `EQ.md` |
 | EQ-15 | The window menu - modes with computed latencies, Color, Whole Curve, Delta Listen, Sketch, Instances, analyser/view options, EQ Match, presets | Mixing | IMP-16 | `EQ.md` |

@@ -766,6 +766,18 @@ public:
                 graph.setBandValue (b, "gain", (float) gain.getValue());
         };
 
+        initKnob (satK, "Saturate just this band's region: the slice at the "
+                        "band's frequency and width is softened and folded "
+                        "back. Zero = clean.");
+        satK.setRange (0.0, 1.0, 0.0);
+        satK.setDoubleClickReturnValue (true, 0.0);
+        gestureOnDragStart (satK, "sat");
+        satK.onValueChange = [this]
+        {
+            if (const int b = graph.selectedBand(); b >= 0)
+                graph.setBandValue (b, "sat", (float) satK.getValue());
+        };
+
         initKnob (pan, "Pans this band's effect across the stereo image: "
                        "hard left and the boost or cut lands only on the left "
                        "channel. Not an audio pan - the band's, and only on "
@@ -787,8 +799,9 @@ public:
                          "- a number, or a note name like A4 or C#2+13.");
         wireNumber (q, "q", true, 0.008f,
                     [] (float v) { return juce::String (v, 2); });
-        q.setTooltip ("Width. Higher is narrower. The wheel over the band's "
-                      "dot changes it too.");
+        q.setTooltip ("Width. Higher is narrower - and on Low Pass and High "
+                      "Pass it is RESONANCE: a peak right at the cutoff, any "
+                      "slope. The wheel over the band's dot changes it too.");
 
         type.segs = {
             { fontaudio::FilterBell, {}, "Bell" },
@@ -850,14 +863,6 @@ public:
         wireNumber (phaseN, "phase", false, 0.004f,
                     [] (float v)
                     { return juce::String ((int) std::round (v * 100.0f)) + "%"; });
-        // W-14: this band's slice of the color stage.
-        wireNumber (satN, "sat", false, 0.004f,
-                    [] (float v)
-                    { return juce::String ((int) std::round (v * 100.0f)) + "%"; });
-        satN.setTooltip ("Saturate just this band's region: the slice at the "
-                         "band's frequency and width is softened and folded "
-                         "back. Zero = clean.");
-        addAndMakeVisible (satN);
         phaseN.setTooltip ("This band's phase in the linear modes: 0% rides "
                            "the mode's linear phase, 100% makes just this "
                            "band minimum-phase - its pre-ring disappears.");
@@ -1057,6 +1062,7 @@ public:
                         juce::Justification::centred);
         };
         caption (gain, "GAIN");
+        caption (satK, "SAT");
         caption (pan, "PAN");
 
         if (b >= 0 && kbs::eqTypeSupportsDynamic (graph.bandParams (b).type))
@@ -1105,6 +1111,7 @@ public:
         {
             const auto p = graph.bandParams (b);
             readout (gain, juce::String (p.gainDb, 1) + " dB");
+            readout (satK, juce::String ((int) std::round (p.satAmt * 100)) + "%");
             readout (pan, std::abs (p.placement) < 0.02f ? juce::String ("C")
                           : (p.placement < 0 ? "L" : "R")
                               + juce::String ((int) std::round (std::abs (p.placement) * 100)));
@@ -1168,8 +1175,7 @@ private:
             const auto p = graph.bandParams (b);
             return std::strcmp (field, "freq") == 0 ? p.freqHz
                  : std::strcmp (field, "slope") == 0 ? p.slope
-                 : std::strcmp (field, "phase") == 0 ? p.phaseMix
-                 : std::strcmp (field, "sat") == 0 ? p.satAmt : p.q;
+                 : std::strcmp (field, "phase") == 0 ? p.phaseMix : p.q;
         };
         d.set = [this, field] (float v)
         {
@@ -1224,8 +1230,16 @@ private:
         // disagree is how a layout starts reserving space for nothing.
         const bool showDynRow  = dynT.isVisible();
         const bool showDynBody = direction.isVisible();
-        const int need = 233 + 152 + (showDynRow  ? 12 + 16 : 0)
-                             + (showDynBody ? 4 + 16 + 4 + 200 : 0);
+        const bool showSlope   = slope.isVisible();
+        const bool showPhase   = phaseN.isVisible();
+        // Base rows (knobs through channel) + each optional part it actually
+        // shows + the MOD block, which is ALWAYS placed: it belongs to any
+        // band, dynamic or not - leaving it un-laid-out on a non-dynamic band
+        // parked the MOD knobs at stale bounds over the rows above.
+        const int need = 155 + (showSlope ? 26 : 0) + (showPhase ? 26 : 0)
+                             + (showDynRow  ? 12 + 16 : 0)
+                             + (showDynBody ? 4 + 16 + 4 + 200 : 0)
+                             + 150;
 
         mMaxScroll = juce::jmax (0, need - full.getHeight());
         mScrollY   = juce::jlimit (0, mMaxScroll, mScrollY);
@@ -1233,8 +1247,10 @@ private:
         auto r = full.withY (full.getY() - mScrollY).withHeight (need);
 
         auto knobs = r.removeFromTop (34);
-        gain.setBounds (knobs.removeFromLeft (knobs.getWidth() / 2).reduced (14, 0));
-        pan.setBounds (knobs.reduced (14, 0));
+        const int kw3 = knobs.getWidth() / 3;
+        gain.setBounds (knobs.removeFromLeft (kw3).reduced (8, 0));
+        satK.setBounds (knobs.removeFromLeft (kw3).reduced (8, 0));
+        pan.setBounds (knobs.reduced (8, 0));
         r.removeFromTop (20);                              // caption + readout
 
         auto row = r.removeFromTop (27);
@@ -1247,9 +1263,8 @@ private:
         r.removeFromTop (3);
         chan.setBounds (r.removeFromTop (16));
         r.removeFromTop (3);
-        slope.setBounds (r.removeFromTop (26));
-        phaseN.setBounds (r.removeFromTop (26));
-        satN.setBounds (r.removeFromTop (26));
+        if (showSlope) slope.setBounds (r.removeFromTop (26));
+        if (showPhase) phaseN.setBounds (r.removeFromTop (26));
 
         if (showDynRow)
         {
@@ -1262,35 +1277,39 @@ private:
             extT.setBounds (tr.reduced (1, 0));
         }
 
-        if (! showDynBody) return;
+        if (showDynBody)
+        {
+            r.removeFromTop (4);
+            direction.setBounds (r.removeFromTop (16));
+            r.removeFromTop (4);
 
-        r.removeFromTop (4);
-        direction.setBounds (r.removeFromTop (16));
-        r.removeFromTop (4);
+            auto body = r.removeFromTop (200);
+            auto meterCol = body.removeFromRight (22);
+            grMeter.setBounds (meterCol.reduced (0, 1));
 
-        auto body = r.removeFromTop (200);
-        auto meterCol = body.removeFromRight (22);
-        grMeter.setBounds (meterCol.reduced (0, 1));
+            auto k1 = body.removeFromTop (30);
+            const int kw = k1.getWidth() / 2;
+            thrK.setBounds (k1.removeFromLeft (kw).reduced (8, 0));
+            ratK.setBounds (k1.reduced (8, 0));
+            body.removeFromTop (20);                       // captions + values
+            auto k2 = body.removeFromTop (30);
+            atkK.setBounds (k2.removeFromLeft (kw).reduced (8, 0));
+            relK.setBounds (k2.reduced (8, 0));
+            body.removeFromTop (20);
+            auto k3 = body.removeFromTop (30);
+            thrBK.setBounds (k3.removeFromLeft (kw).reduced (8, 0));
+            ratBK.setBounds (k3.reduced (8, 0));
+            body.removeFromTop (20);
+            auto k4 = body.removeFromTop (30);
+            rngBK.setBounds (k4.removeFromLeft (kw).reduced (8, 0));
+            onsK.setBounds (k4.reduced (8, 0));
+            body.removeFromTop (20);
+            auto k5 = body.removeFromTop (30);
+            denK.setBounds (k5.removeFromLeft (kw).reduced (8, 0));
+        }
 
-        auto k1 = body.removeFromTop (30);
-        const int kw = k1.getWidth() / 2;
-        thrK.setBounds (k1.removeFromLeft (kw).reduced (8, 0));
-        ratK.setBounds (k1.reduced (8, 0));
-        body.removeFromTop (20);                           // captions + values
-        auto k2 = body.removeFromTop (30);
-        atkK.setBounds (k2.removeFromLeft (kw).reduced (8, 0));
-        relK.setBounds (k2.reduced (8, 0));
-        body.removeFromTop (20);
-        auto k3 = body.removeFromTop (30);
-        thrBK.setBounds (k3.removeFromLeft (kw).reduced (8, 0));
-        ratBK.setBounds (k3.reduced (8, 0));
-        body.removeFromTop (20);
-        auto k4 = body.removeFromTop (30);
-        rngBK.setBounds (k4.removeFromLeft (kw).reduced (8, 0));
-        onsK.setBounds (k4.reduced (8, 0));
-        body.removeFromTop (20);
-        auto k5 = body.removeFromTop (30);
-        denK.setBounds (k5.removeFromLeft (kw).reduced (8, 0));
+        // W-13 MOD: any band can modulate, so this lays out whether or not
+        // the dynamics body is open.
         r.removeFromTop (12);
         auto m1 = r.removeFromTop (30);
         const int mw = m1.getWidth() / 2;
@@ -1311,7 +1330,6 @@ private:
         if (b < 0) return;
         slope.refresh();
         phaseN.refresh();
-        satN.refresh();
     }
 
     void timerCallback() override
@@ -1331,6 +1349,7 @@ private:
         {
             stampedBand = b;
             gain.setComponentID (graph.paramId (b, "gain"));
+            satK.setComponentID (graph.paramId (b, "sat"));
             pan.setComponentID (graph.paramId (b, "place"));
             thrK.setComponentID (graph.paramId (b, "thr"));
             ratK.setComponentID (graph.paramId (b, "ratio"));
@@ -1355,10 +1374,13 @@ private:
         if (pan.isVisible() && ! pan.isMouseButtonDown())
             pan.setValue (p.placement, juce::dontSendNotification);
 
+        satK.setVisible (show && kbs::eqTypeHasGain (p.type));
+        if (satK.isVisible() && ! satK.isMouseButtonDown())
+            satK.setValue (p.satAmt, juce::dontSendNotification);
+
         slope.setVisible (show && kbs::eqTypeHasSlope (p.type));
         phaseN.setVisible (show && graph.eq() != nullptr
                            && kbs::eqModeIsLinear (graph.eq()->getMode()));
-        satN.setVisible (show && kbs::eqTypeHasGain (p.type));
         chan.setVisible (show && graph.domainView() == DomainView::stereo);
 
         const bool dynOk = show && kbs::eqTypeSupportsDynamic (p.type);
@@ -1378,11 +1400,15 @@ private:
         direction.setVisible (dyn);
 
         const bool bandChanged = b != lastLaidOutBand;
+        const bool slopeVis = slope.isVisible(), phaseVis = phaseN.isVisible();
         if (bandChanged) { mScrollY = 0; lastLaidOutBand = b; }
-        if (bandChanged || dynOk != lastDynRow || dyn != lastDynBody)
+        if (bandChanged || dynOk != lastDynRow || dyn != lastDynBody
+            || slopeVis != lastSlopeRow || phaseVis != lastPhaseRow)
         {
-            lastDynRow  = dynOk;
-            lastDynBody = dyn;
+            lastDynRow   = dynOk;
+            lastDynBody  = dyn;
+            lastSlopeRow = slopeVis;
+            lastPhaseRow = phaseVis;
             layout();
             repaint();
         }
@@ -1424,7 +1450,7 @@ private:
 
     EqGraphView& graph;
 
-    juce::Slider gain, pan, thrK, ratK, atkK, relK, thrBK, ratBK, rngBK, onsK, denK;
+    juce::Slider gain, satK, pan, thrK, ratK, atkK, relK, thrBK, ratBK, rngBK, onsK, denK;
     juce::Slider lfoRateK, lfoDepthK, envDepthK;
     SegmentRow lfoTgt, envTgt;
     SegmentRow direction;
@@ -1432,12 +1458,12 @@ private:
     SegmentRow type, chan;
     DragNumber slope { "SLOPE" };
     DragNumber phaseN { "PHASE" };
-    DragNumber satN { "SAT" };
     juce::TextButton dynT, autoT, extT;
     GrMeter grMeter;
     int dynTop = 300;
     int mScrollY = 0, mMaxScroll = 0;
     bool lastDynRow = false, lastDynBody = false;
+    bool lastSlopeRow = false, lastPhaseRow = false;
     int lastLaidOutBand = -2;
     int stampedBand = -1;
     bool syncing = false;

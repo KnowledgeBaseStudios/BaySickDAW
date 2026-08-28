@@ -337,9 +337,9 @@ View row segments: `ST` / `MID` / `SIDE`.  Chip row: bands numbered
 morph strip's end letters are `A` / `B`, the add control is `+`, the A/B
 pill reads `A` or `B`.
 
-Rail captions: `BAND <n>` / `NO BAND`; knob captions `GAIN` `PAN`; numbers
-`FREQ` (the caption becomes the live note name, e.g. `A4` / `A4 +13c`,
-while a band is selected) `Q` `SLOPE` `PHASE` `SAT`; dynamics header
+Rail captions: `BAND <n>` / `NO BAND`; knob captions `GAIN` `SAT` `PAN`;
+numbers `FREQ` (the caption becomes the live note name, e.g. `A4` /
+`A4 +13c`, while a band is selected) `Q` `SLOPE` `PHASE`; dynamics header
 `DYNAMICS`; toggles `DYN` `AUTO` `EXT`; direction segments `DOWN` / `UP`;
 dyn knob captions `THR` `RATIO` `ATK` `REL` `THR B` `RATIO B` `RANGE B`
 `ONSET` `DENSE`; the MOD block: `RATE` `LFO` `ENV` with two `F`/`G`/`Q`

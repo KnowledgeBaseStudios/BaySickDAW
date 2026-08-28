@@ -1221,14 +1221,21 @@ private:
                 b.svfCount = poles / 2;
                 b.poleG = std::tan ((float) kPi * f / designSr);
 
+                // The user's Q is the filter's RESONANCE at any slope, not
+                // only at 12 dB/oct (2026-08-28, Jeff's ruling): the FINAL
+                // pair - the section nearest the axis, the one that peaks -
+                // has its Butterworth Q scaled by q / 0.7071.  At the default
+                // Q the factor is 1 and the cascade is exactly Butterworth;
+                // at two poles butterworthQ is itself 0.7071, so this IS the
+                // old user-Q special case, generalized.  The cutoff gain
+                // lands at exactly Q (linear) for every slope >= 12.
+                const double qScale = (double) std::clamp (b.cQ, 0.05f, 30.0f)
+                                        / 0.70710678118654752;
                 for (int s = 0; s < b.svfCount; ++s)
                 {
-                    // Slope 12 with one section takes the user's Q - that is
-                    // the resonant filter everybody expects; the cascades take
-                    // the Butterworth Qs so the knee stays maximally flat.
-                    const double bq = (poles == 2)
-                                        ? (double) std::clamp (b.cQ, 0.35f, 24.0f)
-                                        : eqdesign::butterworthQ (poles, s + 1);
+                    double bq = eqdesign::butterworthQ (poles, s + 1);
+                    if (s == b.svfCount - 1)
+                        bq = std::clamp (bq * qScale, 0.35, 24.0);
                     b.svfL[s].set (f, (float) bq);
                     b.svfR[s].set (f, (float) bq);
                 }
@@ -1672,19 +1679,25 @@ private:
             }
 
             const bool hp = p.type == EqType::highPass;
+            const int poles = (int) (slopeDb / 6.0f + 1.0e-4f);
+            const float rem = slopeDb - 6.0f * (float) poles;
+            const double qScale = (double) std::clamp (p.q, 0.05f, 30.0f)
+                                    / 0.70710678118654752;
 
-            if (eqModeIsLinear (mode))
+            // Exact fractional Butterworth holds only while the Q is neutral
+            // (or there is no pair to resonate): a turned Q makes the linear
+            // modes realize the SAME scaled-final-pair cascade the IIR runs,
+            // so drawn == heard stays true in every mode.
+            if (eqModeIsLinear (mode)
+                && (std::abs (qScale - 1.0) < 0.01 || poles < 2))
             {
-                // Exact fractional Butterworth: |H|^2 = 1 / (1 + Om^2n) for
-                // any REAL n.  The FIR is designed from this very value, so
-                // the linear modes deliver the true continuous slope.
+                // |H|^2 = 1 / (1 + Om^2n) for any REAL n.  The FIR is
+                // designed from this very value, so the linear modes deliver
+                // the true continuous slope.
                 const double n = (double) slopeDb / 6.0;
                 const double o2n = std::pow (Om, 2.0 * n);
                 return (hp ? std::pow (Om, n) : 1.0) / std::sqrt (1.0 + o2n);
             }
-
-            const int poles = (int) (slopeDb / 6.0f + 1.0e-4f);
-            const float rem = slopeDb - 6.0f * (float) poles;
 
             if ((poles % 2) == 1)
             {
@@ -1694,9 +1707,9 @@ private:
             const int pairs = poles / 2;
             for (int i = 1; i <= pairs; ++i)
             {
-                const double k = (poles == 2)
-                                   ? 1.0 / std::clamp ((double) p.q, 0.35, 24.0)
-                                   : 1.0 / eqdesign::butterworthQ (poles, i);
+                double bq = eqdesign::butterworthQ (poles, i);
+                if (i == pairs) bq = std::clamp (bq * qScale, 0.35, 24.0);
+                const double k = 1.0 / bq;
                 const double den = std::sqrt (sq (1.0 - Om * Om) + sq (k * Om));
                 mag *= (hp ? Om * Om : 1.0) / den;
             }
@@ -1766,11 +1779,15 @@ private:
             }
             const int pairs = bp ? std::max (1, (int) std::round (slopeDb / 12.0f))
                                  : poles / 2;
+            const double qScale = (double) std::clamp (p.q, 0.05f, 30.0f)
+                                    / 0.70710678118654752;
             for (int i = 1; i <= pairs; ++i)
             {
-                const double k = (poles == 2 || bp)
-                                   ? 1.0 / std::clamp ((double) p.q, 0.35, 24.0)
-                                   : 1.0 / eqdesign::butterworthQ (poles, i);
+                double bq = bp ? (double) std::clamp (p.q, 0.35f, 24.0f)
+                               : eqdesign::butterworthQ (poles, i);
+                if (! bp && i == pairs)
+                    bq = std::clamp (bq * qScale, 0.35, 24.0);
+                const double k = 1.0 / bq;
                 const double num = bp ? kPi / 2.0 : (hp ? kPi : 0.0);
                 ph += num - std::atan2 (k * Om, 1.0 - Om * Om);
             }

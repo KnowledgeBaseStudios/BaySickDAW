@@ -12450,9 +12450,9 @@ Plugin</b> appears only while a hosted plugin is down.</p>
 <tr id="row-EQ-7"><td><button type="button" class="n" data-back="EQ-7" title="Show it on the picture">7</button></td><td>The live spectrum - pre dim / post bright / sidechain, with spectrogram, phase and piano opt-ins</td></tr>
 <tr id="row-EQ-8"><td><button type="button" class="n" data-back="EQ-8" title="Show it on the picture">8</button></td><td>The headphone button - latches band LISTEN on the selected band</td></tr>
 <tr id="row-EQ-9"><td><button type="button" class="n" data-back="EQ-9" title="Show it on the picture">9</button></td><td>The crosshair - arms the spectrum grab (max-held peaks; one grab per arming)</td></tr>
-<tr id="row-EQ-10"><td><button type="button" class="n" data-back="EQ-10" title="Show it on the picture">10</button></td><td>Rail <code>GAIN</code> / <code>PAN</code> knobs - the band&#x27;s gain and its stereo placement</td></tr>
+<tr id="row-EQ-10"><td><button type="button" class="n" data-back="EQ-10" title="Show it on the picture">10</button></td><td>Rail <code>GAIN</code> / <code>SAT</code> / <code>PAN</code> knobs - the band&#x27;s gain, its saturation, its stereo placement</td></tr>
 <tr id="row-EQ-11"><td><button type="button" class="n" data-back="EQ-11" title="Show it on the picture">11</button></td><td>Rail <code>FREQ</code> / <code>Q</code> drag-numbers - drag or double-click to type</td></tr>
-<tr id="row-EQ-12"><td><button type="button" class="n" data-back="EQ-12" title="Show it on the picture">12</button></td><td>Rail type glyph grid (9 incl. All Pass) + <code>ST</code>/<code>L</code>/<code>R</code> + <code>SLOPE</code> (continuous dB/oct) / <code>PHASE</code> / <code>SAT</code> numbers</td></tr>
+<tr id="row-EQ-12"><td><button type="button" class="n" data-back="EQ-12" title="Show it on the picture">12</button></td><td>Rail type glyph grid (9 incl. All Pass) + <code>ST</code>/<code>L</code>/<code>R</code> + <code>SLOPE</code> (continuous dB/oct) / <code>PHASE</code> numbers</td></tr>
 <tr id="row-EQ-13"><td><button type="button" class="n" data-back="EQ-13" title="Show it on the picture">13</button></td><td>Rail <code>DYNAMICS</code> - <code>DYN</code>/<code>AUTO</code>/<code>EXT</code>, <code>DOWN</code>/<code>UP</code>, <code>THR</code>/<code>RATIO</code>/<code>ATK</code>/<code>REL</code>, the second stage <code>THR B</code>/<code>RATIO B</code>/<code>RANGE B</code>, <code>ONSET</code>, <code>DENSE</code>, GR meter</td></tr>
 <tr id="row-EQ-14"><td><button type="button" class="n" data-back="EQ-14" title="Show it on the picture">14</button></td><td>Rail <code>MOD</code> block - <code>RATE</code>/<code>LFO</code>/<code>ENV</code> knobs with <code>F</code>/<code>G</code>/<code>Q</code> target rows (per-band modulators, IIR modes)</td></tr>
 <tr id="row-EQ-15"><td><button type="button" class="n" data-back="EQ-15" title="Show it on the picture">15</button></td><td>The window menu - modes with computed latencies, Color, Whole Curve, Delta Listen, Sketch, Instances, analyser/view options, EQ Match, presets</td></tr>
@@ -12549,23 +12549,25 @@ One grab per arming, so playing music never steals a click.</p>
 <div class="shot cropview m2c" data-screen="EQ" data-m2key="EQ:2" data-file="EQ.png" data-rect="71.54,6.41,28.46,93.59" data-dims="1307,564" style="width:372px;aspect-ratio:0.7047"><img src="figures/EQ.png" alt="" style="position:absolute;width:351.370%;left:-251.370%;top:-6.849%" loading="lazy"><button type="button" class="marker" data-goto="EQ-10" style="left:57.84%;top:16.66%">10</button><button type="button" class="marker" data-goto="EQ-11" style="left:57.84%;top:29.48%">11</button><button type="button" class="marker" data-goto="EQ-12" style="left:57.84%;top:42.30%">12</button><button type="button" class="marker" data-goto="EQ-13" style="left:57.84%;top:59.40%">13</button><button type="button" class="marker" data-goto="EQ-14" style="left:57.84%;top:82.90%">14</button></div>
 
 
-<p id="EQ-10"><b>GAIN and PAN</b> - the selected band's boost or cut, and
-where that boost or cut sits in the stereo picture: PAN hard left and the
+<p id="EQ-10"><b>GAIN, SAT and PAN</b> - the selected band's boost or
+cut; saturation folded into just this band's region (zero is clean); and
+where the band's work sits in the stereo picture: PAN hard left and the
 band's effect lands only on the left channel. It pans the band's WORK,
 not your audio, and the drawn curve deliberately stays put.</p>
 
 <p id="EQ-11"><b>FREQ and Q</b> - drag the numbers up and down, or
-double-click to type. Q is width: higher is narrower.</p>
+double-click to type. Q is width: higher is narrower. On a Low Pass or
+High Pass, Q is resonance instead: a peak right at the cutoff, at any
+slope - the filter sweep sound lives on this number.</p>
 
-<p id="EQ-12"><b>The shape grid, channel and the three numbers</b> - the
+<p id="EQ-12"><b>The shape grid, channel and the two numbers</b> - the
 band's type (Bell, the passes, the shelves, Notch, Band Pass, Tilt, and
 All Pass - which changes only phase, for lining layered sounds up), a
 Stereo / L / R choice for Stereo-view bands, then SLOPE (any steepness
 from 1 to 96 dB per octave, continuously - 17 is a real setting - plus
-Brickwall in the linear-phase modes), PHASE (in linear modes, how much of
-THIS band opts out of linear phase - pull it up on a low bell and the
-bass pre-ring leaves), and SAT (saturation folded into just this band's
-region).</p>
+Brickwall in the linear-phase modes) and PHASE (in linear modes, how
+much of THIS band opts out of linear phase - pull it up on a low bell
+and the bass pre-ring leaves).</p>
 
 <p id="EQ-13"><b>DYNAMICS</b> - DYN makes the band move with the music:
 DOWN cuts when its region crosses the threshold, UP boosts. THR decides

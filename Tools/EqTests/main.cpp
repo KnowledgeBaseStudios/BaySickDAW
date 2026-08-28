@@ -1907,6 +1907,76 @@ int main()
             }
         }
     }
+    // ---- 23. resonant pass filters - Q at any slope (2026-08-28)
+    std::printf ("%s", "\n  23. resonant pass filters\n");
+    {
+        const double srr = 48000.0;
+
+        auto queryDb = [srr] (kbs::EqType type, float slope, float qv,
+                              kbs::EqMode mode)
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setMode (mode);
+            kbs::EqBandParams b;
+            b.on = true; b.type = type;
+            b.freqHz = 1000.0f; b.q = qv; b.slope = slope;
+            eq.setBand (0, b);
+            return 20.0 * std::log10 (eq.bandMagnitudeAt (0, 1000.0f));
+        };
+
+        // The invariant: cutoff gain = Q (linear), any slope with a full
+        // pair.  At neutral Q the cascade is exactly Butterworth (-3 dB).
+        near (queryDb (kbs::EqType::lowPass, 24.0f, 4.0f, kbs::EqMode::zeroLatency),
+              20.0 * std::log10 (4.0), 0.3, "LP slope 24, Q 4: +12 dB at the cutoff");
+        near (queryDb (kbs::EqType::lowPass, 24.0f, 0.7071f, kbs::EqMode::zeroLatency),
+              -3.01, 0.15, "LP slope 24, neutral Q stays Butterworth");
+        near (queryDb (kbs::EqType::highPass, 24.0f, 4.0f, kbs::EqMode::zeroLatency),
+              20.0 * std::log10 (4.0), 0.3, "HP slope 24, Q 4: +12 dB at the cutoff");
+        near (queryDb (kbs::EqType::lowPass, 12.0f, 2.0f, kbs::EqMode::zeroLatency),
+              20.0 * std::log10 (2.0), 0.3, "slope 12 keeps its old user-Q meaning");
+        near (queryDb (kbs::EqType::lowPass, 24.0f, 4.0f, kbs::EqMode::linearMedium),
+              20.0 * std::log10 (4.0), 0.4, "linear mode realizes the same resonance");
+        near (queryDb (kbs::EqType::lowPass, 24.0f, 0.7071f, kbs::EqMode::linearMedium),
+              -3.01, 0.15, "linear mode, neutral Q stays exact fractional");
+
+        // Heard == drawn: the audio's cascade is the query's cascade.
+        // Linear runs at HIGH precision: the design window smooths a narrow
+        // resonance by ~1 dB at Medium - the same documented tradeoff a
+        // Q=1 bell has at Low - and the precision dial is the user's answer.
+        for (int mode = 0; mode < 2; ++mode)
+        {
+            kbs::ParametricEq eq;
+            eq.prepare (srr, 256);
+            eq.setMode (mode == 0 ? kbs::EqMode::zeroLatency
+                                  : kbs::EqMode::linearHigh);
+            kbs::EqBandParams b;
+            b.on = true; b.type = kbs::EqType::lowPass;
+            b.freqHz = 1000.0f; b.q = 3.0f; b.slope = 36.0f;
+            eq.setBand (0, b);
+
+            std::vector<float> L (256), R (256), tail;
+            double phase = 0.0;
+            for (int bl = 0; bl < 120; ++bl)
+            {
+                for (int i = 0; i < 256; ++i)
+                {
+                    phase += 2.0 * kbs::kPi * 1000.0 / srr;
+                    L[(size_t) i] = R[(size_t) i] = (float) (0.1 * std::sin (phase));
+                }
+                eq.process (L.data(), R.data(), 256);
+                if (bl >= 80) tail.insert (tail.end(), L.begin(), L.end());
+            }
+            const double period = srr / 1000.0;
+            const size_t whole = (size_t) (std::floor ((double) tail.size() / period) * period);
+            tail.resize (std::max<size_t> (whole, (size_t) period));
+            const double heard = 20.0 * std::log10 (levelAt (tail, 1000.0, srr, 0) / 0.1);
+            const double drawn = 20.0 * std::log10 (eq.bandMagnitudeAt (0, 1000.0f));
+            near (heard, drawn, 0.5,
+                  mode == 0 ? "IIR: resonant LP heard equals drawn"
+                            : "linear: resonant LP heard equals drawn");
+        }
+    }
     std::printf (failures == 0 ? "\n  all checks passed\n\n" : "\n  %d FAILURE(S)\n\n", failures);
     return failures == 0 ? 0 : 1;
 }

@@ -139,13 +139,21 @@ Reset Band, Delete Band.
 
 ### The rail
 
-BAND header + colour dot; GAIN and PAN knobs (PAN splits the band's effect
+BAND header + colour dot; GAIN / SAT / PAN knobs (SAT is the band's
+saturation, 2026-08-28 - was a drag-number; PAN splits the band's effect
 across the stereo image - gain types, Stereo view only; the drawn curve
 deliberately does not move with it); FREQ / Q drag-numbers (double-click
 types - FREQ also accepts note names: "A4", "Bb2", "C#2+13", and its
-caption reads the live note name while a band is selected); the type
-glyph grid (9); ST/L/R; SLOPE (continuous dB/oct), PHASE (per-band phase
-mix, linear modes) and SAT (per-band saturation) drag-numbers; DYNAMICS:
+caption reads the live note name while a band is selected; on Low Pass /
+High Pass the Q is RESONANCE - the final cascade pair's Butterworth Q
+scaled by q/0.7071, so the cutoff gain lands at exactly Q at ANY slope,
+neutral Q stays pure Butterworth, and slope 12 keeps its old meaning;
+mirrored in the queries and, past neutral Q, realized identically by the
+linear modes); the type glyph grid (9); ST/L/R; SLOPE (continuous
+dB/oct) and PHASE (per-band phase mix, linear modes) drag-numbers
+(each row laid out only when visible; the MOD block lays out for every
+band - the fixed height budget that parked hidden rows at stale bounds
+is gone, 2026-08-28); DYNAMICS:
 DYN / AUTO / EXT, DOWN / UP direction, THR / RATIO / ATK / REL, the
 second stage's THR B / RATIO B / RANGE B, ONSET, DENSE (spectral
 neighborhood width) and a real GR meter; the MOD block: RATE / LFO / ENV
