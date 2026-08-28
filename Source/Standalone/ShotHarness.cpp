@@ -87,12 +87,237 @@ struct World
 
 juce::File     gOutDir;
 juce::StringArray gWanted;
+bool           gDocsMode = false;
+juce::File     gDocsFile;
+juce::DynamicObject::Ptr gDocs;
+BaySickDAWProcessor*     gDocsProc = nullptr;
 float          gScaleOverride = 0.0f;   // 0 = per-figure default
 int            gWritten = 0, gFailed = 0;
 
 bool want (const juce::String& name)
 {
     return gWanted.isEmpty() || gWanted.contains (name, true);
+}
+
+// ── the --docs dump (QA-ManualPress M-3) ──────────────────────────────────
+// Control tables are the half of the manual that rots: every number in them
+// must come from the code.  While shooting, the walk below collects every
+// stamped control (componentID carries the param id; VKnob carries paramId)
+// plus its slider-rendered range strings - the SAME formatting the user sees
+// on screen - and resolves the id against the owning APVTS for the
+// registered name, default, skew and choice names.
+
+juce::String stripLanePrefix (const juce::String& id)
+{
+    for (const char* fam : { "vox", "inst", "plugtab" })
+    {
+        const juce::String f (fam);
+        if (! id.startsWith (f)) continue;
+        int i = f.length();
+        int digits = 0;
+        while (i < id.length() && juce::CharacterFunctions::isDigit (id[i]))
+        { ++i; ++digits; }
+        if (digits > 0 && i < id.length() && id[i] == '_')
+            return id.substring (i + 1);
+    }
+    return id;
+}
+
+juce::RangedAudioParameter* resolveDocParam (BaySickDAWProcessor& proc,
+                                             const juce::String& rawId)
+{
+    const auto id = stripLanePrefix (rawId);
+    if (auto* p = proc.apvts.getParameter (id)) return p;
+
+    static const TabKind kKinds[] = {
+        TabKind::Layers, TabKind::Bass, TabKind::Drums, TabKind::Clips,
+        TabKind::Vox, TabKind::Inst, TabKind::Plugins,
+    };
+    auto& rig = proc.engineRig();
+    for (const auto kind : kKinds)
+        for (int i = 0; i < EngineRig::capacityOf (kind); ++i)
+        {
+            const auto* t = rig.findTab (kind, i);
+            if (t == nullptr) continue;
+            if (auto* ap = EngineRig::apvtsOf (t->engine.get()))
+                if (auto* p = ap->getParameter (id)) return p;
+            if (t->namIr != nullptr)
+                if (auto* ap = EngineRig::apvtsOf (t->namIr))
+                    if (auto* p = ap->getParameter (id)) return p;
+            if (t->pedals != nullptr)
+                if (auto* ap = EngineRig::apvtsOf (t->pedals))
+                    if (auto* p = ap->getParameter (id)) return p;
+            if (kind == TabKind::Vox)
+                if (auto* v = dynamic_cast<BaySickVocalProcessor*> (t->engine.get()))
+                    if (auto* ap = EngineRig::apvtsOf (&v->getNamIrProcessor()))
+                        if (auto* p = ap->getParameter (id)) return p;
+        }
+    return nullptr;
+}
+
+juce::var docRowForParam (BaySickDAWProcessor& proc, const juce::String& id)
+{
+    auto* p = resolveDocParam (proc, id);
+    if (p == nullptr) return {};
+    juce::DynamicObject::Ptr o = new juce::DynamicObject();
+    o->setProperty ("id", id);
+    o->setProperty ("name", p->getName (64));
+    const auto& r = p->getNormalisableRange();
+    o->setProperty ("min", r.start);
+    o->setProperty ("max", r.end);
+    o->setProperty ("interval", r.interval);
+    o->setProperty ("skew", r.skew);
+    o->setProperty ("default", r.convertFrom0to1 (p->getDefaultValue()));
+    o->setProperty ("defaultText", p->getText (p->getDefaultValue(), 24));
+    if (auto* ch = dynamic_cast<juce::AudioParameterChoice*> (p))
+    {
+        juce::Array<juce::var> names;
+        for (const auto& s : ch->choices) names.add (s);
+        o->setProperty ("choices", names);
+        o->setProperty ("kind", "choice");
+    }
+    else if (dynamic_cast<juce::AudioParameterBool*> (p) != nullptr)
+        o->setProperty ("kind", "toggle");
+    else
+        o->setProperty ("kind", "value");
+    return juce::var (o.get());
+}
+
+void collectDocRows (juce::Component& root, juce::Component& c,
+                     juce::Rectangle<int> area, juce::Array<juce::var>& out)
+{
+    // The root itself never gets setVisible(true) headless (snapshots paint
+    // regardless); only CHILD visibility separates shown from hidden state.
+    if (&c != &root && ! c.isVisible()) return;
+    if (dynamic_cast<PageMenuBar*> (&c) != nullptr) return;   // window chrome
+
+    juce::String id, label, tip;
+    juce::Slider* slider = nullptr;
+    juce::ComboBox* combo = nullptr;
+    const char* kind = nullptr;
+    bool emitted = false;
+
+    if (auto* vk = dynamic_cast<VKnob*> (&c))
+    {
+        id = vk->paramId;
+        label = vk->label.getText();
+        tip = vk->slider.getTooltip();
+        slider = &vk->slider;
+        kind = "knob";
+    }
+    else if ((slider = dynamic_cast<juce::Slider*> (&c)) != nullptr)
+    {
+        if ((bool) c.getProperties()["vknob_slider"]) return;  // the VKnob emits
+        id = c.getComponentID();
+        tip = slider->getTooltip();
+        kind = "slider";
+        if (id.isEmpty()) slider = nullptr;   // nameless row = useless row
+    }
+    else if ((combo = dynamic_cast<juce::ComboBox*> (&c)) != nullptr)
+    {
+        id = c.getComponentID();
+        kind = "combo";
+    }
+    else if (auto* btn = dynamic_cast<juce::Button*> (&c))
+    {
+        id = c.getComponentID();
+        label = btn->getButtonText();
+        tip = btn->getTooltip();
+        kind = "toggle";
+    }
+
+    const bool wantRow = (kind != nullptr)
+                         && (id.isNotEmpty()
+                             || (slider != nullptr && juce::String (kind) == "knob"));
+    if (wantRow)
+    {
+        juce::DynamicObject::Ptr o = new juce::DynamicObject();
+        o->setProperty ("id", id);
+        o->setProperty ("kind", kind);
+        if (label.isNotEmpty()) o->setProperty ("label", label);
+        if (tip.isNotEmpty())   o->setProperty ("tip", tip);
+
+        const auto b = root.getLocalArea (&c, c.getLocalBounds());
+        if (area.getWidth() > 0 && area.getHeight() > 0)
+        {
+            juce::Array<juce::var> pct;
+            pct.add (100.0 * (b.getX() - area.getX()) / area.getWidth());
+            pct.add (100.0 * (b.getY() - area.getY()) / area.getHeight());
+            pct.add (100.0 * b.getWidth()  / area.getWidth());
+            pct.add (100.0 * b.getHeight() / area.getHeight());
+            o->setProperty ("bounds", pct);
+        }
+
+        if (slider != nullptr)
+        {
+            o->setProperty ("min", slider->getMinimum());
+            o->setProperty ("max", slider->getMaximum());
+            o->setProperty ("interval", slider->getInterval());
+            o->setProperty ("minText", slider->getTextFromValue (slider->getMinimum()));
+            o->setProperty ("maxText", slider->getTextFromValue (slider->getMaximum()));
+            o->setProperty ("valueText", slider->getTextFromValue (slider->getValue()));
+            if (slider->isDoubleClickReturnEnabled())
+                o->setProperty ("defText",
+                    slider->getTextFromValue (slider->getDoubleClickReturnValue()));
+        }
+        if (combo != nullptr)
+        {
+            juce::Array<juce::var> items;
+            for (int i = 0; i < combo->getNumItems(); ++i)
+                items.add (combo->getItemText (i));
+            o->setProperty ("choices", items);
+        }
+        if (id.isNotEmpty() && gDocsProc != nullptr)
+            if (auto pv = docRowForParam (*gDocsProc, id); ! pv.isVoid())
+                o->setProperty ("param", pv);
+
+        out.add (juce::var (o.get()));
+        emitted = true;
+    }
+
+    if (! emitted)
+        for (auto* child : c.getChildren())
+            if (child != nullptr)
+                collectDocRows (root, *child, area, out);
+}
+
+// Params the walk cannot see (controls that never got a componentID) but the
+// figure plainly shows - documented by id, numbers still resolved from code.
+struct ExtraDoc { const char* figure; const char* id; };
+const ExtraDoc kExtraDocs[] = {
+    { "Mixer", "mixer_master_width" },
+    { "Mixer", "mixer_master_mute" },
+    { "Mixer", "mixer_master_solo" },
+    { "EQ",    "mixer_master_preeq_b1Freq" },
+    { "EQ",    "mixer_master_preeq_b1Q" },
+    { "EQ",    "mixer_master_preeq_b1Type" },
+    { "EQ",    "mixer_master_preeq_b1Slope" },
+};
+
+bool gInMenuSave = false;   // saveMenu arms this: a menu figure has no table
+
+void docsAdd (juce::Component& c, const juce::String& name,
+              juce::Rectangle<int> area)
+{
+    if (! gDocsMode || gDocs == nullptr || gInMenuSave) return;
+
+    juce::Array<juce::var> rows;
+    collectDocRows (c, c, area, rows);
+    for (const auto& x : kExtraDocs)
+        if (name == x.figure && gDocsProc != nullptr)
+            if (auto pv = docRowForParam (*gDocsProc, x.id); ! pv.isVoid())
+            {
+                juce::DynamicObject::Ptr o = new juce::DynamicObject();
+                o->setProperty ("id", juce::String (x.id));
+                o->setProperty ("kind", "supplement");
+                o->setProperty ("param", pv);
+                rows.add (juce::var (o.get()));
+            }
+    if (rows.isEmpty()) return;
+
+    juce::DynamicObject::Ptr fig = new juce::DynamicObject();
+    fig->setProperty ("controls", rows);
+    gDocs->setProperty (name, juce::var (fig.get()));
 }
 
 // Per-figure scale defaults to 1.25: the shipped masters were hand-captured
@@ -107,6 +332,7 @@ void save (juce::Component& c, const juce::String& name, float scale,
 {
     if (gScaleOverride > 0.0f) scale = gScaleOverride;
     if (area.isEmpty()) area = c.getLocalBounds();
+    docsAdd (c, name, area);
 
     const auto shot = c.createComponentSnapshot (area, false, scale);
     const auto file = gOutDir.getChildFile (name + ".png");
@@ -251,7 +477,9 @@ void saveMenu (juce::PopupMenu menu, const juce::String& name,
     MenuCanvas canvas (menu, opts,
                        laf != nullptr ? *laf
                                       : juce::LookAndFeel::getDefaultLookAndFeel());
+    gInMenuSave = true;
     save (canvas, name, 1.25f);
+    gInMenuSave = false;
 }
 
 // Arms the capture hook, runs the gesture that would have shown a menu, and
@@ -1313,7 +1541,9 @@ void shootEffectPanelMenu (World& w)
     win.setTopLeftPosition (0, 0);
     host.addAndMakeVisible (canvas);
     canvas.setTopLeftPosition (0, barH);
+    gInMenuSave = true;
     save (host, "Effects Panel Menu", 1.25f);
+    gInMenuSave = false;
 }
 
 void shootEngineMenus (World& w)
@@ -1591,6 +1821,12 @@ int run (const juce::String& commandLine)
         if (t == "--shot" || t.isEmpty()) continue;
         if (t.startsWith ("--out="))        gOutDir = juce::File (t.fromFirstOccurrenceOf ("=", false, false));
         else if (t.startsWith ("--scale=")) gScaleOverride = t.fromFirstOccurrenceOf ("=", false, false).getFloatValue();
+        else if (t == "--docs")             gDocsMode = true;
+        else if (t.startsWith ("--docs="))
+        {
+            gDocsMode = true;
+            gDocsFile = juce::File (t.fromFirstOccurrenceOf ("=", false, false));
+        }
         else                                gWanted.add (t);
     }
     gOutDir.createDirectory();
@@ -1609,6 +1845,15 @@ int run (const juce::String& commandLine)
             juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
             return 3;
         }
+    }
+
+    if (gDocsMode)
+    {
+        gDocs = new juce::DynamicObject();
+        if (gDocsFile == juce::File())
+            gDocsFile = AppPaths::appRoot().getChildFile ("Manuals")
+                                           .getChildFile ("assets")
+                                           .getChildFile ("bsd-docs.json");
     }
 
     {
@@ -1630,8 +1875,27 @@ int run (const juce::String& commandLine)
         // ensured params all persist.
         w.proc->releaseResources();
 
+        gDocsProc = w.proc.get();
         for (const auto& f : kFigures)
             f.fn (w);
+        gDocsProc = nullptr;
+    }
+
+    if (gDocsMode && gDocs != nullptr)
+    {
+        gDocsFile.deleteFile();
+        juce::FileOutputStream out (gDocsFile);
+        if (out.openedOk())
+        {
+            juce::JSON::writeToStream (out, juce::var (gDocs.get()));
+            std::cout << "docs -> " << gDocsFile.getFullPathName() << std::endl;
+        }
+        else
+        {
+            ++gFailed;
+            std::cout << "  FAILED docs write" << std::endl;
+        }
+        gDocs = nullptr;
     }
 
     juce::LookAndFeel::setDefaultLookAndFeel (nullptr);

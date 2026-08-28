@@ -3749,7 +3749,19 @@ implementation rather than to whatever claims the extension first &mdash; see
 <tr id="row-BSV-10"><td><button type="button" class="n" data-back="BSV-10" title="Show it on the picture">10</button></td><td><code>Formant Preserve</code></td></tr>
 <tr id="row-BSV-11"><td><button type="button" class="n" data-back="BSV-11" title="Show it on the picture">11</button></td><td>Live readout - <code>Detected: -- Hz   Target: -- Hz   Shift: -- cents</code>. Dashes until the tracker has a pitch</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Vox page is the live pitch corrector: it listens to the voice on this
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>A/B Slot</td><td></td><td>A</td><td>A, B</td></tr>
+<tr><td>Pitch Realtime Bypass</td><td></td><td>On</td><td>on / off</td></tr>
+<tr><td>Pitch Root</td><td></td><td>C</td><td>C, C#, D, D#, E, F, F#, G, G#, A, A#, B</td></tr>
+<tr><td>Pitch Scale</td><td></td><td>Chromatic</td><td>Chromatic, Major, Minor, Dorian, Phrygian, Lydian, Mixolydian, Locrian, Harm. Minor, Mel. Minor, Pentatonic Maj, Pentatonic Min, Blues</td></tr>
+<tr><td>Retune Speed ms</td><td></td><td>60</td><td>0 to 100</td></tr>
+<tr><td>Pitch Strength</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Humanize cents</td><td></td><td>0</td><td>0 to 20</td></tr>
+<tr><td>Throat Shift semis</td><td></td><td>0</td><td>-12 to 12</td></tr>
+<tr><td>Formant Preserve</td><td></td><td>Off</td><td>on / off</td></tr>
+</tbody></table>
+<p>The Vox page is the live pitch corrector: it listens to the voice on this
 channel, works out what note is being sung, and pulls it gently - or
 instantly - onto the right one. This window is the tuner itself; the deeper
 vocal editors open from its menu.</p>
@@ -4068,7 +4080,32 @@ vocal setup - chain settings and all - as one preset.</p>
 <tr id="row-BSVC-8"><td><button type="button" class="n" data-back="BSVC-8" title="Show it on the picture">8</button></td><td>Gain-reduction meter - the analog face at a slot left, on the stages that reduce gain</td></tr>
 <tr id="row-BSVC-9"><td><button type="button" class="n" data-back="BSVC-9" title="Show it on the picture">9</button></td><td>Slot <code>Vol</code> and its dBFS meter - <em>see <a href="#row-FX-6">Vol knob</a></em> and <em>see <a href="#row-FX-7">Output dBFS meter</a></em></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Vocal Chain is six studio processors in a fixed order - Gate,
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Vol</td><td></td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Thresh</td><td></td><td>-80</td><td>-80 to 0</td></tr>
+<tr><td>Range</td><td></td><td>-60</td><td>-80 to 0</td></tr>
+<tr><td>Attack</td><td></td><td>1</td><td>0.1 to 100</td></tr>
+<tr><td>Hold</td><td></td><td>50</td><td>0 to 500</td></tr>
+<tr><td>Release</td><td></td><td>100</td><td>5 to 2000</td></tr>
+<tr><td>Reduce</td><td></td><td>50</td><td>0 to 100</td></tr>
+<tr><td>Tail</td><td></td><td>400</td><td>100 to 1000</td></tr>
+<tr><td>Mix</td><td></td><td>100</td><td>0 to 100</td></tr>
+<tr><td>Detect</td><td></td><td>50</td><td>0 to 100</td></tr>
+<tr><td>Mode</td><td></td><td>0</td><td>0 to 100</td></tr>
+<tr><td>Ratio</td><td></td><td>4</td><td>0.4 to 30</td></tr>
+<tr><td>Gain</td><td></td><td>0</td><td>-30 to 30</td></tr>
+<tr><td>Drive</td><td></td><td>3</td><td>0 to 10</td></tr>
+<tr><td>Color</td><td></td><td>3</td><td>0 to 10</td></tr>
+<tr><td>Output</td><td></td><td>0</td><td>-18 to 18</td></tr>
+<tr><td>InGain</td><td></td><td>0</td><td>-12 to 24</td></tr>
+<tr><td>Ceil</td><td></td><td>-0.3</td><td>-24 to 12</td></tr>
+<tr><td>SatTh</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Atk</td><td></td><td>1</td><td>0.1 to 20</td></tr>
+<tr><td>Rel</td><td></td><td>100</td><td>10 to 1000</td></tr>
+<tr><td>Sustain</td><td></td><td>0</td><td>0 to 1000</td></tr>
+</tbody></table>
+<p>The Vocal Chain is six studio processors in a fixed order - Gate,
 De-reverb, De-esser, Compressor, Saturation, Limiter - that every vocal on
 this channel passes through, in that order, always. You shape each stage;
 the order is engineered and locked, because it is the order a studio would
@@ -4710,7 +4747,17 @@ to decide before it has heard the end of the word.</p>
 <tr id="row-BSPDL-11"><td><button type="button" class="n" data-back="BSPDL-11" title="Show it on the picture">11</button></td><td>Per-slot <code>X</code> - removes that pedal; populated slots only</td></tr>
 <tr id="row-BSPDL-12"><td><button type="button" class="n" data-back="BSPDL-12" title="Show it on the picture">12</button></td><td>Per-slot reorder arrows - filled triangles, greyed at the chain ends</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The pedalboard works like the floor in front of a guitarist: eight
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Trim</td><td></td><td>440</td><td>436 to 445</td></tr>
+<tr><td>Dist</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Low</td><td></td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Mid Hz</td><td></td><td>800</td><td>200 to 5000</td></tr>
+<tr><td>Mid dB</td><td></td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>High</td><td></td><td>0</td><td>-15 to 15</td></tr>
+<tr><td>Level</td><td></td><td>0</td><td>-24 to 12</td></tr>
+</tbody></table>
+<p>The pedalboard works like the floor in front of a guitarist: eight
 stompboxes in a row, the signal walking through them left to right on its
 way to the amp. Slot 1 is always the tuner, slot 8 is always an EQ, and the
 six between are yours to fill.</p>
@@ -5264,7 +5311,21 @@ whole instrument setup as one preset.</p>
 <tr id="row-BSNAM-28"><td><button type="button" class="n" data-back="BSNAM-28" title="Show it on the picture">28</button></td><td>Proximity boundary - the 20 cm mark. In SIDE it closes up as the mic backs off and disappears past 20 cm, because proximity follows the TRUE distance and not the height alone</td></tr>
 <tr id="row-BSNAM-29"><td><button type="button" class="n" data-back="BSNAM-29" title="Show it on the picture">29</button></td><td>Placement readout - <code>30 cm   0 deg</code>, gaining a third field in SIDE</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The NAM/IR window is the amp room. NAM stands for Neural Amp Modeler - a
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Input Gain</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Gate Threshold</td><td></td><td>-50</td><td>-60 to 0</td></tr>
+<tr><td>Gate Release</td><td></td><td>100</td><td>5 to 500</td></tr>
+<tr><td>Low Cut</td><td></td><td>20</td><td>20 to 500</td></tr>
+<tr><td>High Cut</td><td></td><td>20000</td><td>3000 to 20000</td></tr>
+<tr><td>Cabinet Mix</td><td></td><td>100</td><td>0 to 100</td></tr>
+<tr><td>Master Output</td><td></td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Mix</td><td></td><td>100</td><td>0 to 100</td></tr>
+<tr><td>Distance</td><td></td><td>30</td><td>1 to 150</td></tr>
+<tr><td>Angle</td><td></td><td>0</td><td>-90 to 90</td></tr>
+<tr><td>Height</td><td></td><td>0</td><td>-30 to 30</td></tr>
+</tbody></table>
+<p>The NAM/IR window is the amp room. NAM stands for Neural Amp Modeler - a
 real amplifier, captured as a model that behaves like the original, drive
 and all. IR stands for impulse response - a real speaker cabinet, captured
 as its acoustic fingerprint. Load one of each and your dry signal comes out
@@ -5777,7 +5838,98 @@ window says so, and the cabinet stage should be bypassed for those.</p>
 <tr id="row-BSHARM-26"><td><button type="button" class="n" data-back="BSHARM-26" title="Show it on the picture">26</button></td><td><code>TYPE</code> chicken-head in <code>UNISON</code> - <code>Pure</code> / <code>Random</code> / <code>Drifting</code> / <code>Alt-only</code></td></tr>
 <tr id="row-BSHARM-27"><td><button type="button" class="n" data-back="BSHARM-27" title="Show it on the picture">27</button></td><td><code>Swing Mix</code> knob on the title bar, right of <code>Menu</code> - scales the global Swing for this player; right-click offers <code>Truncate Swing Notes</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>Harmless builds sound the opposite way from the other synth: instead of
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Filter 1 Type</td><td></td><td>LP</td><td>LP, HP, BP, Notch</td></tr>
+<tr><td>Filter Env Amount</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Filter Cutoff</td><td></td><td>20000</td><td>20 to 20000</td></tr>
+<tr><td>Filter Resonance</td><td></td><td>0.707</td><td>0.1 to 1</td></tr>
+<tr><td>Flt1 KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Filter 2 Type</td><td></td><td>Notch</td><td>LP, HP, BP, Notch</td></tr>
+<tr><td>Filter 2 Env</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Filter 2 Cutoff</td><td></td><td>20000</td><td>20 to 20000</td></tr>
+<tr><td>Filter 2 Res</td><td></td><td>0.707</td><td>0.1 to 1</td></tr>
+<tr><td>Flt2 KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM Sub</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM Prot</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM Clip</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>RM FX</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>RM Vol</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>RM Env</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Mod X</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mod Y</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mod Z</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Tk Lay 1 Harm Volume Mod0 Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Tk Lay 1 Harm Volume Mod0 Length</td><td></td><td></td><td>1/8 beats to 32 beats</td></tr>
+<tr><td>Timbre Blend</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Part A Level</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Part B Level</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Brownian Amount</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Blur Size</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Blur Time</td><td></td><td>1</td><td>0 to 2</td></tr>
+<tr><td>Blur Harm</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Prism Amount</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Prism Mode</td><td></td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Trem Depth</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Trem Speed</td><td></td><td>3</td><td>0.1 to 20</td></tr>
+<tr><td>Trem Gap</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vib Depth</td><td></td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Vib Speed</td><td></td><td>5</td><td>0.1 to 20</td></tr>
+<tr><td>Vib Env</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide Time</td><td></td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Legato Limit</td><td></td><td>0.5</td><td>0.001 to 1</td></tr>
+<tr><td>Flt1 Cutoff Offset</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Flt2 Cutoff Offset</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Filter Mask Cutoff</td><td></td><td>5000</td><td>20 to 20000</td></tr>
+<tr><td>Filter Mask Cutoff (B)</td><td></td><td>5000</td><td>20 to 20000</td></tr>
+<tr><td>Filter Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Sustain</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Filter Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Flt2 Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Flt2 Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Flt2 Sustain</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Flt2 Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>LFO Rate</td><td></td><td>7</td><td>0 to 12</td></tr>
+<tr><td>LFO Shape</td><td></td><td>0</td><td>0 to 3</td></tr>
+<tr><td>Legato</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Unison Voices</td><td></td><td>1</td><td>1 to 9</td></tr>
+<tr><td>Unison Type</td><td></td><td>0</td><td>0 to 3</td></tr>
+<tr><td>Unison Alt</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Unison Spread</td><td></td><td>0.7</td><td>0 to 1</td></tr>
+<tr><td>Unison Detune</td><td></td><td>15</td><td>0 to 100</td></tr>
+<tr><td>Unison Phase</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pluck Decay</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Out Phaser Mix</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Out Phaser Depth</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Out Phaser Rate</td><td></td><td>1</td><td>0.01 to 10</td></tr>
+<tr><td>Out Phaser Width</td><td></td><td>0.5</td><td>0 to 0.95</td></tr>
+<tr><td>Out Phaser Offset</td><td></td><td>1000</td><td>200 to 2000</td></tr>
+<tr><td>Phaser Mask Rate</td><td></td><td>1</td><td>0.1 to 10</td></tr>
+<tr><td>Out EQ Mix</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pluck Blur</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Pitch Semitones</td><td></td><td>0</td><td>-24 st to +24 st</td></tr>
+<tr><td>Pitch Cents</td><td></td><td>0</td><td>-100 to 100</td></tr>
+<tr><td>Pitch Fraction</td><td></td><td>0</td><td>0 to 6</td></tr>
+<tr><td>Volume</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Vel Link</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self Mode</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Amp Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Sustain</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Amp Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Phase Start</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Phase Rand</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>LFO Vel Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>LFO Vol Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>LFO Pitch Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Strum Dir</td><td></td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Strum Time</td><td></td><td>0</td><td>0 to 0.5</td></tr>
+<tr><td>Strum Tension</td><td></td><td>0</td><td>-1 to 1</td></tr>
+</tbody></table>
+<p>Harmless builds sound the opposite way from the other synth: instead of
 starting with a bright wave and filtering it down, it adds the sound up out
 of individual harmonics - the pure tones that stack to make any note. That
 lets it do things a filter never could, and it is why its panel has controls
@@ -6213,7 +6365,18 @@ included.</p>
   <figure><div class="views"><div class="vu"><div class="viewlabel">BaySickSynth</div><div class="shot cropview" data-screen="BSSB" data-view="0" data-file="BaySickSynth FLT.png" data-rect="34.4,1.44,18.04,4.36" data-dims="694,565" style="width:125px;aspect-ratio:5.0823"><img src="figures/BaySickSynth FLT.png" alt="BaySickSynth/Bass Family" width="694" height="565" style="position:absolute;width:554.324%;left:-190.687%;top:-33.028%" loading="lazy"></div></div>
 <div class="vu"><div class="viewlabel">BaySickBass</div><div class="shot cropview" data-screen="BSSB" data-view="1" data-file="BaySickBass Titlebar Crop.png" data-rect="33.5,2.41,19.23,5.58" data-dims="651,441" style="width:125px;aspect-ratio:5.0873"><img src="figures/BaySickBass Titlebar Crop.png" alt="BaySickSynth/Bass Family" width="651" height="441" style="position:absolute;width:520.021%;left:-174.207%;top:-43.190%" loading="lazy"></div></div></div></figure>
   </div>
-  <div class="l2"><p>BaySickSynth and BaySickBass are two versions of the same instrument. The
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Transpose</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Modifier</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Noise</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide</td><td></td><td>0.08</td><td>0 to 2</td></tr>
+<tr><td>Out Vol</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Mod Wheel Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+</tbody></table>
+<p>BaySickSynth and BaySickBass are two versions of the same instrument. The
 synth lives on <b>Layers</b> tabs and the bass on <b>Bass</b> tabs, but open
 them side by side and you are looking at the same window: the same waveform
 strip, the same six panel tabs, the same knobs in the same places.</p>
@@ -6244,7 +6407,18 @@ text says so.</p>
 <tr id="row-BSSBT-1"><td><button type="button" class="n" data-back="BSSBT-1" title="Show it on the picture">1</button></td><td><code>Preset</code> dropdown - the patch picker</td></tr>
 <tr id="row-BSSBT-2"><td><button type="button" class="n" data-back="BSSBT-2" title="Show it on the picture">2</button></td><td><code>Swing Mix</code> knob on the title bar, right of <code>Menu</code> - scales the global Swing for this player; right-click offers <code>Truncate Swing Notes</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The strip across the top of the BaySickSynth and BaySickBass windows -
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Transpose</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Modifier</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Noise</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide</td><td></td><td>0.08</td><td>0 to 2</td></tr>
+<tr><td>Out Vol</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Mod Wheel Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+</tbody></table>
+<p>The strip across the top of the BaySickSynth and BaySickBass windows -
 the same three controls on both. The accent color (synth blue, bass green)
 says whose window you are in, and it follows the engine everywhere it
 appears - the tab, the mixer strip, the panels.</p>
@@ -6400,7 +6574,16 @@ but the live instrument is gone.</p>
 <tr id="row-BSSBOSC-15"><td><button type="button" class="n" data-back="BSSBOSC-15" title="Show it on the picture">15</button></td><td><code>MOD WHEEL</code> destination - <code>Filter</code> / <code>LFO</code></td></tr>
 <tr id="row-BSSBOSC-16"><td><button type="button" class="n" data-back="BSSBOSC-16" title="Show it on the picture">16</button></td><td>Mod-wheel <code>AMOUNT</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Oscillator panel is where the sound is born. An oscillator is the part
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Transpose</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Modifier</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Noise</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Glide</td><td></td><td>0</td><td>0 to 2</td></tr>
+<tr><td>Out Vol</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Mod Wheel Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+</tbody></table>
+<p>The Oscillator panel is where the sound is born. An oscillator is the part
 of a synth that actually vibrates - everything else in the instrument only
 shapes what this panel generates. It is also where the synth decides how it
 behaves when you play more than one note.</p>
@@ -6924,7 +7107,20 @@ defaults and its own accent color; every control exists on both.</p>
 <tr id="row-BSSBOENV-3"><td><button type="button" class="n" data-back="BSSBOENV-3" title="Show it on the picture">3</button></td><td><code>PITCH ENV</code> group - the same four stages applied to pitch</td></tr>
 <tr id="row-BSSBOENV-4"><td><button type="button" class="n" data-back="BSSBOENV-4" title="Show it on the picture">4</button></td><td>Pitch <code>AMOUNT</code> - how far the pitch envelope moves the note. Zero by default, so the envelope exists but does nothing until this is raised</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>Press a piano key and the sound is not a flat block: it jumps out, settles,
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Amp Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Amp Sustain</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Amp Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Vel to Amp</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Pitch Env Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Pitch Env Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Pitch Env Sustain</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pitch Env Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Pitch Env Amount</td><td></td><td>0</td><td>-24 to 24</td></tr>
+</tbody></table>
+<p>Press a piano key and the sound is not a flat block: it jumps out, settles,
 holds while your finger stays down, and rings away when you let go. An
 <b>envelope</b> is the tool that gives a synth note that same life story. It
 is a shape - drawn by four controls - that the synth follows automatically on
@@ -7095,7 +7291,12 @@ float AdsrEnvelope::calcCoef (float timeSec, double sampleRate)
 <tr id="row-BSSBFLT-3"><td><button type="button" class="n" data-back="BSSBFLT-3" title="Show it on the picture">3</button></td><td><code>TRACKING</code> <code>KEYBOARD</code> - how far cutoff follows the played note</td></tr>
 <tr id="row-BSSBFLT-4"><td><button type="button" class="n" data-back="BSSBFLT-4" title="Show it on the picture">4</button></td><td><code>TRACKING</code> <code>VELOCITY</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>A filter is a tone control: it lets some of a sound's frequencies through
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>KB Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel Track</td><td></td><td>0</td><td>0 to 1</td></tr>
+</tbody></table>
+<p>A filter is a tone control: it lets some of a sound's frequencies through
 and holds others back. Every sound is a stack of frequencies - lows that you
 feel, highs that give edge and air - and the raw waves this synth makes come
 out with a LOT of highs. The filter is how you tame that into something
@@ -7250,7 +7451,15 @@ void SynthFilter::reset()
 <tr id="row-BSSBFENV-1"><td><button type="button" class="n" data-back="BSSBFENV-1" title="Show it on the picture">1</button></td><td><code>ATTACK</code> / <code>DECAY</code> / <code>SUSTAIN</code> / <code>RELEASE</code> sliders - the filter envelope</td></tr>
 <tr id="row-BSSBFENV-2"><td><button type="button" class="n" data-back="BSSBFENV-2" title="Show it on the picture">2</button></td><td><code>AMOU...</code> / <code>AMOUNT</code> - how far the envelope moves cutoff. Zero by default</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>This panel makes each note's <em>brightness</em> move. An envelope is a
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Filter Attack</td><td></td><td>0.01</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Decay</td><td></td><td>0.1</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Sustain</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Filter Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Filter Env Amount</td><td></td><td>0</td><td>-1 to 1</td></tr>
+</tbody></table>
+<p>This panel makes each note's <em>brightness</em> move. An envelope is a
 shape the synth follows automatically over the life of every note - four
 controls draw it - and this one steers the filter's cutoff instead of the
 volume, so the note's tone changes as it plays: bright at the start, darker
@@ -7299,7 +7508,12 @@ pluck.)</p>
 <tr id="row-BSSBLFO-5"><td><button type="button" class="n" data-back="BSSBLFO-5" title="Show it on the picture">5</button></td><td><code>DEST</code> - <code>Filter</code> / <code>Pitch</code> / <code>Osc M...</code></td></tr>
 <tr id="row-BSSBLFO-6"><td><button type="button" class="n" data-back="BSSBLFO-6" title="Show it on the picture">6</button></td><td><code>AMOUNT</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>An LFO - low-frequency oscillator - is a wave that runs too slowly to
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>LFO Rate</td><td></td><td>1</td><td>0.01 to 30</td></tr>
+<tr><td>LFO Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+</tbody></table>
+<p>An LFO - low-frequency oscillator - is a wave that runs too slowly to
 hear as a tone, used instead as an invisible hand that turns another control
 for you, over and over. Aim it at pitch and you get vibrato. Aim it at the
 filter and you get wobble. It is movement you would otherwise have to
@@ -7446,7 +7660,19 @@ void LFO::reset() { mPhase = 0.0f; }</code></pre></details>
 <tr id="row-BSSBMOD-5"><td><button type="button" class="n" data-back="BSSBMOD-5" title="Show it on the picture">5</button></td><td><code>DRI...</code> / <code>DRIFT</code></td></tr>
 <tr id="row-BSSBMOD-6"><td><button type="button" class="n" data-back="BSSBMOD-6" title="Show it on the picture">6</button></td><td><code>UNISON</code> - <code>VOICES</code> / <code>DETUNE</code> / <code>SPREAD</code>. Voice gain follows sqrt(N), <em>see <a href="#row-BSHARM-5">UNISON section</a></em></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Mod panel is the character drawer - five independent machines that
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Transient Amount</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Transient Duration</td><td></td><td>5</td><td>0 to 20</td></tr>
+<tr><td>Transient Colour</td><td></td><td>5000</td><td>200 to 10000</td></tr>
+<tr><td>Unison Voices</td><td></td><td>1</td><td>1 to 7</td></tr>
+<tr><td>Unison Detune</td><td></td><td>0.2</td><td>0 to 1</td></tr>
+<tr><td>Unison Spread</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+<tr><td>Analog Drift</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Burst Count</td><td></td><td>4</td><td>1 to 8</td></tr>
+<tr><td>Burst Spacing</td><td></td><td>20</td><td>1 to 100</td></tr>
+</tbody></table>
+<p>The Mod panel is the character drawer - five independent machines that
 each add one kind of personality to the sound. Most patches use one or two
 of them, not all five; each is off or neutral until you reach for it.</p>
 
@@ -7572,7 +7798,40 @@ alternating signs.</p>
 <tr id="row-BSP-7"><td><button type="button" class="n" data-back="BSP-7" title="Show it on the picture">7</button></td><td><code>Preset</code> button on the window title bar - the patch picker</td></tr>
 <tr id="row-BSP-8"><td><button type="button" class="n" data-back="BSP-8" title="Show it on the picture">8</button></td><td><code>Swing Mix</code> knob on the title bar, right of <code>Menu</code> - scales the global Swing for this player; right-click offers <code>Truncate Swing Notes</code></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>BaySickPlayer plays audio files as an instrument: load a sound - a note,
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Sample Start</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Stretch</td><td></td><td>1</td><td>0.5 to 2</td></tr>
+<tr><td>Reverse</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self</td><td></td><td>Off</td><td>on / off</td></tr>
+<tr><td>Cut Self Mode</td><td></td><td>On</td><td>on / off</td></tr>
+<tr><td>Tune</td><td></td><td>0</td><td>-24 to 24</td></tr>
+<tr><td>Voice Cap</td><td></td><td>16</td><td>1 to 16</td></tr>
+<tr><td>Unison Voices</td><td></td><td>1</td><td>1 to 8</td></tr>
+<tr><td>Detune</td><td></td><td>0</td><td>-100 to 100</td></tr>
+<tr><td>Unison Spread</td><td></td><td>0</td><td>0 to 100</td></tr>
+<tr><td>Sensitivity</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>Vel-&gt;Volume</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Vel-&gt;Muffle</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Muffle</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Vel-&gt;Hardness</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Hardness</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Attack</td><td></td><td>0.001</td><td>0.001 to 10</td></tr>
+<tr><td>Decay</td><td></td><td>0.5</td><td>0.001 to 10</td></tr>
+<tr><td>Sustain</td><td></td><td>1</td><td>0 to 1</td></tr>
+<tr><td>Release</td><td></td><td>0.3</td><td>0.001 to 10</td></tr>
+<tr><td>Vibrato Rate</td><td></td><td>5.5</td><td>0.1 to 20</td></tr>
+<tr><td>Vibrato Depth</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Cutoff</td><td></td><td>20000</td><td>20 to 20000</td></tr>
+<tr><td>Resonance</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Reduct</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Stereo</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Treble</td><td></td><td>0</td><td>-12 to 12</td></tr>
+<tr><td>Drive</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Volume</td><td></td><td>0.8</td><td>0 to 1</td></tr>
+</tbody></table>
+<p>BaySickPlayer plays audio files as an instrument: load a sound - a note,
 a drum, a chunk of a song - and the keyboard replays it at different
 pitches. This page decides where playback starts, what happens when notes
 pile up, how your playing force shapes the tone, and what the sound leaves
@@ -11102,7 +11361,17 @@ void BassGraphicEQStyleDSP::process (juce::AudioBuffer&lt;float&gt;&amp; buffer)
 <tr id="row-MIX-17"><td><button type="button" class="n" data-back="MIX-17" title="Show it on the picture">17</button></td><td><code>+</code> - add a send on that strip</td></tr>
 <tr id="row-MIX-18"><td><button type="button" class="n" data-back="MIX-18" title="Show it on the picture">18</button></td><td><code>Analyzer</code> - opens the Master Analyzer, <em>see <a href="#ANLZ">Master Analyzer</a></em></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>The Mixer is where everything meets: every tab and bus in the project as
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mixer Master Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Fx Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Width</td><td></td><td>1</td><td>0 to 2</td></tr>
+<tr><td>Mute</td><td></td><td>Off</td><td>on / off</td></tr>
+</tbody></table>
+<p>The Mixer is where everything meets: every tab and bus in the project as
 a vertical strip, the Master pinned at the left, and the routing between
 them drawn as actual cables underneath. Every strip has the same anatomy,
 so learn one and you have learned them all.</p>
@@ -11387,7 +11656,19 @@ so one fader rides all the vocals and one rack processes them together.</p>
 <tr id="row-MIXSTP-2"><td><button type="button" class="n" data-back="MIXSTP-2" title="Show it on the picture">2</button></td><td>Headphones Listen LED - hear this input through the bus and master. Right-click picks the monitor mode: Vox <code>True Dry</code> / <code>Bypass Pitch Corrector</code> / <code>With Effect</code>; Inst <code>Dry</code> / <code>With Effect</code></td></tr>
 <tr id="row-MIXSTP-3"><td><button type="button" class="n" data-back="MIXSTP-3" title="Show it on the picture">3</button></td><td>Split meter - peak bars below, scrolling RMS history above (every strip but Master)</td></tr>
 </tbody></table></div>
-  <div class="l2"><p>Two strips side by side: an engine strip (<code>Bass 1</code>) and a
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Pan</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Mixer Master Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Fx Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Voxbus Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Instbus Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Bass 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Vox 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+<tr><td>Mixer Inst 0 Fader</td><td></td><td>0</td><td>-60 to 5.6</td></tr>
+</tbody></table>
+<p>Two strips side by side: an engine strip (<code>Bass 1</code>) and a
 live-input strip (<code>Vox 1</code>). Everything the engine strip carries
 is taught on the Mixer page. What is numbered here is the row of controls
 only LIVE inputs have - the strips that record a microphone or an
@@ -12315,7 +12596,15 @@ are added it shows the header with a greyed
 <tr id="row-FX-6"><td><button type="button" class="n" data-back="FX-6" title="Show it on the picture">6</button></td><td><code>Vol</code> knob - slot output trim on most panels; pedal-native panels and the CS Style Compressor use their own <code>Level</code> instead</td></tr>
 <tr id="row-FX-7"><td><button type="button" class="n" data-back="FX-7" title="Show it on the picture">7</button></td><td>Output dBFS meter - the vertical bar at the right, scale in dBFS. Every panel has one. <b>This is not a VU</b>: the app one VU is its own window, <em>see <a href="#VUMTR">VU Meter</a></em></td></tr>
 </tbody></table></div>
-  <div class="l2"><p>An effect panel - the window a rack slot opens. Every effect in the app
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Vol</td><td></td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Detect</td><td></td><td>50</td><td>0 to 100</td></tr>
+<tr><td>Thresh</td><td></td><td>-12.5</td><td>-80 to 0</td></tr>
+<tr><td>Range</td><td></td><td>-14</td><td>-48 to 0</td></tr>
+<tr><td>Mode</td><td></td><td>50</td><td>0 to 100</td></tr>
+</tbody></table>
+<p>An effect panel - the window a rack slot opens. Every effect in the app
 shares this frame; the knobs in the middle change per effect, the furniture
 around them does not. Learn the furniture once.</p>
 
@@ -12372,7 +12661,33 @@ VU - the slow loudness needle - is its own window.</p>
   <div class="l1"><p class="lede">Nine effects have a Visual window - Chorus, Compressor, Delay, Flanger, Limiter, Phaser, Reverb, Saturation, Transient Shaper. Elsewhere the menu entry is absent, not greyed. The Visual window&#x27;s own Menu has a single item: <code>Lock to Effect Window</code> / <code>Unlock from Effect Window</code>.</p>
   <figure><div class="views"><div class="vu"><div class="shot" data-screen="FXV" data-view="0" data-file="Effects Panel with Visual.png" data-rect="0,0,100,100" data-dims="858,605" style=""><img src="figures/Effects Panel with Visual.png" alt="Effect Panel w/ Visual" width="858" height="605" style="" loading="lazy"></div></div></div></figure>
   </div>
-  <div class="l2"><p>Nine effects come with a Visual window - a live moving picture of what
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Vol</td><td></td><td>0</td><td>-24 to 12</td></tr>
+<tr><td>Room</td><td></td><td>0.6</td><td>0 to 2</td></tr>
+<tr><td>Decay</td><td></td><td>2</td><td>0.1 to 20</td></tr>
+<tr><td>HFRatio</td><td></td><td>0.7</td><td>0.3 to 2</td></tr>
+<tr><td>Diffuse</td><td></td><td>0.5</td><td>0 to 1</td></tr>
+<tr><td>PreDly</td><td></td><td>10</td><td>0 to 200</td></tr>
+<tr><td>WetTone</td><td></td><td>0</td><td>-12 to 12</td></tr>
+<tr><td>Wet</td><td></td><td>0.3</td><td>0 to 1</td></tr>
+<tr><td>Dry</td><td></td><td>0.7</td><td>0 to 1</td></tr>
+<tr><td>LoCut</td><td></td><td>80</td><td>20 to 800</td></tr>
+<tr><td>HiCut</td><td></td><td>18000</td><td>1000 to 20000</td></tr>
+<tr><td>BassMlt</td><td></td><td>1.2</td><td>0.5 to 3</td></tr>
+<tr><td>BassX</td><td></td><td>250</td><td>20 to 800</td></tr>
+<tr><td>TailDep</td><td></td><td>0.3</td><td>0 to 1.5</td></tr>
+<tr><td>TailRt</td><td></td><td>0.35</td><td>0.05 to 2</td></tr>
+<tr><td>Stereo</td><td></td><td>100</td><td>0 to 200</td></tr>
+<tr><td>HiDamp</td><td></td><td>8000</td><td>500 to 20000</td></tr>
+<tr><td>ER</td><td></td><td>-6</td><td>-60 to 12</td></tr>
+<tr><td>Master 621E60Bbafc540Aaae7E8Ecb187602Af Freeze</td><td></td><td></td><td>on / off</td></tr>
+<tr><td>Duck</td><td></td><td>0</td><td>0 to 100</td></tr>
+<tr><td>DkThr</td><td></td><td>-24</td><td>-60 to 0</td></tr>
+<tr><td>DkAtt</td><td></td><td>10</td><td>1 to 200</td></tr>
+<tr><td>DkRel</td><td></td><td>200</td><td>10 to 1000</td></tr>
+</tbody></table>
+<p>Nine effects come with a Visual window - a live moving picture of what
 the processing is doing: Chorus, Compressor, Delay, Flanger, Limiter,
 Phaser, Reverb, Saturation and the Transient Shaper. Where an effect has no
 visual, the menu entry simply is not there.</p>
@@ -12457,7 +12772,28 @@ Plugin</b> appears only while a hosted plugin is down.</p>
 <tr id="row-EQ-14"><td><button type="button" class="n" data-back="EQ-14" title="Show it on the picture">14</button></td><td>Rail <code>MOD</code> block - <code>RATE</code>/<code>LFO</code>/<code>ENV</code> knobs with <code>F</code>/<code>G</code>/<code>Q</code> target rows (per-band modulators, IIR modes)</td></tr>
 <tr id="row-EQ-15"><td><button type="button" class="n" data-back="EQ-15" title="Show it on the picture">15</button></td><td>The window menu - modes with computed latencies, Color, Whole Curve, Delta Listen, Sketch, Instances, analyser/view options, EQ Match, presets</td></tr>
 </tbody></table></div>
-  <div class="l2">﻿<p>An equalizer - EQ - turns parts of the frequency range up or down: more
+  <div class="l2"><h4 class="ctrlhead">Controls</h4>
+<table class="controls"><thead><tr><th>Control</th><th>What it does</th><th>Default</th><th>Range</th></tr></thead><tbody>
+<tr><td>Pre EQ B2 Gain</td><td></td><td>0</td><td>-30 to 30</td></tr>
+<tr><td>Pre EQ B2 Sat</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pre EQ B2 Place</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Pre EQ B2 Threshold</td><td></td><td>0</td><td>-60 to 0</td></tr>
+<tr><td>Pre EQ B2 Ratio</td><td></td><td>2</td><td>1 to 20</td></tr>
+<tr><td>Pre EQ B2 Attack</td><td></td><td>10</td><td>0.1 to 500</td></tr>
+<tr><td>Pre EQ B2 Release</td><td></td><td>100</td><td>1 to 2000</td></tr>
+<tr><td>Pre EQ B2 ThresholdB</td><td></td><td>-60</td><td>-60 to 0</td></tr>
+<tr><td>Pre EQ B2 RatioB</td><td></td><td>2</td><td>1 to 20</td></tr>
+<tr><td>Pre EQ B2 RangeB</td><td></td><td>0</td><td>-30 to 30</td></tr>
+<tr><td>Pre EQ B2 Onset</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pre EQ B2 LFO Rate</td><td></td><td>2</td><td>0.02 to 20</td></tr>
+<tr><td>Pre EQ B2 LFO Depth</td><td></td><td>0</td><td>0 to 1</td></tr>
+<tr><td>Pre EQ B2 Env Depth</td><td></td><td>0</td><td>-1 to 1</td></tr>
+<tr><td>Pre EQ B2 Freq</td><td></td><td>100</td><td>20 to 20000</td></tr>
+<tr><td>Pre EQ B2 Q</td><td></td><td>0.707</td><td>0.1 to 30</td></tr>
+<tr><td>Pre EQ B2 Type</td><td></td><td>0</td><td>0 to 8</td></tr>
+<tr><td>Pre EQ B2 Slope</td><td></td><td>12</td><td>1 to 97</td></tr>
+</tbody></table>
+﻿<p>An equalizer - EQ - turns parts of the frequency range up or down: more
 bass, less harshness, air on top. This one gives you up to ninety-six
 independent <em>bands</em> - grabbable handles on a curve, each in charge of
 its own region - drawn over a live picture of your actual sound. Every

@@ -29,6 +29,99 @@ CDOT_ROWS = {}
 for _k, _d in CLUSTER_DOTS.items():
     CDOT_ROWS.setdefault(_k.split(":")[0], set()).update(_d.keys())
 
+# QA-ManualPress M-3: generated Controls tables.  bsd-docs.json is written by
+# `BaySickDAW.exe --shot --docs` - every number in the tables comes from the
+# code, never from prose memory.  Blurbs are authored per control id in
+# control-blurbs.py and merged here.
+DOCS = {}
+_docs_path = os.path.join(MAN, "assets", "bsd-docs.json")
+if os.path.exists(_docs_path):
+    DOCS = json.load(open(_docs_path, encoding="utf-8"))
+BLURBS = {}
+_cb_path = os.path.join(MAN, "assets", "control-blurbs.py")
+if os.path.exists(_cb_path):
+    _cb_spec = importlib.util.spec_from_file_location("cb", _cb_path)
+    _cb = importlib.util.module_from_spec(_cb_spec)
+    _cb_spec.loader.exec_module(_cb)
+    BLURBS = getattr(_cb, "BLURBS", {})
+
+def _ct_num(v):
+    if v is None:
+        return ""
+    if isinstance(v, float) and v == int(v):
+        return str(int(v))
+    if isinstance(v, float):
+        return ("%.3f" % v).rstrip("0").rstrip(".")
+    return str(v)
+
+def _ct_clean(s):
+    # JUCE's default slider text renders 7 decimals; keep real formatted
+    # strings ("1.2k", "20 Hz") and de-noise the bare numbers.
+    if s is None:
+        return ""
+    s = str(s).strip()
+    try:
+        return _ct_num(float(s))
+    except ValueError:
+        return s
+
+_CT_PREFIX = re.compile(r"^(mixer|swing)_[A-Za-z0-9_]+ ")
+
+def _ct_name(name):
+    return _CT_PREFIX.sub("", str(name)).strip()
+
+def controls_table(code):
+    rows_out, seen = [], set()
+    for fname in FIGS[code].get('files') or []:
+        fig = os.path.splitext(os.path.basename(fname))[0]
+        for row in (DOCS.get(fig) or {}).get('controls', []):
+            rid = row.get('id') or ''
+            param = row.get('param') or {}
+            name = _ct_name(param.get('name') or row.get('label')
+                            or rid.replace('_', ' ').strip().title())
+            if not name:
+                continue
+            key = rid or (fig + '|' + name)
+            if key in seen:
+                continue
+            seen.add(key)
+            blurb = BLURBS.get(rid) or BLURBS.get(fig + '|' + name) or ''
+            choices = param.get('choices') or row.get('choices') or []
+            if choices:
+                rng = ", ".join(choices)
+            elif row.get('kind') == 'toggle' or param.get('kind') == 'toggle':
+                rng = "on / off"
+            elif row.get('minText') is not None:
+                rng = "%s to %s" % (row.get('minText'), row.get('maxText'))
+            elif param:
+                rng = "%s to %s" % (_ct_num(param.get('min')),
+                                    _ct_num(param.get('max')))
+            else:
+                rng = ""
+            default = _ct_clean(param.get('defaultText') or row.get('defText') or '')
+            if choices:
+                try:
+                    di = int(float(default))
+                    if 0 <= di < len(choices):
+                        default = choices[di]
+                except ValueError:
+                    pass
+            if row.get('minText') is not None and not choices:
+                rng = "%s to %s" % (_ct_clean(row.get('minText')),
+                                    _ct_clean(row.get('maxText')))
+            if (name, default, rng) in {(r[0], r[2], r[3]) for r in rows_out}:
+                continue   # per-strip clones document once
+            rows_out.append((name, blurb, default, rng))
+    if not rows_out:
+        return ""
+    body = "\n".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+        % tuple(html.escape(str(x)) for x in r) for r in rows_out)
+    return ('<h4 class="ctrlhead">Controls</h4>\n'
+            '<table class="controls"><thead><tr><th>Control</th>'
+            '<th>What it does</th><th>Default</th><th>Range</th></tr></thead>'
+            '<tbody>\n%s\n</tbody></table>\n' % body)
+
 reg = open(REG, encoding="utf-8").read()
 FIGS, ORDER = {}, []
 for m in re.finditer(r'^\| (Shell|Instrument|Mixing & Effects) \| (\d+) \| `([A-Z\-]+)` '
@@ -351,10 +444,11 @@ for g in GROUPS:
   <div class="l1">{blurb}
   <figure>{views}</figure>
   {table}</div>
-  <div class="l2">{chapter}</div>
+  <div class="l2">{controls}{chapter}</div>
   {l3}
 </section>""".format(code=code, name=html.escape(f['name']), crumbs=ch, blurb=bl,
                      views=l1_views(code), table=l1_table(code),
+                     controls=controls_table(code),
                      chapter=l2_chapter(code),
                      l3=('<div class="l3">%s</div>' % l3) if l3 else ''))
     bi = 0

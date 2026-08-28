@@ -195,3 +195,46 @@ the BaySickDrum Menu master documents the KIT PAD right-click shape
 (fromKit=true, per-drum MIDI Note/MIDI Learn rows) - not the window
 Menu dropdown; switched, parity 290x330 vs 289x330. Gate six zeros +
 four links x4 (seams interim, figures, anchor fix, fromKit fix).
+
+## 2026-08-28 - Task 4 - the --docs dump + control tables
+
+`--shot --docs` now writes Manuals/assets/bsd-docs.json: while shooting,
+save() walks every figure's component tree and emits each stamped
+control - componentID carries the param id on plain widgets, VKnob
+carries its own public paramId (it never uses componentID; a walk that
+misses that misses every effect-panel and pedal knob). Per row: the
+slider-rendered min/max/value strings (getTextFromValue - the SAME
+formatting the user sees, since getLabel() is empty on every parameter
+in this codebase and no param registers a textFromValue), the
+double-click return value as the default for param-less panel knobs,
+combo item names, tooltip, and percent bounds within the shot area (the
+Task 12 dot-anchoring seed). Ids resolve against the owning APVTS
+through a chain copied from the editor's history-labels walk: strip the
+vox{N}_/inst{N}_/plugtab{N}_ lane prefix, main apvts, then every rig
+tab's engine/namIr/pedals trees, then the vocal's embedded NAM-IR.
+Resolved rows add the registered name, true default (rendered through
+getText), skew, and AudioParameterChoice names. A small kExtraDocs
+supplement documents controls the walk cannot see (unstamped mixer
+width/mute + the EQ band's freq/Q/type/slope, which live on DragNumbers
+and SegmentRows) - numbers still resolved from code, never typed.
+
+Coverage: 20 figures, 310 rows; the six synth tabs sum to exactly the
+34 stamped sliders (per-tab visibility gating works). Known gaps for the
+blurb pass to extend (all UNSTAMPED controls, not dump bugs): synth/bass
+combos+toggle buttons, BaySickPitch's four knobs, the sfizz Inst
+editors, Audio Settings combos, Aria panel controls. Menu figures skip
+the dump by design (no table on a popup).
+
+generate-manual.py loads bsd-docs.json + a NEW control-blurbs.py
+(authored in Tasks 5-7, keyed by param id) and renders a Controls table
+at the TOP of every In Depth chapter: Control / What it does / Default /
+Range - enum choices by NAME (Filter 1 Type defaults "LP", range
+"LP, HP, BP, Notch" - the KBS index bug class, dead on arrival),
+slider-rendered range strings de-noised of JUCE's 7-decimal default,
+per-strip clone rows deduped, raw strip-prefix names stripped. 19
+tables render in the regenerated manual.
+
+Fix pass: the walk found only supplements at first - a headless root
+never gets setVisible(true) (snapshots paint regardless), so the
+visibility gate now exempts the root and prunes children only. Gate six
+zeros + four links x3 (dump, defText, root-visible fix).
