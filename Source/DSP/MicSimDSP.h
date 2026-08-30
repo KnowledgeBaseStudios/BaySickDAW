@@ -103,6 +103,13 @@ public:
     // Display names + tooltips for the 10 built-in models.  Editor calls
     // these to populate the dropdown + tooltip strings.
     static const char* modelDisplayName (int modelIndex);
+
+    // The SAME list, as a StringArray, for anything building a picker -
+    // parameter layouts included.  A mic rename is a trademark-sensitive
+    // edit (QA-ManualPress 2026-08-30): hand-copied lists meant one landed
+    // in the DSP table while two AudioParameterChoice arrays kept the old
+    // name.  Build from here and a rename lands once.
+    static juce::StringArray modelDisplayNames();
     static const char* modelTypicalUse  (int modelIndex);
 
 private:

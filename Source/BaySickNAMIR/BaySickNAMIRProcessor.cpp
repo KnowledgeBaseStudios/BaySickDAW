@@ -141,10 +141,7 @@ BaySickNAMIRProcessor::createLayout()
     layout.add (std::make_unique<C> (PID ("nam_micsim_mode", 1), "Mic Sim Mode",
         juce::StringArray { "Built-in", "User IR" }, 0));
     layout.add (std::make_unique<C> (PID ("nam_micsim_model", 1), "Mic Sim Model",
-        juce::StringArray { "Live Vocal Dynamic", "Broadcast Dynamic",
-                              "Workhorse Cardioid", "Vintage LDC '87",
-                              "Modern LDC", "Multi-Pattern LDC", "Tube LDC",
-                              "Pencil SDC", "Ribbon", "Kick Drum" }, 0));
+        MicSimDSP::modelDisplayNames(), 0));
     layout.add (std::make_unique<F> (PID ("nam_micsim_mix", 1), "Mic Sim Mix",
         juce::NormalisableRange<float> (0.0f, 100.0f, 1.0f), 100.0f));
 
@@ -170,10 +167,7 @@ BaySickNAMIRProcessor::createLayout()
     layout.add (std::make_unique<C> (PID ("nam_micsim_b_mode", 1), "Mic B Sim Mode",
         juce::StringArray { "Built-in", "User IR" }, 0));
     layout.add (std::make_unique<C> (PID ("nam_micsim_b_model", 1), "Mic B Sim Model",
-        juce::StringArray { "Live Vocal Dynamic", "Broadcast Dynamic",
-                              "Workhorse Cardioid", "Vintage LDC '87",
-                              "Modern LDC", "Multi-Pattern LDC", "Tube LDC",
-                              "Pencil SDC", "Ribbon", "Kick Drum" }, 0));
+        MicSimDSP::modelDisplayNames(), 0));
     layout.add (std::make_unique<F> (PID ("nam_micsim_b_mix", 1), "Mic B Sim Mix",
         juce::NormalisableRange<float> (0.0f, 100.0f, 1.0f), 100.0f));
     layout.add (std::make_unique<F> (PID ("nam_placement_b_distance_cm", 1), "Mic B Distance",

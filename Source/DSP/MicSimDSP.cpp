@@ -49,7 +49,7 @@ namespace
            {12000.0f, 0.7f, +2.0f }} },
 
         // VintageLDC87 (U87-style large diaphragm condenser)
-        { "Vintage LDC '87",
+        { "Condenser Large",
           "Studio lead vocal, classic LDC sound",
           {{   80.0f, 0.7f, +1.0f },
            { 1000.0f, 1.0f,  0.0f },
@@ -110,6 +110,14 @@ const char* MicSimDSP::modelDisplayName (int idx)
 {
     if (idx < 0 || idx >= (int) Model::kNumModels) return "(unknown)";
     return kModels[idx].displayName;
+}
+
+juce::StringArray MicSimDSP::modelDisplayNames()
+{
+    juce::StringArray out;
+    for (int i = 0; i < (int) Model::kNumModels; ++i)
+        out.add (kModels[i].displayName);
+    return out;
 }
 
 const char* MicSimDSP::modelTypicalUse (int idx)
