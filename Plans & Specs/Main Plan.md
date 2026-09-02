@@ -2403,6 +2403,26 @@ These four batches were planned in the original `lucky-discovering-tiger` Phase 
 
 ---
 
+### Phase 8 - Legal / Brand Safety (added 2026-09-02 at QA-Solstice open - see §9 seventieth Forks entry)
+
+Trademark exposure in what ships: engine and feature names, user-facing strings,
+factory content names, manual prose.  Batches here are release blockers
+regardless of feature state.  Jeff's slot ruling 2026-09-02 (item 3c): a new
+phase rather than Phase 6 (dead-code cleanup) or Phase 7 (docs / templates).
+
+#### **QA-Solstice: Harmless -> BaySickSolstice rename + shipped-name brand review** *(NEW - inserted 2026-09-02; Jeff-reported: "Harmless" is the name of Image-Line's additive synth - same name, same product category, shipping in a DAW; STATUS: OPEN)*
+**Plan file:** [`Plans & Specs/Batch Plans/solar-scrubbing-sparrow.md`](Batch Plans/solar-scrubbing-sparrow.md).
+**Bucket:** Players (the engine) + Meta (legal).
+- Items: (1) rename the additive engine in full - display name, engine-type id, APVTS state tag `HarmlessState` -> `BaySickSolsticeState`, param prefix `harm` -> `bso`, 18 `Harmless*` files + classes, `Source/Harmless/` -> `Source/BaySickSolstice/`, factory presets (152) + templates (24) regenerated, manual figure codes `BSHARM`/`BSHARMM` -> `BSSOL`/`BSSOLM`, every doc incl. history (Jeff item 3b), memory; (2) a semantic-read brand-safety review of every shipped string and preset / kit / template name, delivered as a per-item list for Jeff's calls (renames not pre-applied).
+- Scope: 410 tracked files mention the name.  Not in scope: the generic-named engine files (`AdditiveVoice`, `HarmonicEngine`, `SpectralModules`, `VisualizerScreen`), the on-screen `HARM` knob label (harmonics), the English adjective in comments, Jeff's user template.
+- Risk: medium - one build, one manual regeneration; saved projects with the old engine restore that tab engineless (verified `EngineRig.cpp:566`, no crash), no migration pre-v1 (Jeff item 1).
+- Dependencies: none.  QA-ManualPress stays open with its close held.
+- Effort: ~1 day.
+- Why this slot: release blocker; the root cause was the brand rule's own memory listing `Harmless` as brand-safe (2026-06-07), so the review half exists to catch the same class of miss across everything else that ships.
+- Commit cadence: per task, no approval gate (Jeff 2026-09-02, "no approval just go").
+
+---
+
 ## 5.5 Domain Coverage (batch → bucket map)
 
 > **STALE since 2026-05 (banner added 2026-07-31, Jeff's ruling c).**  This table has not been
@@ -3167,6 +3187,8 @@ before QA-UndoCoverage**; the G4 boundary R3 review + smoke (now carrying
 §B.31 + the §B.1-B.30 reconciliation pass) follows QA-Soundness per the
 run plan.  Bucket: see the §5 entry.  See §9 sixty-fifth + sixty-sixth
 Forks entries.
+
+**2026-09-02 - QA-Solstice** (Phase 8, Legal / Brand Safety) inserted after QA-ManualPress, ahead of any release cut; see §9 seventieth Forks entry.  (QA-EqPro and QA-ManualPress themselves were never added to this arrow or to §5 - recorded there.)
 
 ---
 
@@ -6798,3 +6820,16 @@ the structural-ops exclusion.  Two rulings, plus a process correction that goes 
 `swift-stampeding-caribou.md` composition note (order updated).
 **Verification:** the merged batch's own gates + the campaign; nothing walks at the G4
 boundary for this entry.
+
+### 2026-09-02 - QA-Solstice inserted as Phase 8 (Legal / Brand Safety): Harmless -> BaySickSolstice rename + shipped-name brand review (seventieth Forks entry)
+
+**Trigger:** Jeff, 2026-09-02: "We need to rename Harmless in full as apparently thats the original name of image-lines synth and you never fucking told me and that's a huge liability It will be BaySickSolstice."  Image-Line ships an additive synth named Harmless; ours is an additive synth named Harmless, inside a DAW.  Same name, same category.
+
+- **Root cause of the miss, owned.**  `feedback_no_brand_names_in_user_facing_strings.md` (memory, 2026-06-07) lists `Harmless` under "brand-safe substitutes".  The rule that exists to catch this recorded the collision as safe, so the QA-EffectsReview sweep, the QA-F BaySickVocal fold, and the 2026-08-31 mic-name pass all skipped it by design.  T3 rewrites that memory file; T4 exists so the same class of miss is checked against everything else that ships.
+- **Rulings (first round):** (1) saved projects with a Harmless tab + user patches stop loading, no migration - "This is fine"; (2a) Claude syncs `Documents/BaySickDAW` (copy the regenerated folder + templates, delete the old folder); (3b) scrub everything, history included - the Carry-Forward's frozen rule and the Work Log's append-only rule yield to a global noun rename; (4c) its own batch.  Brand sweep becomes a task in the new plan.  Dirty tree committed first (`b240712a`).
+- **Rulings (second round, Rule 5 pose):** (1a) four tasks; (2a) commit per task, no approval gate; (3c) new Phase 8 rather than Phase 6 / 7; (4a) T4 by semantic-read agent.
+- **Stated by Claude, no objection:** param prefix `bso`; figure codes `BSSOL` / `BSSOLM` (precedent: the 2026-08-13 map's `HARM` -> `BSHARM`); generic-named engine files untouched; the `HARM` knob label (harmonics) stays; `Templates/My Templates/Test Kit.xml` (user file) left alone.
+- **Drift recorded:** QA-EqPro (`natural-notching-narwhal`) and QA-ManualPress (`shutter-snapping-shrike`) were never added to §5, §6 or §9.  This entry is the first Main Plan batch record since QA-Layout (sixty-ninth entry, 2026-08-06).  Their rows are Jeff's call; not added here.
+
+**Plan files affected:** this entry; §5 Phase 8 (new) with the QA-Solstice row; §6 note; [`Batch Plans/solar-scrubbing-sparrow.md`](Batch Plans/solar-scrubbing-sparrow.md) + paired running notes (new).
+**Verification:** T1 build gate + the seven-scenario app smoke and T2's three manual checks (in the plan); `git grep Harmless` empty at T3; T4's list to Jeff.
