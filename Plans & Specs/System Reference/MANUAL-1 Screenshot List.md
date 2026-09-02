@@ -3771,7 +3771,7 @@ Analyze/Apply. Same badge-catching trick as Sitting 25.
 
 **SHOT-675 — BaySickNAM/IR, built-in mic model dropdown open**
 - Reach: MIC SIM A in Built-in mode > click the "Model" dropdown.
-- Visible: Ten rows — Live Vocal Dynamic, Broadcast Dynamic, Workhorse Cardioid, Vintage LDC '87, Modern LDC, Multi-Pattern LDC, Tube LDC, Pencil SDC, Ribbon, Kick Drum. The combo's tooltip carries "Built-in mic archetype: <name>. Typical use: <use>" for the current pick.
+- Visible: Ten rows — Live Vocal Dynamic, Broadcast Dynamic, Workhorse Cardioid, Condenser Large, Modern LDC, Multi-Pattern LDC, Tube LDC, Pencil SDC, Ribbon, Kick Drum. The combo's tooltip carries "Built-in mic archetype: <name>. Typical use: <use>" for the current pick.
 - Why separate: **The ten model names appear nowhere else in the UI.**
 
 **SHOT-676 — BaySickNAM/IR, Mic Placement A column**

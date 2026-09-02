@@ -150,7 +150,7 @@ an entry shows what it is good for.
 | **Live Vocal Dynamic** | Live vocals, sturdy stage mic | Cuts the low end back hard, pushes a strong 5 kHz presence forward, softens the very top. Cuts through a mix. |
 | **Broadcast Dynamic** | Podcasting, voiceover, smooth vocals | Nearly flat with a gentle 4 kHz lift and a softened top. Smooth and close-sounding. |
 | **Workhorse Cardioid** | Backing vocals, brighter lead vocals | Lean low end with a big 6 kHz lift and extra air. Bright and forward. |
-| **Vintage LDC '87** | Studio lead vocal, classic large-diaphragm sound | A touch of low warmth plus an open, lifted top end. The default "expensive studio vocal" flavor. |
+| **Condenser Large** | Studio lead vocal, classic large-diaphragm sound | A touch of low warmth plus an open, lifted top end. The default "expensive studio vocal" flavor. |
 | **Modern LDC** | Modern vocals, voiceover | Clean lows and a strong, very extended top. Detailed and modern. |
 | **Multi-Pattern LDC** | Versatile studio work, pop vocals | Slight low-mid trim with a wide air lift up top. Polished. |
 | **Tube LDC** | Character vocals, jazz, soul | Warm lows, a gentle low-mid dip, sweet upper-mids and top. Rich rather than clinical. |
