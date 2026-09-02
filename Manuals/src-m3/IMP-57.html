@@ -316,8 +316,8 @@ public:
     // Construct-or-swap the tab's engine and register it for audio dispatch.
     // Same-type + engine-already-live is a no-op returning the live engine
     // (the DrumPage swap guard, generalized).  Kind-specific engine menus:
-    //   Layers: Harmless / BaySickPlayer / BaySickSynth
-    //   Bass:   Harmless / BaySickPlayer / BaySickBass
+    //   Layers: BaySickSolstice / BaySickPlayer / BaySickSynth
+    //   Bass:   BaySickSolstice / BaySickPlayer / BaySickBass
     //   Drums:  BaySickPlayer / BaySickSynth
     //   Clips:  BaySickPlayer      Vox: BaySickVocal      Inst: Chain
     juce::AudioProcessor* setEngineType (TabKind k, int pageIndex,

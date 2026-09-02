@@ -12,7 +12,7 @@ fires.</p>
 registration and its offline-replay branch added in the same change, or it will
 play correctly while you listen and be missing from the exported file.</p>
 
-<p>Harmless's modulation curves are a different system in the same shape. Those
+<p>BaySickSolstice's modulation curves are a different system in the same shape. Those
 run across each <em>note</em> on a 0-1 phase; automation clips run on song
 position in ticks. The two are deliberately not shared.</p>
 
@@ -123,9 +123,9 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
         case TabKind::Drums:
         case TabKind::Clips:
             registerParamsOf (Target::MainEngine, tab.engine.get(), {});
-            // BLU-344: Harmless also carries non-parameter mod-editor targets.
+            // BLU-344: BaySickSolstice also carries non-parameter mod-editor targets.
             // No-op for the other engine types.
-            registerHarmlessModAutomation (kind, idx);
+            registerBaySickSolsticeModAutomation (kind, idx);
             break;
 
         case TabKind::Vox:
@@ -160,7 +160,7 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab&amp; tab)
 - Landing rule: any NEW lane class needs its live registration AND an `applyOfflineLaneValue` branch in the SAME pass, or it plays live and silently vanishes from exports.
 - Lane-id vocabulary (prefix grammar): Layers/Bass/Drums/Clips = bare engine paramID (no prefix); Vox = `vox&lt;N&gt;_&lt;paramId&gt;` (engine + its embedded NAM/IR share the prefix, tried in that order); Inst NAM/IR = `inst&lt;N&gt;_&lt;paramId&gt;`; pedal board = `inst&lt;N&gt;_pedals_&lt;slotUuid&gt;_&lt;suffix&gt;` (slot resolved BY UUID, never index — reorder carries the uuid); hosted Plugins tab = `plugtab&lt;N&gt;_vst_&lt;pluginParamId&gt;`. The digits-immediately-after-word parse is what keeps `vox_bus` / `inst_0` RACK prefixes from colliding (they carry an underscore first).
 - Offline replay filters (applyOfflineAutomationAt, mirrors the live in-processBlock replay): clipType == Automation, not muted, row audible, paramId non-empty, points non-empty, `global_tempo` excluded (the clock&#x27;s job), main-APVTS lanes excluded (they replay inside processBlock identically to live). Builder grid is uniform 4 beats per bar: `bar = songBeat / 4.0`; relative position `rel = (bar - clipStart) / len` clamped 0..1; the SAME shared point evaluator (`evalAutomationLaneAt`) serves live and offline.
-- Applicator writes the PARAMETER, not the control: `param-&gt;setValueNotifyingHost(jlimit(0,1,v01))`. For Harmless dual-part controls, both `part` ids get applicators (a control-driven applicator would collapse two lanes onto whichever part is bound).
+- Applicator writes the PARAMETER, not the control: `param-&gt;setValueNotifyingHost(jlimit(0,1,v01))`. For BaySickSolstice dual-part controls, both `part` ids get applicators (a control-driven applicator would collapse two lanes onto whichever part is bound).
 - Vocal capture gate: writes to the realtime-board set are VETOED while the strip records (`BaySickVocalProcessor::isCaptureGated` + `onIsStripRecording`); the lane is not consumed — the next tick after the veto clears applies normally.
 - Reader fallback returns 0.5f when the target cannot be resolved.
 - The offline write path is itself why `EngineRig::markEngineContentChanged` early-outs on `isNonRealtime()`: setValueNotifyingHost on the engine APVTS is the exact tree the freeze watcher listens to — a replay is not a user edit.</pre>

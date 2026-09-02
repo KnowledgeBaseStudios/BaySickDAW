@@ -264,7 +264,7 @@ time-signature markers placed on the Builder ruler (needed for SHOT-040).
 **SHOT-031 — Record dropdown > Global Record-Quantize submenu**
 - Reach: Record chevron > hover "Global Record-Quantize".
 - Visible: Eleven rows with a tick on the active one: Off, Line, Bar, Beat, 1/2 Beat, 1/3 Beat, Step, 1/2 Step, 1/3 Step, 1/4 Step, 1/6 Step.
-- Why separate: **This is the canonical eleven-label snap ladder** shared by the Builder, Piano Roll, Drum Kit and Harmless Mod Editor snap menus. Shoot it once here; every other snap menu footnotes back to it. ("Line" is a no-op in this particular menu.)
+- Why separate: **This is the canonical eleven-label snap ladder** shared by the Builder, Piano Roll, Drum Kit and BaySickSolstice Mod Editor snap menus. Shoot it once here; every other snap menu footnotes back to it. ("Line" is a no-op in this particular menu.)
 
 **SHOT-032 — Metronome button, off vs on**
 - Reach: Crop the metronome button, once off and once after clicking it on.
@@ -340,7 +340,7 @@ time-signature markers placed on the Builder ruler (needed for SHOT-040).
 ## SITTING 5 — Ribbon and contained-window chrome
 
 **SETUP:** A project with at least one of every tab type. Use the "+" slot to
-add: BaySickVocal (Vox), BaySickLiveInst (Inst), Harmless > Layers,
+add: BaySickVocal (Vox), BaySickLiveInst (Inst), BaySickSolstice > Layers,
 BaySickPlayer > Bass, BaySickPlayer > Audio Clips, BaySickDrums >
 BaySickPlayer, BaySickRustyDrums, and a VST3 instrument if any are installed.
 Lock one tab and freeze one tab before starting (needed for SHOT-048/049).
@@ -369,11 +369,11 @@ Lock one tab and freeze one tab before starting (needed for SHOT-048/049).
 
 **SHOT-050 — "+" add menu, open**
 - Reach: Click the narrow "+" slot at the right end of the ribbon.
-- Visible: Rows in locked order: BaySickVocal / BaySickLiveInst / BaySickGuitars / BaySickBasses / "VSTPlugin" (submenu) / "Harmless" (submenu) / BaySickSynth / "BaySickPlayer" (submenu) / BaySickBass / "BaySickDrums" (submenu) / BaySickRustyDrums. **Every entry names an ENGINE, never a page type** — the engine decides which tab it lands in.
+- Visible: Rows in locked order: BaySickVocal / BaySickLiveInst / BaySickGuitars / BaySickBasses / "VSTPlugin" (submenu) / "BaySickSolstice" (submenu) / BaySickSynth / "BaySickPlayer" (submenu) / BaySickBass / "BaySickDrums" (submenu) / BaySickRustyDrums. **Every entry names an ENGINE, never a page type** — the engine decides which tab it lands in.
 - Why separate: The main route to bring a page type back once its last instance is deleted. It is no longer the only one - the master menu bar's Edit > New Tab embeds this exact menu - but it is the one the ribbon puts in front of the user.
 
-**SHOT-051 — "+" menu > Harmless submenu**
-- Reach: "+" > hover "Harmless".
+**SHOT-051 — "+" menu > BaySickSolstice submenu**
+- Reach: "+" > hover "BaySickSolstice".
 - Visible: Two rows: "Layers" and "Bass".
 - Why separate: Side submenus exist only for engines that can live in more than one tab type; the pattern must be shown.
 - Variant of: SHOT-050
@@ -381,7 +381,7 @@ Lock one tab and freeze one tab before starting (needed for SHOT-048/049).
 **SHOT-052 — "+" menu > BaySickPlayer submenu**
 - Reach: "+" > hover "BaySickPlayer".
 - Visible: Three rows: "Layers", "Bass", "Audio Clips".
-- Why separate: Different destination list from Harmless.
+- Why separate: Different destination list from BaySickSolstice.
 - Variant of: SHOT-050
 
 **SHOT-053 — "+" menu > BaySickDrums submenu**
@@ -419,12 +419,12 @@ Lock one tab and freeze one tab before starting (needed for SHOT-048/049).
 
 **SHOT-059 — Layers instance dropdown (canonical shape)**
 - Reach: Add two or three Layers tabs, then click the chevron on the Layers ribbon slot.
-- Visible: FOUR sections — (1) every Layers instance by name with a tick on the active one, plus any "[L] " / " (missing)" decorations; sep; (2) a greyed "Pages:" heading followed by indented rows naming that instance's windows, built live (includes Pre/Post EQ rows); sep; (3) "Rename..." and "Delete" (Delete always enabled unless the tab is locked); sep; (4) engine-named add rows "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickSynth".
+- Visible: FOUR sections — (1) every Layers instance by name with a tick on the active one, plus any "[L] " / " (missing)" decorations; sep; (2) a greyed "Pages:" heading followed by indented rows naming that instance's windows, built live (includes Pre/Post EQ rows); sep; (3) "Rename..." and "Delete" (Delete always enabled unless the tab is locked); sep; (4) engine-named add rows "+ Add BaySickSolstice", "+ Add BaySickPlayer", "+ Add BaySickSynth".
 - Why separate: This is the canonical instance-dropdown shape — every other type's dropdown is a variation on these four sections.
 
 **SHOT-060 — Bass instance dropdown**
 - Reach: Click the chevron on the Bass ribbon slot.
-- Visible: Same four-section shape; add rows are "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickBass".
+- Visible: Same four-section shape; add rows are "+ Add BaySickSolstice", "+ Add BaySickPlayer", "+ Add BaySickBass".
 - Why separate: Different add-row set from Layers.
 - Variant of: SHOT-059
 
@@ -489,7 +489,7 @@ Lock one tab and freeze one tab before starting (needed for SHOT-048/049).
 - Variant of: SHOT-070
 
 **SHOT-072 — Title strip, centered engine wordmark**
-- Reach: Open a Layers tab running Harmless (or any player) and crop its title strip.
+- Reach: Open a Layers tab running BaySickSolstice (or any player) and crop its title strip.
 - Visible: The engine's name painted centered in its accent colour at 15pt bold with a symmetric bloom halo (glyph path stroked at 30% alpha then filled). Centered in the FREE SPAN between the left cluster and the right extras, not on the whole strip. When a wordmark is present the small grey page-title text is suppressed.
 - Variant of: SHOT-070
 
@@ -2562,7 +2562,7 @@ chapters instead of repeating them.
 that already has a MIDI mapping saved.
 
 **SHOT-462 — "Automate" right-click menu on any knob**
-- Reach: Right-click any knob or fader in BaySickSynth, BaySickBass, BaySickPlayer, Harmless or any ARIA panel (e.g. the OSC tab's TRANSPOSE knob).
+- Reach: Right-click any knob or fader in BaySickSynth, BaySickBass, BaySickPlayer, BaySickSolstice or any ARIA panel (e.g. the OSC tab's TRANSPOSE knob).
 - Visible: A popup: "Automate: <friendly parameter name>", "Type in value...", then the MIDI Learn items appended by the shared automation helper.
 - Why separate: **The doorway to automation and MIDI Learn for the entire app.**
 
@@ -2577,9 +2577,9 @@ that already has a MIDI mapping saved.
 - Visible: Modal titled "Set <parameter name>"; prompt "Enter a new value:" with a second line "Range: <min> - <max>" formatted in the parameter's own units; a text field pre-filled with the current value; OK (Return) and Cancel (Escape).
 
 **SHOT-465 — Knob value popup while dragging**
-- Reach: Click and hold-drag any knob in Harmless or BaySickPlayer (these knobs have NO printed value box).
+- Reach: Click and hold-drag any knob in BaySickSolstice or BaySickPlayer (these knobs have NO printed value box).
 - Visible: A small floating value bubble beside the knob showing the current value in its own units.
-- Why separate: **BaySickSynth and BaySickBass knobs carry a permanent numeric value box under the knob; Harmless and BaySickPlayer knobs do not** — the drag bubble is their only readout, and a reader will not know it exists. (The ARIA variant shows an integer 0-127 — SHOT-584.)
+- Why separate: **BaySickSynth and BaySickBass knobs carry a permanent numeric value box under the knob; BaySickSolstice and BaySickPlayer knobs do not** — the drag bubble is their only readout, and a reader will not know it exists. (The ARIA variant shows an integer 0-127 — SHOT-584.)
 
 ---
 
@@ -2813,223 +2813,223 @@ only). BaySickBass is a flat row (Bass only).
 
 ---
 
-## SITTING 20 — Harmless
+## SITTING 20 — BaySickSolstice
 
 **Design size for framing:** 1039x421 content (window minimum 1047x455) — one
 dense screen with **no tabs and no Basic/Advanced split.** Accent #FF6600
-(orange). Reach: Ribbon "+" > Harmless > Layers (or > Bass).
+(orange). Reach: Ribbon "+" > BaySickSolstice > Layers (or > Bass).
 
-Harmless has ~15 framed sections in one window, each a rounded recessed panel
+BaySickSolstice has ~15 framed sections in one window, each a rounded recessed panel
 with a small dim uppercase header at its top-left and tiny labels beneath every
 knob. Each needs a labelled close-up or the atlas is unusable.
 
-**SHOT-508 — Harmless, window title strip + Preset button**
-- Reach: Shoot the top strip of the Harmless window.
-- Visible: Centred "Harmless" in orange (#FF6600) with bloom halo; the Preset button; window controls.
+**SHOT-508 — BaySickSolstice, window title strip + Preset button**
+- Reach: Shoot the top strip of the BaySickSolstice window.
+- Visible: Centred "BaySickSolstice" in orange (#FF6600) with bloom halo; the Preset button; window controls.
 - Variant of: SHOT-466
 
-**SHOT-509 — Harmless, full editor**
-- Reach: Ribbon "+" > Harmless > Layers. A wide short window opens showing the whole editor at once.
+**SHOT-509 — BaySickSolstice, full editor**
+- Reach: Ribbon "+" > BaySickSolstice > Layers. A wide short window opens showing the whole editor at once.
 - Visible: Four-column dense layout on a dark chassis. TOP BAND: left column with OUTPUT / TREMOLO + ROUTING / VIBRATO-LEGATO framed sections; a middle narrow UNISON column; a right column with FILTER 1 + ADSR, FILTER 2 + ADSR and a full-width TIMBRE row. BOTTOM BAND: a left stack of PITCH + LFO MOD, STRUM + FX, AMP ENV/PHASE and BLUR/PRISM strips beside the XYZ/MOD pad; then the SPECTROGRAM column; then the Mod Editor filling the right-hand third.
 
-**SHOT-510 — Harmless, OUTPUT section**
+**SHOT-510 — BaySickSolstice, OUTPUT section**
 - Reach: Shoot the top-left section headed "OUTPUT".
 - Visible: Header "OUTPUT"; VOL knob, PAN knob (bipolar), then four buttons in a row: VEL, CUT SELF, SAME PITCH, and the auto-gain button reading "AG: REL".
 
-**SHOT-511 — Harmless, OUTPUT with AG: ABS**
+**SHOT-511 — BaySickSolstice, OUTPUT with AG: ABS**
 - Reach: OUTPUT section > click the button reading "AG: REL".
 - Visible: The same button now reading "AG: ABS" in its toggled-on state.
 - Why separate: The button TEXT changes between two modes.
 - Variant of: SHOT-510
 
-**SHOT-512 — Harmless, OUTPUT with CUT ALL**
+**SHOT-512 — BaySickSolstice, OUTPUT with CUT ALL**
 - Reach: OUTPUT section > click the button reading "SAME PITCH".
 - Visible: The button now reading "CUT ALL", toggled on.
 - Variant of: SHOT-510
 
-**SHOT-513 — Harmless, TREMOLO section**
+**SHOT-513 — BaySickSolstice, TREMOLO section**
 - Reach: Shoot the section headed "TREMOLO" in the top-left column.
 - Visible: Header; a waveform ICON BUTTON labelled WAVE; then DEPTH, SPEED and GAP knobs with labels.
 
-**SHOT-514 — Harmless, waveform icon button, all four shapes**
+**SHOT-514 — BaySickSolstice, waveform icon button, all four shapes**
 - Reach: Click the TREMOLO WAVE button repeatedly — each click cycles sine > saw > square > triangle. Capture all four.
 - Visible: A small dark rounded box with an orange stroked waveform glyph inside: sine curve, then a two-ramp saw, then a square step, then a triangle.
-- Why separate: **The same icon-button widget appears four times in Harmless** (Part A shape, Part B shape, Tremolo wave, Vibrato wave) and it is a cycle-on-click control with **no visible arrow** — a reader cannot tell it is clickable from one frame.
+- Why separate: **The same icon-button widget appears four times in BaySickSolstice** (Part A shape, Part B shape, Tremolo wave, Vibrato wave) and it is a cycle-on-click control with **no visible arrow** — a reader cannot tell it is clickable from one frame.
 - Variant of: SHOT-513
 
-**SHOT-515 — Harmless, ROUTING section**
+**SHOT-515 — BaySickSolstice, ROUTING section**
 - Reach: Shoot the section headed "ROUTING" beside TREMOLO.
 - Visible: Header over a single packed row of six small knobs labelled SUB, PROT, CLIP, FX, VOL, ENV. No LEDs, no readouts.
 
-**SHOT-516 — Harmless, VIBRATO / LEGATO section**
+**SHOT-516 — BaySickSolstice, VIBRATO / LEGATO section**
 - Reach: Shoot the section headed "VIBRATO / LEGATO" at the bottom of the top-left column.
 - Visible: Header; a waveform icon button labelled WAVE; DEPTH, SPEED, ENV, GLIDE, LIMIT knobs with labels; a LEGATO switch button.
 
-**SHOT-517 — Harmless, UNISON column**
+**SHOT-517 — BaySickSolstice, UNISON column**
 - Reach: Shoot the narrow full-height section headed "UNISON" between the left and right top columns.
 - Visible: Header; VOICES knob; a full-width chicken-head type selector labelled TYPE; an ALT switch button; then a row of PAN, PITCH, PHASE knobs with labels.
 
-**SHOT-518 — Harmless, FILTER 1 + ADSR row**
+**SHOT-518 — BaySickSolstice, FILTER 1 + ADSR row**
 - Reach: Shoot the top row of the right-hand column, headed "FILTER 1 + ADSR".
 - Visible: Header; on the left the filter row on its own recessed panel — a type combo reading LP, then ENV, FREQ, RES, KB knobs each with a small label; on the right four knobs ATK, DEC, SUS, REL.
 
-**SHOT-519 — Harmless, filter type combo open**
+**SHOT-519 — BaySickSolstice, filter type combo open**
 - Reach: Click the type combo in the FILTER 1 row.
 - Visible: LP, HP, BP, Notch.
 - Variant of: SHOT-518
 
-**SHOT-520 — Harmless, FILTER 2 + ADSR row**
+**SHOT-520 — BaySickSolstice, FILTER 2 + ADSR row**
 - Reach: Shoot the second row of the right-hand column, headed "FILTER 2 + ADSR".
 - Visible: Identical shape to Filter 1 — type combo, ENV / FREQ / RES / KB knobs, and ATK / DEC / SUS / REL knobs.
 - Why separate: Two independent filters that look the same; the atlas must show both so a reader can tell which section they are pointing at.
 - Variant of: SHOT-518
 
-**SHOT-521 — Harmless, TIMBRE row, Part A active**
+**SHOT-521 — BaySickSolstice, TIMBRE row, Part A active**
 - Reach: Shoot the full-width bottom row of the right-hand column, headed "TIMBRE", with the A button lit.
 - Visible: Header; A and B switch buttons (A lit); two waveform icon buttons labelled PART A and PART B; then knobs MIX, VOICE A, VOICE B, BROWN, F1 OFS, F2 OFS, A MASK, B MASK, each labelled beneath.
 
-**SHOT-522 — Harmless, TIMBRE row, Part B active**
+**SHOT-522 — BaySickSolstice, TIMBRE row, Part B active**
 - Reach: TIMBRE row > click the "B" button.
 - Visible: B lit, A unlit, and the shared knobs elsewhere in the editor (BROWN, BLUR, TIME, HARM, PRISM, MODE, PLUCK, MASK and the BLUR pluck button) jump to Part B's values.
 - Why separate: **A/B is the single most confusing thing in this editor** — the same knobs edit different parameters depending on this button, and **both parts sound simultaneously** (timbre_blend crossfades them; part_sel is view state no DSP reads). The manual cannot explain it without both pictures.
 - Variant of: SHOT-521
 
-**SHOT-523 — Harmless, PITCH section**
+**SHOT-523 — BaySickSolstice, PITCH section**
 - Reach: Shoot the section headed "PITCH" in the bottom band's left stack, top row.
 - Visible: Header; FREQ knob, DETUNE knob, a chicken-head FRAC selector, and two small switch buttons OCT and Hz.
 
-**SHOT-524 — Harmless, PITCH FREQ readout with OCT engaged**
+**SHOT-524 — BaySickSolstice, PITCH FREQ readout with OCT engaged**
 - Reach: PITCH section > click OCT, then drag the FREQ knob and hold.
 - Visible: The FREQ drag popup reading in octaves (e.g. "+1 oct"); the drag now snaps in octave steps.
 - Why separate: OCT and Hz change the FREQ knob's UNITS and DRAG BEHAVIOUR without changing anything visible on the knob itself.
 - Variant of: SHOT-523
 
-**SHOT-525 — Harmless, PITCH FREQ readout with Hz engaged**
+**SHOT-525 — BaySickSolstice, PITCH FREQ readout with Hz engaged**
 - Reach: PITCH section > click Hz, then drag the FREQ knob and hold.
 - Visible: The FREQ drag popup reading an absolute frequency in Hz / kHz.
 - Variant of: SHOT-523
 
-**SHOT-526 — Harmless, LFO MOD section**
+**SHOT-526 — BaySickSolstice, LFO MOD section**
 - Reach: Shoot the section headed "LFO MOD" beside PITCH.
 - Visible: Header; RATE knob, a chicken-head SHAPE knob, a TEMPO switch button, then VEL, VOL, PITCH knobs with labels.
 
-**SHOT-527 — Harmless, LFO MOD with TEMPO engaged**
+**SHOT-527 — BaySickSolstice, LFO MOD with TEMPO engaged**
 - Reach: LFO MOD > click TEMPO, then hover/drag the RATE knob.
 - Visible: TEMPO lit; the RATE popup reading a beat length ("1/8 beats" ... "32 beats") rather than a plain number.
 - Why separate: The rate readout switches between beats and seconds on this toggle.
 - Variant of: SHOT-526
 
-**SHOT-528 — Harmless, STRUM section**
+**SHOT-528 — BaySickSolstice, STRUM section**
 - Reach: Shoot the section headed "STRUM" in the bottom band's second row.
 - Visible: Header; a chicken-head DIR selector, TIME knob, TNS knob, each labelled.
 
-**SHOT-529 — Harmless, FX section**
+**SHOT-529 — BaySickSolstice, FX section**
 - Reach: Shoot the section headed "FX - PLUCK / PHASER / EQ" beside STRUM.
 - Visible: Header; PLUCK knob; a BLUR switch button; then MIX, DEPTH, RATE, WIDTH, OFS, MASK and EQ knobs each with a small label.
 
-**SHOT-530 — Harmless, AMP ENV / PHASE section**
+**SHOT-530 — BaySickSolstice, AMP ENV / PHASE section**
 - Reach: Shoot the section headed "AMP ENV / PHASE" in the bottom band's left half.
 - Visible: Header; six knobs labelled ATK, DEC, SUS, REL, START, RAND.
 
-**SHOT-531 — Harmless, BLUR / PRISM section**
+**SHOT-531 — BaySickSolstice, BLUR / PRISM section**
 - Reach: Shoot the section headed "BLUR / PRISM" below AMP ENV.
 - Visible: Header; five controls labelled BLUR, TIME, HARM, PRISM and a chicken-head MODE selector.
 
-**SHOT-532 — Harmless, XYZ / MOD pad**
+**SHOT-532 — BaySickSolstice, XYZ / MOD pad**
 - Reach: Shoot the tall panel between the left knob stack and the spectrogram; it carries its own "MOD" caption.
 - Visible: A recessed pad with a centre crosshair (one horizontal, one vertical hairline), an orange dot with a soft halo at centre, the word "MOD" in the top-left corner, and below the pad three knobs labelled X, Y, Z.
 
-**SHOT-533 — Harmless, XYZ pad with the dot dragged off-centre**
+**SHOT-533 — BaySickSolstice, XYZ pad with the dot dragged off-centre**
 - Reach: Click and drag inside the MOD pad toward a corner.
 - Visible: The orange dot at the new position, and the X and Y knobs beneath rotated to match.
 - Why separate: The pad-drives-knobs link is invisible at rest, and the default centred dot reads as decoration.
 - Variant of: SHOT-532
 
-**SHOT-534 — Harmless, SPECTROGRAM idle**
+**SHOT-534 — BaySickSolstice, SPECTROGRAM idle**
 - Reach: Shoot the column headed "SPECTROGRAM" with no notes playing.
 - Visible: Header; a pitch-black panel with three faint horizontal grid lines and a thin border — and nothing else.
 
-**SHOT-535 — Harmless, SPECTROGRAM with a sustained chord**
-- Reach: Hold a chord on the piano-roll keyboard (or a MIDI keyboard) while the Harmless window is open, and shoot the SPECTROGRAM column.
+**SHOT-535 — BaySickSolstice, SPECTROGRAM with a sustained chord**
+- Reach: Hold a chord on the piano-roll keyboard (or a MIDI keyboard) while the BaySickSolstice window is open, and shoot the SPECTROGRAM column.
 - Visible: Hundreds of thin orange vertical bars of varying height across the panel — one per harmonic partial — with peak-fall decay.
 - Why separate: **An empty black box and a wall of orange bars are the same widget**; a beginner shown only the idle state will think it is broken.
 - Variant of: SHOT-534
 
-**SHOT-536 — Harmless, Mod Editor, Envelope source (default)**
-- Reach: Shoot the right-hand third of the Harmless window. It opens on target 1 with the Envelope source.
+**SHOT-536 — BaySickSolstice, Mod Editor, Envelope source (default)**
+- Reach: Shoot the right-hand third of the BaySickSolstice window. It opens on target 1 with the Envelope source.
 - Visible: Top row — two dropdowns side by side: Articulations (target) left, Modulations (source) right. Second row — an "ENV" tab button, then CURVE / STEP / SNAP tool buttons, then FREEZE / + / - buttons and a snap-division dropdown. Middle — the curve graph: dark panel, vertical grid lines whose density follows the chosen division, three horizontal quarter lines plus a brighter centre line, an orange curve with a glow and round orange control-point dots. Below the graph — a horizontal scroll bar. Bottom strip — DEPTH knob, LENGTH knob, TEMPO button, SPD, TNS, SKEW, PW knobs with small labels beneath.
 - Note: The Mod Editor is effectively a second editor inside the first, with its own undo (Ctrl+Z / Ctrl+Y while focused) and its own right-click delete on curve points (right-clicking a middle point deletes it; the two boundary points are protected and silently refuse).
 
-**SHOT-537 — Harmless, Mod Editor, Articulations dropdown open**
+**SHOT-537 — BaySickSolstice, Mod Editor, Articulations dropdown open**
 - Reach: Click the LEFT dropdown at the top of the Mod Editor.
 - Visible: The 16 modulation targets in order: Volume, Pan, Pitch, Timbre Blend, Pluck Decay, Prism Amount, Blur Harm, Filter 1 Cutoff, Filter 2 Cutoff, Filter 1 Resonance, Filter 2 Resonance, Phaser Mix, Phaser Width, Unison Pitch Thickness, Part A Level, Part B Level.
 
-**SHOT-538 — Harmless, Mod Editor, Modulations dropdown open**
+**SHOT-538 — BaySickSolstice, Mod Editor, Modulations dropdown open**
 - Reach: Click the RIGHT dropdown at the top of the Mod Editor.
 - Visible: The 7 sources: Envelope, LFO, Velocity, Keyboard, Mod X, Mod Y, Mod Z.
 
-**SHOT-539 — Harmless, Mod Editor with LFO source**
+**SHOT-539 — BaySickSolstice, Mod Editor with LFO source**
 - Reach: Set the Modulations dropdown to "LFO".
 - Visible: A SHAPE knob appears in the bottom strip (hidden for every other source); LENGTH and TEMPO stay; the graph draws the selected LFO waveform as a continuous orange trace with **NO draggable dots.**
 - Why separate: The bottom strip gains a control and the graph stops being editable — a fundamentally different screen.
 - Variant of: SHOT-536
 
-**SHOT-540 — Harmless, Mod Editor with Velocity source**
+**SHOT-540 — BaySickSolstice, Mod Editor with Velocity source**
 - Reach: Set the Modulations dropdown to "Velocity" (Keyboard / Mod X / Mod Y / Mod Z look the same).
 - Visible: LENGTH, TEMPO and SHAPE are ALL GONE from the bottom strip — only DEPTH, SPD, TNS, SKEW, PW remain; the curve graph is still editable.
 - Why separate: Three controls disappear; a reader comparing against the default will think something is broken.
 - Variant of: SHOT-536
 
-**SHOT-541 — Harmless, Mod Editor, STEP mode curve**
+**SHOT-541 — BaySickSolstice, Mod Editor, STEP mode curve**
 - Reach: Mod Editor > click STEP, then click a few times inside the graph to add points.
 - Visible: A stair-stepped orange curve holding each value until the next point, versus the smooth curve CURVE mode produces from identical clicks.
 - Variant of: SHOT-536
 
-**SHOT-542 — Harmless, Mod Editor, SNAP on with division dropdown open**
+**SHOT-542 — BaySickSolstice, Mod Editor, SNAP on with division dropdown open**
 - Reach: Mod Editor > click SNAP, then click the division dropdown at the right end of the tool row.
 - Visible: SNAP lit; the dropdown listing the app's unified snap divisions; behind it the graph's vertical grid redrawn at the chosen density.
 
-**SHOT-543 — Harmless, Mod Editor zoomed in**
+**SHOT-543 — BaySickSolstice, Mod Editor zoomed in**
 - Reach: Mod Editor > click "+" two or three times.
 - Visible: A small "4x" (or "2x" / "8x") indicator in the top-right corner of the graph; the scroll bar beneath now has a short thumb that can be dragged to pan; grid lines further apart with finer rungs visible.
 - Why separate: The zoom indicator and the live scroll thumb exist only above 1x.
 - Variant of: SHOT-536
 
-**SHOT-544 — Harmless, Mod Editor with FREEZE engaged**
+**SHOT-544 — BaySickSolstice, Mod Editor with FREEZE engaged**
 - Reach: Mod Editor > click FREEZE.
 - Visible: FREEZE lit; clicks and drags inside the graph do nothing — no new points appear.
 - Why separate: A locked editor that silently ignores clicks is exactly the state a beginner needs told about.
 - Variant of: SHOT-536
 
-**SHOT-545 — Harmless, Mod Editor bottom knob strip close-up**
+**SHOT-545 — BaySickSolstice, Mod Editor bottom knob strip close-up**
 - Reach: Shoot only the bottom ~50px of the Mod Editor with the Envelope source selected.
 - Visible: DEPTH knob, LENGTH knob, TEMPO button, the SHAPE slot (empty for Envelope), SPD, TNS, SKEW, PW knobs, each with its label centred beneath; labels overhang their knobs into the gaps.
 - Why separate: Eight controls at 16px with 8pt labels — unreadable in the full-editor shot.
 
-**SHOT-546 — Harmless, right-click menu on a modulatable knob**
+**SHOT-546 — BaySickSolstice, right-click menu on a modulatable knob**
 - Reach: Right-click the VOL knob in the OUTPUT section (or any of the 16 registered targets listed in SHOT-537).
 - Visible: "Automate: <friendly parameter name>", "Type in value...", **"Modulate envelope..."**, then the MIDI Learn items.
 - Why separate: The third item appears only on knobs the mod matrix knows about — this is how a knob gets into the Mod Editor.
 
-**SHOT-547 — Harmless, right-click menu on a NON-modulatable knob**
+**SHOT-547 — BaySickSolstice, right-click menu on a NON-modulatable knob**
 - Reach: Right-click a knob that is not a registered target, e.g. TREMOLO DEPTH or STRUM TIME.
 - Visible: "Automate: ...", "Type in value..." and the MIDI Learn items but **NO "Modulate envelope..." row.**
 - Why separate: The missing row is the whole point — a reader needs both menus side by side to learn which knobs can be enveloped.
 - Variant of: SHOT-546
 
-**SHOT-548 — Harmless, Preset menu open**
-- Reach: Click "Preset" on the Harmless window's title strip.
+**SHOT-548 — BaySickSolstice, Preset menu open**
+- Reach: Click "Preset" on the BaySickSolstice window's title strip.
 - Visible: One cascading submenu per genre folder (e.g. Modern Hip-Hop, Psytrance), a My Presets folder, a separator, "Save preset..." and **"Init (reset to default)"**.
-- Why separate: Harmless's menu carries an "Init" row the other engines' preset menus do not have.
+- Why separate: BaySickSolstice's menu carries an "Init" row the other engines' preset menus do not have.
 - Variant of: SHOT-495
 
-**SHOT-549 — Harmless, Preset menu with no presets installed**
-- Reach: Click Preset on a machine/profile where the Harmless preset folder is empty.
+**SHOT-549 — BaySickSolstice, Preset menu with no presets installed**
+- Reach: Click Preset on a machine/profile where the BaySickSolstice preset folder is empty.
 - Visible: A greyed, non-clickable "(no presets installed)" row above the separator, then "Save preset..." and "Init (reset to default)".
 - Variant of: SHOT-548
 
-**SHOT-550 — Harmless, Save Preset dialog**
-- Reach: Harmless Preset button > "Save preset...".
+**SHOT-550 — BaySickSolstice, Save Preset dialog**
+- Reach: BaySickSolstice Preset button > "Save preset...".
 - Visible: Modal "Save Preset", prompt "Enter a name:", text field pre-filled "My Preset", Save (bound to Enter) and Cancel.
 - Why separate: Different prompt wording from the synth's ("Enter a name:" vs "Enter preset name:") and Save is Return-bound here.
 - Variant of: SHOT-497
@@ -3914,7 +3914,7 @@ surfaces SHOT-686, 687, 688, 689, 690, 693, 703 and 705 together.
 - Variant of: SHOT-573
 
 **SHOT-697 — Engine preset read failure alert (shared)**
-- Reach: From BaySickSynth, BaySickBass, Harmless or BaySickPlayer, pick a preset whose XML file is corrupt or came from another engine.
+- Reach: From BaySickSynth, BaySickBass, BaySickSolstice or BaySickPlayer, pick a preset whose XML file is corrupt or came from another engine.
 - Visible: Warning-icon alert "Load Preset" reading "That preset file could not be read." with OK.
 - Why separate: All four engines share this one alert; needs a damaged file to trigger.
 

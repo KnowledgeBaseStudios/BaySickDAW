@@ -7,9 +7,9 @@ resonance knob anywhere else, by design. Cutoff runs logarithmically over
 fraction of the played note's position to the cutoff so patches stay evenly
 bright across the range; velocity tracking does the same with playing force.
 BaySickPlayer carries the same filter over its samples, plus a bit-reduction
-stage for lo-fi grit. The two Harmless filters are a separate implementation
+stage for lo-fi grit. The two BaySickSolstice filters are a separate implementation
 inside the additive engine - same musical controls, different machinery (see
-the Harmless topic).</p>
+the BaySickSolstice topic).</p>
 
 <div class="codeblock"><div class="codehead">Source\SynthFilter.cpp (custom TPT state-variable filter used by BaySickSynth/BaySickBass voices)</div><pre><code>// SynthFilter::processSample / calcCoeffs -- Source/SynthFilter.cpp
 float SynthFilter::processSample (float in)

@@ -85,11 +85,11 @@ so reshaping a crop box never moves a dot.
 | Instrument | 10 | `BSBAS` | BaySickBasses | Sub | `BSPDL` | `BaySickBasses.png` | full |
 | Instrument | 11 | `BSGBM` | BaySickGuitars/Basses Menu | Sub | `BSPDL` `BSGTR` `BSBAS` | `BaySickGuitars & Basses Menu.png` | full |
 | Instrument | 12 | `BSNAM` | BaySickNAM/IR | Sub | `BSPDL` `BSGTR` `BSBAS` `BSV` | `BaySickNAMIR.png` | full |
-| Instrument | 13 | `BSHARM` | Harmless | Main | - | `Harmless.png` | full |
-| Instrument | 14 | `BSHARMM` | Harmless Menu | Sub | `BSHARM` | `BaySickSynth-BaySickPlayer-Harmless Menu.png` | full |
+| Instrument | 13 | `BSSOL` | BaySickSolstice | Main | - | `BaySickSolstice.png` | full |
+| Instrument | 14 | `BSSOLM` | BaySickSolstice Menu | Sub | `BSSOL` | `BaySickSynth-BaySickPlayer-BaySickSolstice Menu.png` | full |
 | Instrument | 15 | `BSSB` | BaySickSynth/Bass Family | Main | - | `BaySickSynth FLT.png` + `BaySickBass Titlebar Crop.png` | crop |
 | Instrument | 16 | `BSSBT` | BaySickSynth/Bass Titlebar | Sub | `BSSB` | `BaySickSynth FLT.png` + `BaySickBass Titlebar Crop.png` | crop |
-| Instrument | 17 | `BSSBM` | BaySickSynth/Bass Menu | Sub | `BSSB` | `BaySickSynth-BaySickPlayer-Harmless Menu.png` + `BaySickBass Menu Updated.png`  | full |
+| Instrument | 17 | `BSSBM` | BaySickSynth/Bass Menu | Sub | `BSSB` | `BaySickSynth-BaySickPlayer-BaySickSolstice Menu.png` + `BaySickBass Menu Updated.png`  | full |
 | Instrument | 18 | `BSSBOSC` | BaySickSynth/Bass Oscillator | Sub | `BSSB` | `BaySickSynth OSC.png` | crop |
 | Instrument | 19 | `BSSBOENV` | BaySickSynth/Bass Oscillator Envelope | Sub | `BSSB` | `BaySickSynth OSC ENV.png` | crop |
 | Instrument | 20 | `BSSBFLT` | BaySickSynth/Bass Filter | Sub | `BSSB` | `BaySickSynth FLT.png` | crop |
@@ -97,7 +97,7 @@ so reshaping a crop box never moves a dot.
 | Instrument | 22 | `BSSBLFO` | BaySickSynth/Bass LFO | Sub | `BSSB` | `BaySickSynth LFO.png` | crop |
 | Instrument | 23 | `BSSBMOD` | BaySickSynth/Bass Mod | Sub | `BSSB` | `BaySickSynth MOD.png` | crop |
 | Instrument | 24 | `BSP` | BaySickPlayer | Main | - | `BaySickPlayer.png` | full |
-| Instrument | 25 | `BSPM` | BaySickPlayer Menu | Sub | `BSP` | `BaySickSynth-BaySickPlayer-Harmless Menu.png`  | full |
+| Instrument | 25 | `BSPM` | BaySickPlayer Menu | Sub | `BSP` | `BaySickSynth-BaySickPlayer-BaySickSolstice Menu.png`  | full |
 | Instrument | 26 | `BSDRUMS` | BaySickDrums | Main | - | `Drum Kit.png` | full |
 | Instrument | 27 | `BSDM` | BaySickDrums Menu | Sub | `BSDRUMS` | `BaySickDrum Menu.png` | full |
 | Instrument | 28 | `BSRDTTL` | BaySickRustyDrums | Main | - | `BaySickRustyDrums Main.png` | crop |
@@ -208,7 +208,7 @@ rather than erroring when the tab has no instrument.
 
 Eight further entries were checked and cleared. `TABBAR-6`/`TABBAR-7`/`TABBAR-9` name
 ribbon slots after the pages they open, `EXP-10` and `FILE-7` quote on-screen
-text verbatim, `KEYS-1` lists the category names, and `BSHARM-25` / `BSNAM-12`
+text verbatim, `KEYS-1` lists the category names, and `BSSOL-25` / `BSNAM-12`
 deliberately contrast themselves AGAINST another surface - which is the point of
 those entries, not a misfiling.
 
@@ -292,7 +292,7 @@ put a number on the `Menu` button of a window, a button `CHR-1` already teaches
 once for every window. A dot whose caption is "Menu - see the chrome figure" is
 the table telling you what your own eyes already say.
 
-All 21 struck: `BLD-1` `MIX-1` `PR-1` `EQ-1` `FX-1` `FXI-1` `VUMTR-1` `BSHARM-1`
+All 21 struck: `BLD-1` `MIX-1` `PR-1` `EQ-1` `FX-1` `FXI-1` `VUMTR-1` `BSSOL-1`
 `BSP-1` `BSSBOSC-1` `BSGTR-1` `BSBAS-10` `BSRDMAIN-1` `BSV-1` `BSVC-14` `BSPIT-21`
 `BSA-17` `BSNAM-1` `BSPDL-1` `ANLZ-1` `BSPLUG-1`. The variants that also named
 the logo or the strip preset picker are the same class - those are `CHR-2` and
@@ -303,17 +303,17 @@ It moved into the figure blurbs - plain prose above the picture, unnumbered:
 which entries `BLD`'s Menu carries, `MIX`'s VU entries, `BSV`'s four editors,
 `BSPDL`'s NAM/IR route, and `VUMTR`'s calibration-only menu.
 
-`FRAME-17` and `BSHARM-2` are the same family but were NOT in this ruling; they
+`FRAME-17` and `BSSOL-2` are the same family but were NOT in this ruling; they
 stand until Jeff says otherwise.
 
 **Callouts: 557.** Markers on pictures: 539. Retired to date: 43.
 
-### FRAME-17 and BSHARM-2 struck, and the whole set renumbered - 2026-08-13
+### FRAME-17 and BSSOL-2 struck, and the whole set renumbered - 2026-08-13
 
 The two same-family strays went the way of the 21 `Menu` rows: `FRAME-17` was
-"a contained window - see CHR" and `BSHARM-2` was the strip preset picker, taught
-once at `CHR-4`. BSHARM-2's presets-are-how-you-learn line became the Manual 2
-Presets section's opening prose and a line in the BSHARM figure blurb.
+"a contained window - see CHR" and `BSSOL-2` was the strip preset picker, taught
+once at `CHR-4`. BSSOL-2's presets-are-how-you-learn line became the Manual 2
+Presets section's opening prose and a line in the BSSOL figure blurb.
 
 Then every screen was RENUMBERED CONTIGUOUS. The gaps were fallout from a
 never-renumber constraint Claude had invented and Jeff never asked for -
@@ -407,13 +407,13 @@ after Basses instead of folded under Guitars.
 
 The Replace feature changed four menus and Jeff shot four new pictures, so
 the menu figures re-based: `BSSBM` now shows the shared
-`BaySickSynth-BaySickPlayer-Harmless Menu.png` beside
+`BaySickSynth-BaySickPlayer-BaySickSolstice Menu.png` beside
 `BaySickBass Menu Updated.png`; `BSPM` shows the shared picture alone;
 `BSPLUGM` shows `BaySickPlugins Menu.png`. Two NEW figures (88 -> 90):
-`BSHARMM` (Harmless Menu - Harmless had no menu entry; Sub of `BSHARM`) and
+`BSSOLM` (BaySickSolstice Menu - BaySickSolstice had no menu entry; Sub of `BSSOL`) and
 `BSDM` (BaySickDrums Menu - Main, placed right before the BaySickRustyDrums
 block; reached from a kit pad's right-click or the drum window's Menu).
-New rows: `Replace Engine` at `BSSBM-8`/`BSPM-8`/`BSHARMM-8` (old 8+
+New rows: `Replace Engine` at `BSSBM-8`/`BSPM-8`/`BSSOLM-8` (old 8+
 renumbered +1), and `Rename...`/`Replace Plugin`/`Duplicate Plugin` at
 `BSPLUGM-4`..`6` (old 4-7 -> 7-10). Jeff's nudge export merged same day
 (731 dots validated). Follow-up (Jeff): NEW `BSDRUMS` (BaySickDrums, Main,
@@ -490,7 +490,7 @@ the removed rows re-aimed.
 
 The page swing knob (the red ring beside `Menu`, on every player title
 strip since 2026-08-04) was undocumented on every player figure - one row
-+ dot added to BSP, BSHARM, BSRDMAIN, BSGTR, BSBAS, BSPLUG and BSSBT.
++ dot added to BSP, BSSOL, BSRDMAIN, BSGTR, BSBAS, BSPLUG and BSSBT.
 The Drum Kit view has no swing knob BY DESIGN - its sixteen pickers link
 to player pages that each carry their own - so `DKIT` gets no row (the
 claim that its screenshot was stale was wrong; Jeff corrected it).
@@ -629,7 +629,7 @@ reading; new topics append at the end of the namespace, never inside a block.
 | IMP-84 | Unison and voice stacking - the sqrt(N) gain law | `Manuals/manual-3.html` |
 | IMP-85 | Voice modes and note cutting - poly / mono / legato, CUT SELF, choke groups | `Manuals/manual-3.html` |
 | IMP-86 | The BaySickSynth / BaySickBass voice - oscillator, modifier, noise, transients | `Manuals/manual-3.html` |
-| IMP-87 | Additive synthesis - how Harmless makes sound | `Manuals/manual-3.html` |
+| IMP-87 | Additive synthesis - how BaySickSolstice makes sound | `Manuals/manual-3.html` |
 | IMP-88 | The sample player - roots, stretch, velocity routing | `Manuals/manual-3.html` |
 | IMP-89 | The sampled instruments - SFZ programs, keyswitches, articulations | `Manuals/manual-3.html` |## Namespace 1 - callout allocation
 
@@ -733,7 +733,7 @@ type, including the ones whose ribbon slot has vanished at zero instances.
 | TABUTN-3 | `BaySickGuitars` | Instruments | IMP-57 | `BaySickGuitars.md` |
 | TABUTN-4 | `BaySickBasses` | Instruments | IMP-57 | `BaySickBasses.md` |
 | TABUTN-5 | `VSTPlugin` submenu - the added third-party instruments, alphabetical. Empty state: `None added - see Options > Plugins` | Instruments | IMP-77 | `Plugins Page.md` |
-| TABUTN-6 | `Harmless` submenu | Instruments | IMP-57 | `Harmless.md` |
+| TABUTN-6 | `BaySickSolstice` submenu | Instruments | IMP-57 | `BaySickSolstice.md` |
 | TABUTN-7 | `BaySickSynth` | Instruments | IMP-57 | `BaySickSynth.md` |
 | TABUTN-8 | `BaySickPlayer` submenu | Instruments | IMP-57 | `BaySickPlayer.md` |
 | TABUTN-9 | `BaySickBass` | Instruments | IMP-57 | `BaySickBass.md` |
@@ -970,63 +970,63 @@ The app one VU. Master output only. Its `Menu` carries the calibration submenu a
 | VUMTR-1 | Analog VU face - needle ballistics, not a peak meter | Mixing | IMP-50 | `Effect Racks.md` |
 | VUMTR-2 | `CURRENT` and `MAX` readout boxes | Mixing | IMP-50 | `Effect Racks.md` |
 | VUMTR-3 | `VU Calibration (0 VU = ...)` on this window Menu - the same app-wide value the rack menu sets, *see FXRM-4* | Mixing | IMP-50 | `Effect Racks.md` |
-### `BSHARM` - `Harmless.png`
+### `BSSOL` - `BaySickSolstice.png`
 
 Additive engine, single page, no tabs. Grouped by the painted section captions. The `Preset` picker on its strip loads a ready-made sound - the fastest way to learn the engine is to load one and move things.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| BSHARM-1 | `OUTPUT` section - `VOL`, `PAN`, and the `VEL` / `CUT SELF` / `SAME PITCH` / `AG: REL` voice switches | Instruments | IMP-85 | `Harmless.md` |
-| BSHARM-2 | `TREMOLO` section - `WAVE` selector plus `DEPTH`, `SPEED`, `GAP` | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-3 | `ROUTING` section - `SUB`, `PROT`, `CLIP`, `FX`, `VOL`, `ENV` | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-4 | `VIBRATO / LEGATO` section - `WAVE`, `DEPTH`, `SPEED`, `ENV`, `GLIDE`, `LIMIT` and the `LEGATO` switch | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-5 | `UNISON` section - `VOICES` with its `ALT` switch, then `PAN`, `PITCH`, `PHASE`. Voice gain follows sqrt(N) so stacking voices does not raise level | Instruments | IMP-84 | `Harmless.md` |
-| BSHARM-6 | `FILTER 1 + ADSR` - type picker (`LP` here), `ENV`, `FR...`, `RES`, `KB`, then `ATK` / `DEC` / `SUS` / `REL`. Its envelopes run per-sample | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-7 | `FILTER 2 + ADSR` - the same control set, second filter, `Notch` here | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-8 | `TIMBRE` section, `A` / `B` part selector - **view state only**. Both parts always render; nothing in the DSP reads this | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-9 | `PART A` / `PART B` waveform buttons | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-10 | `MIX` - the A/B timbre crossfade. This is the control that blends the two parts, not the selector | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-11 | `VOICE A` / `VOICE B` / `BROWN` / `F1 OFS` / `F2 OFS` / `A MASK` / `B MASK` | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-12 | `PITCH` section - `FREQ`, `DETUNE`, `FRAC`, and the `OCT` / `Hz` unit switch | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-13 | `LFO MOD` section - `RATE`, `SHAPE`, the `TEMPO` sync switch, `VEL`, `VOL`, `PITCH` | Instruments | IMP-83 | `Harmless.md` |
-| BSHARM-14 | `STRUM` section - `DIR`, `TIME`, `TNS` | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-15 | `FX - PLUCK / PHASER / EQ` - `PLUCK`, the `BLU` switch, `MIX`, `DEPTH`, `RATE`, `WIDTH`, `OFS`, `MASK`, `EQ` | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-16 | `AMP ENV / PHASE` - `ATK` / `DEC` / `SUS` / `REL` plus `START`, `RAND` | Instruments | IMP-81 | `Harmless.md` |
-| BSHARM-17 | `BLUR / PRISM` - `BLUR`, `TIME`, `HARM`, `PRISM`, `MODE` | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-18 | `MOD` XY pad with the `X` / `Y` / `Z` knobs beneath it | Instruments | IMP-87 | `Harmless.md` |
-| BSHARM-19 | `SPECTROGRAM` - live picture of the harmonics as they sound | Instruments | IMP-56 | `Harmless.md` |
-| BSHARM-20 | Modulation target picker - `Volume` | Writing | IMP-87 | `Automation.md` |
-| BSHARM-21 | Modulation source picker - `Envelope` / `LFO` / `Velocity` / `Keyboard` / `Mod X` / `Mod Y` / `Mod Z` | Writing | IMP-87 | `Automation.md` |
-| BSHARM-22 | Mod editor toolbar - `ENV` / `CURVE` / `STEP` / `SNAP` / `FREEZE` / `+` / `-` / `Step` | Writing | IMP-87 | `Automation.md` |
-| BSHARM-23 | Mod curve canvas - per-note 0-1 phase, NOT song position. A Harmless mod curve and a Builder automation clip are different domains | Writing | IMP-87 | `Automation.md` |
-| BSHARM-24 | Zoom / pan scroll bar under the curve - the thumb is the visible phase window | Writing | IMP-87 | `Automation.md` |
-| BSHARM-25 | `DEPTH` / `LENGTH` / `TEMPO` / `SPD` / `TNS` / `SKEW` / `PW` - the curve shaping row | Writing | IMP-87 | `Automation.md` |
-| BSHARM-26 | `TYPE` chicken-head in `UNISON` - `Pure` / `Random` / `Drifting` / `Alt-only` | Instruments | IMP-84 | `Harmless.md` |
-| BSHARM-27 | `Swing Mix` knob on the title bar, right of `Menu` - scales the global Swing for this player; right-click offers `Truncate Swing Notes` | Tabs | IMP-65 | `Patterns and Arrangement.md` |
-### `BSHARMM` - `BaySickSynth-BaySickPlayer-Harmless Menu.png`
+| BSSOL-1 | `OUTPUT` section - `VOL`, `PAN`, and the `VEL` / `CUT SELF` / `SAME PITCH` / `AG: REL` voice switches | Instruments | IMP-85 | `BaySickSolstice.md` |
+| BSSOL-2 | `TREMOLO` section - `WAVE` selector plus `DEPTH`, `SPEED`, `GAP` | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-3 | `ROUTING` section - `SUB`, `PROT`, `CLIP`, `FX`, `VOL`, `ENV` | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-4 | `VIBRATO / LEGATO` section - `WAVE`, `DEPTH`, `SPEED`, `ENV`, `GLIDE`, `LIMIT` and the `LEGATO` switch | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-5 | `UNISON` section - `VOICES` with its `ALT` switch, then `PAN`, `PITCH`, `PHASE`. Voice gain follows sqrt(N) so stacking voices does not raise level | Instruments | IMP-84 | `BaySickSolstice.md` |
+| BSSOL-6 | `FILTER 1 + ADSR` - type picker (`LP` here), `ENV`, `FR...`, `RES`, `KB`, then `ATK` / `DEC` / `SUS` / `REL`. Its envelopes run per-sample | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-7 | `FILTER 2 + ADSR` - the same control set, second filter, `Notch` here | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-8 | `TIMBRE` section, `A` / `B` part selector - **view state only**. Both parts always render; nothing in the DSP reads this | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-9 | `PART A` / `PART B` waveform buttons | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-10 | `MIX` - the A/B timbre crossfade. This is the control that blends the two parts, not the selector | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-11 | `VOICE A` / `VOICE B` / `BROWN` / `F1 OFS` / `F2 OFS` / `A MASK` / `B MASK` | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-12 | `PITCH` section - `FREQ`, `DETUNE`, `FRAC`, and the `OCT` / `Hz` unit switch | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-13 | `LFO MOD` section - `RATE`, `SHAPE`, the `TEMPO` sync switch, `VEL`, `VOL`, `PITCH` | Instruments | IMP-83 | `BaySickSolstice.md` |
+| BSSOL-14 | `STRUM` section - `DIR`, `TIME`, `TNS` | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-15 | `FX - PLUCK / PHASER / EQ` - `PLUCK`, the `BLU` switch, `MIX`, `DEPTH`, `RATE`, `WIDTH`, `OFS`, `MASK`, `EQ` | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-16 | `AMP ENV / PHASE` - `ATK` / `DEC` / `SUS` / `REL` plus `START`, `RAND` | Instruments | IMP-81 | `BaySickSolstice.md` |
+| BSSOL-17 | `BLUR / PRISM` - `BLUR`, `TIME`, `HARM`, `PRISM`, `MODE` | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-18 | `MOD` XY pad with the `X` / `Y` / `Z` knobs beneath it | Instruments | IMP-87 | `BaySickSolstice.md` |
+| BSSOL-19 | `SPECTROGRAM` - live picture of the harmonics as they sound | Instruments | IMP-56 | `BaySickSolstice.md` |
+| BSSOL-20 | Modulation target picker - `Volume` | Writing | IMP-87 | `Automation.md` |
+| BSSOL-21 | Modulation source picker - `Envelope` / `LFO` / `Velocity` / `Keyboard` / `Mod X` / `Mod Y` / `Mod Z` | Writing | IMP-87 | `Automation.md` |
+| BSSOL-22 | Mod editor toolbar - `ENV` / `CURVE` / `STEP` / `SNAP` / `FREEZE` / `+` / `-` / `Step` | Writing | IMP-87 | `Automation.md` |
+| BSSOL-23 | Mod curve canvas - per-note 0-1 phase, NOT song position. A BaySickSolstice mod curve and a Builder automation clip are different domains | Writing | IMP-87 | `Automation.md` |
+| BSSOL-24 | Zoom / pan scroll bar under the curve - the thumb is the visible phase window | Writing | IMP-87 | `Automation.md` |
+| BSSOL-25 | `DEPTH` / `LENGTH` / `TEMPO` / `SPD` / `TNS` / `SKEW` / `PW` - the curve shaping row | Writing | IMP-87 | `Automation.md` |
+| BSSOL-26 | `TYPE` chicken-head in `UNISON` - `Pure` / `Random` / `Drifting` / `Alt-only` | Instruments | IMP-84 | `BaySickSolstice.md` |
+| BSSOL-27 | `Swing Mix` knob on the title bar, right of `Menu` - scales the global Swing for this player; right-click offers `Truncate Swing Notes` | Tabs | IMP-65 | `Patterns and Arrangement.md` |
+### `BSSOLM` - `BaySickSynth-BaySickPlayer-BaySickSolstice Menu.png`
 
-The Harmless tab's menu - the same tab menu every Layers-family engine shows
-(one shared picture; the menu belongs to the TAB, not the engine). Harmless
+The BaySickSolstice tab's menu - the same tab menu every Layers-family engine shows
+(one shared picture; the menu belongs to the TAB, not the engine). BaySickSolstice
 had no menu entry of its own until 2026-08-16. `Polyphony` reads `(n/a)` and
-greys on a Harmless layer - Harmless is always polyphonic.
+greys on a BaySickSolstice layer - BaySickSolstice is always polyphonic.
 
 | Callout | On-screen label | Manual 2 | IMP | System Reference |
 |---|---|---|---|---|
-| BSHARMM-1 | `Player` - the engine view, tick when shown | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSHARMM-2 | `Piano Roll` - jumps the roll to this tab | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSHARMM-3 | `FX Rack` - *see FXI* | Mixing | IMP-62 | `Effect Racks.md` |
-| BSHARMM-4 | `Freeze` - renders this tab and plays the render instead. Greys when unavailable, with the reason in its tooltip; label color signals state - cyan while frozen, orange once the render goes stale | Tabs | IMP-75 | `Freeze and Export.md` |
-| BSHARMM-5 | `Lock Layer` - tick when locked; a locked tab shows `[L] ` on its ribbon slot | Tabs | IMP-70 | `Workspace and Windows.md` |
-| BSHARMM-6 | `Polyphony: (n/a)` - greyed on Harmless; the engine is always polyphonic | Tabs | IMP-85 | `Workspace and Windows.md` |
-| BSHARMM-7 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSHARMM-8 | `Replace Engine` submenu - swap this tab's engine in place; the notes, mixer settings, effects and window all stay. Tick = the current engine; greys while the tab is locked | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSHARMM-9 | `Duplicate Layer (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSHARMM-10 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; same-group tabs cut each other off | Tabs | IMP-57 | `Workspace and Windows.md` |
-| BSHARMM-11 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
-| BSHARMM-12 | `Load Preset` submenu - the engine's preset tree; `(no presets installed)` when empty | Tabs | IMP-72 | `Presets.md` |
-| BSHARMM-13 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
-| BSHARMM-14 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
-| BSHARMM-15 | `Delete Layer` | Tabs | IMP-72 | `Workspace and Windows.md` |
+| BSSOLM-1 | `Player` - the engine view, tick when shown | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSOLM-2 | `Piano Roll` - jumps the roll to this tab | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSOLM-3 | `FX Rack` - *see FXI* | Mixing | IMP-62 | `Effect Racks.md` |
+| BSSOLM-4 | `Freeze` - renders this tab and plays the render instead. Greys when unavailable, with the reason in its tooltip; label color signals state - cyan while frozen, orange once the render goes stale | Tabs | IMP-75 | `Freeze and Export.md` |
+| BSSOLM-5 | `Lock Layer` - tick when locked; a locked tab shows `[L] ` on its ribbon slot | Tabs | IMP-70 | `Workspace and Windows.md` |
+| BSSOLM-6 | `Polyphony: (n/a)` - greyed on BaySickSolstice; the engine is always polyphonic | Tabs | IMP-85 | `Workspace and Windows.md` |
+| BSSOLM-7 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSOLM-8 | `Replace Engine` submenu - swap this tab's engine in place; the notes, mixer settings, effects and window all stay. Tick = the current engine; greys while the tab is locked | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSOLM-9 | `Duplicate Layer (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSOLM-10 | `Choke Group` submenu - `None` / `Group 1` through `Group 16`; same-group tabs cut each other off | Tabs | IMP-57 | `Workspace and Windows.md` |
+| BSSOLM-11 | `Save Current Patch As...` | Tabs | IMP-72 | `Presets.md` |
+| BSSOLM-12 | `Load Preset` submenu - the engine's preset tree; `(no presets installed)` when empty | Tabs | IMP-72 | `Presets.md` |
+| BSSOLM-13 | `Save Page Preset As...` | Tabs | IMP-72 | `Presets.md` |
+| BSSOLM-14 | `Load Page Preset` submenu | Tabs | IMP-72 | `Presets.md` |
+| BSSOLM-15 | `Delete Layer` | Tabs | IMP-72 | `Workspace and Windows.md` |
 
 ### `BSP` - `BaySickPlayer.png`
 
@@ -1123,7 +1123,7 @@ The panel below the section tabs. The section tab row along the top is taught on
 | BSSBMOD-3 | `BURST ENV` `BURST` switch | Instruments | IMP-86 | `BaySickSynth.md` |
 | BSSBMOD-4 | `COUNT` / `SPACING` | Instruments | IMP-86 | `BaySickSynth.md` |
 | BSSBMOD-5 | `DRI...` / `DRIFT` | Instruments | IMP-86 | `BaySickSynth.md` |
-| BSSBMOD-6 | `UNISON` - `VOICES` / `DETUNE` / `SPREAD`. Voice gain follows sqrt(N), *see BSHARM-5* | Instruments | IMP-84 | `BaySickSynth.md` |
+| BSSBMOD-6 | `UNISON` - `VOICES` / `DETUNE` / `SPREAD`. Voice gain follows sqrt(N), *see BSSOL-5* | Instruments | IMP-84 | `BaySickSynth.md` |
 ### `BSGTR` - `BaySickGuitars.png`
 
 An sfizz Inst tab. The control surface is drawn from the loaded instrument, so
@@ -1457,7 +1457,7 @@ contained window - so it has no `Menu` button and no workspace chrome.
 | EVT-9 | `New Automation Clip` | Writing | IMP-63 | `Automation.md` |
 | EVT-10 | `Snap:` picker - `1/16` | Writing | IMP-68 | `Event Editor.md` |
 | EVT-11 | Value readout - `0.915`, the value under the cursor | Writing | IMP-68 | `Event Editor.md` |
-| EVT-12 | Curve canvas - scale 0.00 to 1.00, tick-based SONG position. Not the per-note 0-1 phase a Harmless mod curve uses, *see BSHARM-23* | Writing | IMP-63 | `Automation.md` |
+| EVT-12 | Curve canvas - scale 0.00 to 1.00, tick-based SONG position. Not the per-note 0-1 phase a BaySickSolstice mod curve uses, *see BSSOL-23* | Writing | IMP-63 | `Automation.md` |
 | EVT-13 | A control point - the circles at each end of the line | Writing | IMP-63 | `Automation.md` |
 | EVT-14 | Tool row - `D` / `P` / `E` / `I` / `S` / `Z` | Writing | IMP-79 | `Keyboard Shortcuts.md` |
 | EVT-15 | Status line - `Beat 0.97   0.997`, position and value under the cursor | Writing | IMP-68 | `Event Editor.md` |
@@ -1931,7 +1931,7 @@ window you are in.
 |---|---|---|---|---|
 | BSSBT-1 | `Preset` dropdown - the patch picker | Instruments | IMP-72 | `Presets.md` |
 | BSSBT-2 | `Swing Mix` knob on the title bar, right of `Menu` - scales the global Swing for this player; right-click offers `Truncate Swing Notes` | Tabs | IMP-65 | `Patterns and Arrangement.md` |
-### `BSSBM` - `BaySickSynth-BaySickPlayer-Harmless Menu.png` + `BaySickBass Menu Updated.png`
+### `BSSBM` - `BaySickSynth-BaySickPlayer-BaySickSolstice Menu.png` + `BaySickBass Menu Updated.png`
 
 The family's tab menu - both menus in one entry; one shape, two namings
 (`Layer` / `Bass`). The menu belongs to the TAB, not the engine, so the
@@ -1944,7 +1944,7 @@ BaySickPlayer picture is identical (see BSPM).
 | BSSBM-3 | `FX Rack` - *see FXI* | Mixing | IMP-62 | `Effect Racks.md` |
 | BSSBM-4 | `Freeze` - renders this tab and plays the render instead. Greys when unavailable, with the reason in its tooltip; label color signals state - cyan while frozen, orange once the render goes stale | Tabs | IMP-75 | `Freeze and Export.md` |
 | BSSBM-5 | `Lock Layer` / `Lock Bass` - tick when locked; a locked tab shows `[L] ` on its ribbon slot | Tabs | IMP-70 | `Workspace and Windows.md` |
-| BSSBM-6 | `Polyphony: Polyphonic` / `Monophonic` - reads the engine's voice mode; click toggles it. The synth starts polyphonic, the bass monophonic. `Polyphony: (n/a)`, greyed, on a Harmless layer | Tabs | IMP-85 | `Workspace and Windows.md` |
+| BSSBM-6 | `Polyphony: Polyphonic` / `Monophonic` - reads the engine's voice mode; click toggles it. The synth starts polyphonic, the bass monophonic. `Polyphony: (n/a)`, greyed, on a BaySickSolstice layer | Tabs | IMP-85 | `Workspace and Windows.md` |
 | BSSBM-7 | `Rename...` | Tabs | IMP-57 | `Workspace and Windows.md` |
 | BSSBM-8 | `Replace Engine` submenu - swap this tab's engine in place; the notes, mixer settings, effects and window all stay. Tick = the current engine; greys while the tab is locked | Tabs | IMP-57 | `Workspace and Windows.md` |
 | BSSBM-9 | `Duplicate Layer / Bass (new tab)` - greys with no engine loaded | Tabs | IMP-57 | `Workspace and Windows.md` |
@@ -1956,7 +1956,7 @@ BaySickPlayer picture is identical (see BSPM).
 | BSSBM-15 | `Delete Layer` / `Delete Bass` | Tabs | IMP-72 | `Workspace and Windows.md` |
 
 
-### `BSPM` - `BaySickSynth-BaySickPlayer-Harmless Menu.png`
+### `BSPM` - `BaySickSynth-BaySickPlayer-BaySickSolstice Menu.png`
 
 The Layers-tab menu as it reads on a BaySickPlayer tab - identical to the BaySickSynth one (see BSSBM); the menu belongs to the TAB, not the engine.
 

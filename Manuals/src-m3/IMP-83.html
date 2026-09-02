@@ -1,7 +1,7 @@
 <p>A low-frequency oscillator is a wave running below hearing range, used as
 a hand that turns another control. The synth family's LFO offers sine, saw
 and square shapes aimed at the filter, pitch or the oscillator modifier;
-Harmless carries its own LFO with depth sends into velocity, volume and
+BaySickSolstice carries its own LFO with depth sends into velocity, volume and
 pitch. Free mode runs in Hz; sync mode locks the rate to the transport's
 tempo through the shared note-length divisions, so a quarter-note wobble
 stays a quarter-note wobble when the song speeds up. Sync does not swap any
@@ -102,5 +102,5 @@ float LFO::getNextSample()
 - Output scaled by depth (0..1); the voice reads depth=1 and applies its own amount.
 - Tempo sync: `effectiveRate = (BPM / 60) * mult[div]`, with division multipliers in cycles-per-quarter-note: 1/1 = 0.25, 1/2 = 0.5, 1/4 = 1.0, 1/8 = 2.0, 1/16 = 4.0, 1/32 = 8.0. (BPM/60 = quarter notes per second, so e.g. 1/16 at 120 BPM = 2 * 4 = 8 Hz.)
 - LFO destinations in the voice (BaySickSynthVoice::renderNextBlock): Pitch `pitchSemis += lfo * 4` (±4 semitones), Filter `effCutoff *= 2^(lfo * 2)` (±2 octaves), OscModifier `modifier + lfo * 0.3` clamped 0..1. Mod-wheel-to-LFO boost: `effectiveLFO = lfoRaw * amount + lfoRaw * wheel * wheelAmt`.
-- Harmless vibrato: radian phase, `phase += 2*pi*speed/fs`; onset envelope ramps 0..1 at `1/(0.001 + vibEnv * fs)` per sample; `vibSemis = lfo * depth * envPos`.</pre>
-<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSHARM-13">LFO MOD section</a>, <a href="manual-2.html#BSSBLFO-1">SHAPE</a>, <a href="manual-2.html#BSSBLFO-2">RATE knob</a>, <a href="manual-2.html#BSSBLFO-3">Sync division picker</a>, <a href="manual-2.html#BSSBLFO-4">SYNC</a>, <a href="manual-2.html#BSSBLFO-5">DEST</a>, <a href="manual-2.html#BSSBLFO-6">AMOUNT</a>.</p>
+- BaySickSolstice vibrato: radian phase, `phase += 2*pi*speed/fs`; onset envelope ramps 0..1 at `1/(0.001 + vibEnv * fs)` per sample; `vibSemis = lfo * depth * envPos`.</pre>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSSOL-13">LFO MOD section</a>, <a href="manual-2.html#BSSBLFO-1">SHAPE</a>, <a href="manual-2.html#BSSBLFO-2">RATE knob</a>, <a href="manual-2.html#BSSBLFO-3">Sync division picker</a>, <a href="manual-2.html#BSSBLFO-4">SYNC</a>, <a href="manual-2.html#BSSBLFO-5">DEST</a>, <a href="manual-2.html#BSSBLFO-6">AMOUNT</a>.</p>

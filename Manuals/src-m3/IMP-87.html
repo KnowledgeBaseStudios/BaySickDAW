@@ -1,4 +1,4 @@
-<p>Where the synth family starts from a wave and subtracts, Harmless builds
+<p>Where the synth family starts from a wave and subtracts, BaySickSolstice builds
 sound by summing harmonics directly - which is why it can do things
 filters cannot. Its two parts, A and B, are two harmonic recipes running
 simultaneously, crossfaded by the MIX control (the A/B selector on the
@@ -8,11 +8,11 @@ energy in time; PRISM shifts harmonics off their exact multiples, running
 from chorus-like shimmer to full clangor; and the brownian control adds
 per-harmonic wander. Its two filters and their envelopes run inside the
 additive engine per sample. The modulation editor attaches a per-note curve
-to almost any Harmless control - each note runs the curve privately from
+to almost any BaySickSolstice control - each note runs the curve privately from
 its own start, which is a different thing from song-position automation:
 one is performance shape, the other is arrangement.</p>
 
-<div class="codeblock"><div class="codehead">Source\Harmless\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</div><pre><code>// HarmonicEngine::buildWavetable (partial assembly into IFFT bins) -- Source/Harmless/HarmonicEngine.cpp
+<div class="codeblock"><div class="codehead">Source\BaySickSolstice\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</div><pre><code>// HarmonicEngine::buildWavetable (partial assembly into IFFT bins) -- Source/BaySickSolstice/HarmonicEngine.cpp
     for (int i = 0; i &lt; kNumPartials; ++i)
     {
         const float amp = workAmps[i];
@@ -51,7 +51,7 @@ one is performance shape, the other is arrangement.</p>
 
     // ── 4. Inverse FFT → time-domain waveform ─────────────────────────────────
     mFFT.performRealOnlyInverseTransform (mFFTData.data());</code></pre></div>
-<details class="fullfn"><summary>Full function &mdash; Source\Harmless\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</summary><pre><code>// Source/Harmless/HarmonicEngine.cpp  -  HarmonicEngine::buildWavetable (complete)
+<details class="fullfn"><summary>Full function &mdash; Source\BaySickSolstice\HarmonicEngine.cpp (buildWavetable -- 516 partials summed into a wavetable via IFFT; Blur runs here, Prism shifts bins here)</summary><pre><code>// Source/BaySickSolstice/HarmonicEngine.cpp  -  HarmonicEngine::buildWavetable (complete)
 //==============================================================================
 void HarmonicEngine::buildWavetable()
 {
@@ -220,4 +220,4 @@ void HarmonicEngine::buildWavetable()
 - Playback increment: `inc = currentHz * unisonMult * (kFFTSize / sampleRate)` table samples per audio sample; linear-interp table read with power-of-two mask.
 - Parts A and B are SIMULTANEOUS layers: per-sample `sample = wtA(phaseA)*pA + wtB(phaseB)*pB`; `timbre_blend` crossfades (`aEff = A*(1-blend)`, `bEff = B + A*blend`), and the mod-matrix TimbreBlend target pushes `pA *= (1 - max(0, +m))`, `pB *= (1 - max(0, -m))`.
 - Sub oscillator: sine one octave below (`currentHz * 0.5`) added post-stack.</pre>
-<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSHARM-2">TREMOLO section</a>, <a href="manual-2.html#BSHARM-3">ROUTING section</a>, <a href="manual-2.html#BSHARM-4">VIBRATO / LEGATO section</a>, <a href="manual-2.html#BSHARM-6">FILTER 1 + ADSR</a>, <a href="manual-2.html#BSHARM-7">FILTER 2 + ADSR</a>, <a href="manual-2.html#BSHARM-8">TIMBRE section, A / B part selector</a>, <a href="manual-2.html#BSHARM-9">PART A / PART B waveform buttons</a>, <a href="manual-2.html#BSHARM-10">MIX</a>, <a href="manual-2.html#BSHARM-11">VOICE A / VOICE B / BROWN / F1 OFS / F2 OF...</a>, <a href="manual-2.html#BSHARM-12">PITCH section</a>, <a href="manual-2.html#BSHARM-14">STRUM section</a>, <a href="manual-2.html#BSHARM-15">FX</a>, <a href="manual-2.html#BSHARM-17">BLUR / PRISM</a>, <a href="manual-2.html#BSHARM-18">MOD XY pad with the X / Y / Z knobs beneat...</a>.</p>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSSOL-2">TREMOLO section</a>, <a href="manual-2.html#BSSOL-3">ROUTING section</a>, <a href="manual-2.html#BSSOL-4">VIBRATO / LEGATO section</a>, <a href="manual-2.html#BSSOL-6">FILTER 1 + ADSR</a>, <a href="manual-2.html#BSSOL-7">FILTER 2 + ADSR</a>, <a href="manual-2.html#BSSOL-8">TIMBRE section, A / B part selector</a>, <a href="manual-2.html#BSSOL-9">PART A / PART B waveform buttons</a>, <a href="manual-2.html#BSSOL-10">MIX</a>, <a href="manual-2.html#BSSOL-11">VOICE A / VOICE B / BROWN / F1 OFS / F2 OF...</a>, <a href="manual-2.html#BSSOL-12">PITCH section</a>, <a href="manual-2.html#BSSOL-14">STRUM section</a>, <a href="manual-2.html#BSSOL-15">FX</a>, <a href="manual-2.html#BSSOL-17">BLUR / PRISM</a>, <a href="manual-2.html#BSSOL-18">MOD XY pad with the X / Y / Z knobs beneat...</a>.</p>

@@ -2,12 +2,12 @@
 to full), decay (fall to the held level), sustain (the held level itself),
 release (the fade after note-off). BaySickSynth and BaySickBass run one ADSR
 on volume, one on the filter and one on pitch per voice; BaySickPlayer runs
-its amp envelope over the sample; Harmless adds phase-start control on top of
+its amp envelope over the sample; BaySickSolstice adds phase-start control on top of
 its ADSR. The engines differ in their DEFAULTS, not the mechanism - the bass
 ships snappier than the synth on both amp and filter envelopes, which is most
 of why it reads as a bass. Envelope stages are recalculated per voice at note
-start, and the Harmless filter envelopes advance per SAMPLE rather than per
-block, which is why fast Harmless sweeps stay smooth at any buffer size.</p>
+start, and the BaySickSolstice filter envelopes advance per SAMPLE rather than per
+block, which is why fast BaySickSolstice sweeps stay smooth at any buffer size.</p>
 
 <div class="codeblock"><div class="codehead">Source\AdsrEnvelope.cpp (the ADSR used by BaySickSynth/BaySickBass voices: mAmpEnv, mFltEnv, mPitchEnv in BaySickSynthVoice)</div><pre><code>// AdsrEnvelope::getNextSample() -- Source/AdsrEnvelope.cpp
 float AdsrEnvelope::getNextSample()
@@ -77,6 +77,6 @@ float AdsrEnvelope::getNextSample()
 - Release: `level += releaseCoef * (0.0 - 1.01 - level)` -- undershoot target -1.01; voice retires when `level &lt;= 0.0001`.
 - Sustain: `level = sustain` held every sample.
 - Amp/filter/pitch envelopes in BaySickSynth all call `getNextSample()` once per sample inside `BaySickSynthVoice::renderNextBlock` (stages advance per sample).
-- Harmless: `juce::ADSR` filter envelopes advance one sample per sample; the derived filter cutoff is only re-applied on a 2 kHz control tick (`mFltCtrlInterval = round(sampleRate / 2000)` samples), so a 5 ms filter attack still resolves into ~10 cutoff steps.
+- BaySickSolstice: `juce::ADSR` filter envelopes advance one sample per sample; the derived filter cutoff is only re-applied on a 2 kHz control tick (`mFltCtrlInterval = round(sampleRate / 2000)` samples), so a 5 ms filter attack still resolves into ~10 cutoff steps.
 - Per-note release scale (CC72, both engines): `release = max(0.001, baseRelease * relScale)` where `relScale = 2^((cc/127 - 0.5) * 4)` (0.25x..4x).</pre>
-<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSHARM-16">AMP ENV / PHASE</a>, <a href="manual-2.html#BSSBOENV-1">AMP ENV group</a>, <a href="manual-2.html#BSSBOENV-2">Amp VEL</a>, <a href="manual-2.html#BSSBOENV-3">PITCH ENV group</a>, <a href="manual-2.html#BSSBOENV-4">Pitch AMOUNT</a>, <a href="manual-2.html#BSSBFENV-1">ATTACK / DECAY / SUSTAIN / RELEASE sliders</a>, <a href="manual-2.html#BSSBFENV-2">AMOU... / AMOUNT</a>.</p>
+<p class="behind"><b>Behind:</b> <a href="manual-2.html#BSSOL-16">AMP ENV / PHASE</a>, <a href="manual-2.html#BSSBOENV-1">AMP ENV group</a>, <a href="manual-2.html#BSSBOENV-2">Amp VEL</a>, <a href="manual-2.html#BSSBOENV-3">PITCH ENV group</a>, <a href="manual-2.html#BSSBOENV-4">Pitch AMOUNT</a>, <a href="manual-2.html#BSSBFENV-1">ATTACK / DECAY / SUSTAIN / RELEASE sliders</a>, <a href="manual-2.html#BSSBFENV-2">AMOU... / AMOUNT</a>.</p>
