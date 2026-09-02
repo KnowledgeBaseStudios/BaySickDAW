@@ -56,8 +56,8 @@ mentioned anywhere in the block.
 source: "Lead" voice mode removed from BaySickSynth and BaySickBass (zero
 `"Lead"` hits in either directory); BaySickPlayer's LFO relabelled to
 `VIBRATO` / `VIB RATE` / `VIB DEPTH` (`BaySickPlayerEditor.cpp:69`, `:177`,
-`:178`); engine gain staging (Synth/Bass -12 dB, Harmless -6 dB); audio clips
-gained pitch vibrato; Compressor `CS Style` renamed to `Pedal`; Harmless RM VOL
+`:178`); engine gain staging (Synth/Bass -12 dB, BaySickSolstice -6 dB); audio clips
+gained pitch vibrato; Compressor `CS Style` renamed to `Pedal`; BaySickSolstice RM VOL
 taper changed; the Edit menu's three fixed "New ... Tab" items replaced with the
 full ribbon "+" list.
 
@@ -748,12 +748,12 @@ editing the doc that came to mind:
   (`kClipVibratoMaxCents = 50.0`), user-controllable because a Clips tab hosts
   the full BaySickPlayer editor. Documented as control rows, not a footnote.
 - **Engine gain staging.** `kOutputHeadroom` 0.251189 (-12 dB) on Synth/Bass,
-  0.501187 (-6 dB) on Harmless, applied AFTER the user's knob. Documented as a
+  0.501187 (-6 dB) on BaySickSolstice, applied AFTER the user's knob. Documented as a
   calibration trim; the "old presets are quieter" migration framing was
   deliberately left out per the no-backward-compat-pre-v1 rule.
 - **Compressor `CS Style` to `Pedal`.** Menu literal is `Pedal (Sustain)`, short
   label `Pedal`. Eight sites across three docs.
-- **Harmless RM VOL taper.** The 3.5 dB cliff is gone; the row described the old
+- **BaySickSolstice RM VOL taper.** The 3.5 dB cliff is gone; the row described the old
   gated 1.5x behavior verbatim including the false "0.667 is also unity".
 - **Edit menu rebuilt.** It does not COPY the ribbon "+" list, it calls
   `RibbonTabBar::buildAddMenu()` directly, so the two cannot drift - the docs
@@ -845,7 +845,7 @@ Every area needed correction. The ones that would have shipped as damage:
   beginner runs out of fader and is still quiet. Cut.
 - **A level-parity claim sourced from a code comment**, not from code. Cut, per
   never-trust-a-comment-over-the-code.
-- **A bare dB figure with no reference point** on the Harmless CLIP row - the
+- **A bare dB figure with no reference point** on the BaySickSolstice CLIP row - the
   1/6 ceiling is measured before the -6 dB engine trim, so a meter shows about
   -21.5 dBFS, not -15.5. Reworded to "about a sixth of full scale".
 - **`SHOT-050`'s "The ONLY way" claim**, which the Edit-menu rebuild falsifies -
@@ -1791,8 +1791,8 @@ and the per-figure Phase B table. Jeff tracks progress there.
 ### Defect caught during verification - the rename pass ate six literals
 
 The backtick rename pass corrupted six ON-SCREEN literals that collide with
-old codes: Harmless's `PITCH` section/knob labels and `HARM` knob became
-`BSPIT` / `BSHARM`, and BaySickPitch's `ALIGN` and `PITCH` boxes became
+old codes: BaySickSolstice's `PITCH` section/knob labels and `HARM` knob became
+`BSPIT` / `BSSOL`, and BaySickPitch's `ALIGN` and `PITCH` boxes became
 `BSA` / `BSPIT`. All six restored in the registry and the interim manual-2.
 Lesson: a code-rename sweep must WHITELIST on-screen literal text; Jeff's
 future coordinate exports translate through the saved map, never pasted raw.
@@ -1878,7 +1878,7 @@ the new Mixer Strip figure; the Builder playhead, ruler marker glyphs and
 browser resize grip; the Drum Kit drag handle and per-row audition key; the
 per-slot bypass LED and remove cross on the effects rack; Pedals slot
 remove/reorder and the Compact slot dropdown; the Swing Mix title-bar knob
-on Guitars/Basses; the Harmless UNISON TYPE chicken-head; the NAM/IR
+on Guitars/Basses; the BaySickSolstice UNISON TYPE chicken-head; the NAM/IR
 status-row hint and error labels; the hosted-plugin dead-plugin marker.
 PRMMNU gained Modulate envelope / MIDI Forget / Save-mappings rows earlier
 the same pass.
@@ -2047,7 +2047,7 @@ verified from code earlier in the batch.
 
 ### The nine topics
 
-- **Envelopes** - ADSR across engines; Harmless's envelopes run per-sample.
+- **Envelopes** - ADSR across engines; BaySickSolstice's envelopes run per-sample.
 - **The subtractive filter** - the XY pad as the app's ONLY resonance
   control, log cutoff, tracking.
 - **LFOs** - free vs synced through the shared divisions.
@@ -2056,7 +2056,7 @@ verified from code earlier in the batch.
   PITCH / CUT ALL, choke groups, note-on-accurate cutting.
 - **The BaySickSynth/BaySickBass voice** - oscillator, modifier,
   noise/transient/burst/drift, SYNC/RING.
-- **Additive synthesis - Harmless** - parts A/B always both sounding, masks,
+- **Additive synthesis - BaySickSolstice** - parts A/B always both sounding, masks,
   BLUR/PRISM, per-note mod curves vs song automation.
 - **The sample player** - root notes, drum-tab root pinning, tempo-relative
   stretch, three-way velocity routing.
@@ -2070,7 +2070,7 @@ topics, mapped per figure family:
 
 - Synth panels -> Envelopes / Filter / LFO / Unison / Voice modes / Synth
   voice.
-- Harmless -> Additive, with overrides.
+- BaySickSolstice -> Additive, with overrides.
 - BSP -> Sample player.
 - The sfizz figures (Guitars / Basses / Rusty sections / kit view / note
   map) -> Sampled instruments.
@@ -2095,7 +2095,7 @@ was already prose and true.
 | In Depth buttons landing | 829 of 829 |
 | In The Weeds buttons landing | all |
 
-The sweep flagged two "MIX" text tokens; both are Harmless's on-screen MIX
+The sweep flagged two "MIX" text tokens; both are BaySickSolstice's on-screen MIX
 knob labels - real screen text, not codes.
 
 Staged into BOTH build configs; `BaySickDAW-Manuals.zip` refreshed.
@@ -2233,7 +2233,7 @@ untrusted-files safety section), then placed:
 
 - **Figure-specific topics render under their figure's Weeds layer** - 32
   mapped, e.g. EQ internals under the EQ, mic placement under NAM/IR, undo
-  under Undo History, Harmless additive under Harmless.
+  under Undo History, BaySickSolstice additive under BaySickSolstice.
 - **Shared topics render in per-group "Under the hood" end blocks.** Shell:
   the shell/infra topics plus the safety section under its original
   safe-inputs anchor. Instrument: the instrument mechanisms, the
@@ -2284,7 +2284,7 @@ and the close-up cluster boxes, and one Copy exporting
 
 Code blocks are excluded from the visible-id sweep by design - identifiers in
 quoted source are the point. The one remaining "used to" is ordinary English
-in the Harmless LFO sentence, and the "MIX" tokens are Harmless's on-screen
+in the BaySickSolstice LFO sentence, and the "MIX" tokens are BaySickSolstice's on-screen
 knob label.
 
 Staged into BOTH build configs; `BaySickDAW-Manuals.zip` refreshed. Checklist
@@ -2707,18 +2707,18 @@ dots for the Replace entries ride his export, same flow as the nudge era.
 Jeff shot the four new menus and specced the manual update: BaySickDrums
 Menu as its OWN entry right before BaySickRustyDrums (documenting both
 access routes), new pictures on the Synth/Player/Bass menu figures, a
-brand-new Harmless Menu entry (it never had one), fresh dots everywhere
+brand-new BaySickSolstice Menu entry (it never had one), fresh dots everywhere
 (he rearranges), and Replace documented basic-in-the-box +
 mechanics-in-In-Depth.
 
-Executed: BSSBM re-based on `BaySickSynth-BaySickPlayer-Harmless
+Executed: BSSBM re-based on `BaySickSynth-BaySickPlayer-BaySickSolstice
 Menu.png` + `BaySickBass Menu Updated.png`, BSPM on the shared picture,
-BSPLUGM on `BaySickPlugins Menu.png`; NEW `BSHARMM` (Sub of BSHARM) and
+BSPLUGM on `BaySickPlugins Menu.png`; NEW `BSSOLM` (Sub of BSSOL) and
 NEW `BSDM` (Main, before the Rusty block) take the figure count 88 -> 90
-(generator assert updated). Replace rows at BSSBM-8/BSPM-8/BSHARMM-8;
+(generator assert updated). Replace rows at BSSBM-8/BSPM-8/BSSOLM-8;
 BSPLUGM gained Rename/Replace/Duplicate at 4..6 (old 4-7 -> 7-10);
 renumber sweeps ran across registry + all chapters. In Depth prose: the
-full Replace contract lives on BSSBM's chapter; BSPM/BSHARMM defer to it
+full Replace contract lives on BSSBM's chapter; BSPM/BSSOLM defer to it
 with per-engine color; BSDM and BSPLUGM carry their own full walks.
 Fresh estimated dot sets (menu-geometry model, x=9%) on all five figures
 - PRE-NUDGE, Jeff rearranges. Regenerate green: 90 figures, 731 markers

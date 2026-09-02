@@ -255,7 +255,7 @@ Per SC-2=(c), this commit covers the wrapper-load-path engine (BaySickRustyDrums
    - **(3)** **If the loaded kit has NO keyswitches** (unlikely for BaySickRustyDrums but possible for some kits): the keyboard should render unchanged - no amber bleed-through; existing J-7b `noteLabelProvider` drum labels (`Snare Center`, `Hi-hat Tight Closed`, etc.) still readable.
    - **(4)** Switch the loaded BaySickRustyDrums kit to a different one (if more than one is available). Confirm amber labels refresh from the newly-parsed keyswitch data on next piano-roll repaint.
    - **(5)** Regression check: BaySickPlayer Layer/Bass/Drum/Clip tabs still render amber correctly for Tuba-KS (QA-SfzGroup Task 2 wiring untouched).
-   - **(6)** Regression check: Harmless / BaySickSynth / BaySickBass piano rolls render unchanged (no false amber on engines that don't implement `getKeyswitchLabel`)."
+   - **(6)** Regression check: BaySickSolstice / BaySickSynth / BaySickBass piano rolls render unchanged (no false amber on engines that don't implement `getKeyswitchLabel`)."
 - [ ] Wait for Jeff's verify result.
 - [ ] **On verify pass:** surface full git status. Dispatch `/draft-commit`. Surface drafted message + git status to Jeff for approval. Commit on approval via `git commit -F .git/COMMIT_EDITMSG_QA-Sfizz-Task2A.txt`. Remove temp message file post-commit.
 - [ ] Dispatch `/draft-doc running-notes` and apply.
@@ -419,7 +419,7 @@ After Task 5 commit lands (or Task 6 close if Branch C / known-issue):
 2. **Item 1 — Amber keyswitch labels on the 3 sfizz engines.** BaySickRustyDrums (if any keyswitch kit available) + BaySickGuitars + BaySickBasses piano rolls render keyswitch keys with amber backgrounds + bold dark-amber `sw_label` text + tooltip on hover. Matches the BaySickPlayer Tuba-KS UX from QA-SfzGroup Task 2.
 3. **Item 1 — Engine swap.** Switch engine on an Inst tab (BaySickGuitars ↔ BaySickBasses ↔ LiveInput); amber rendering follows correctly (visible on sfizz engines; absent on LiveInput).
 4. **Item 1 — Kit reload.** Load another kit on the same engine; amber labels refresh from the newly-parsed keyswitch data.
-5. **Item 1 — Non-sfizz regression.** BaySickPlayer Layer/Bass/Drum/Clip tabs still render amber correctly (QA-SfzGroup Task 2 wiring untouched). Harmless / BaySickSynth / BaySickBass piano rolls render unchanged (no false amber).
+5. **Item 1 — Non-sfizz regression.** BaySickPlayer Layer/Bass/Drum/Clip tabs still render amber correctly (QA-SfzGroup Task 2 wiring untouched). BaySickSolstice / BaySickSynth / BaySickBass piano rolls render unchanged (no false amber).
 6. **Item 2 — Round-robin cycling.** BaySickGuitars + BaySickBasses with content that has `<group>`-scoped `seq_length` + `seq_position` produces audible 4-variant rotation when striking the same note at fixed velocity with the keyswitched articulation engaged.
 7. **Item 3 — BaySickRustyDrums MT-mode cymbals/hi-hats.** Clean audio (no bit-crusher distortion) when MT is enabled. Kick/snare unchanged. MT-off behavior unchanged from QA-SfzGroup close baseline (i.e. clean both ways).
 8. **MT/serial parity.** Toggle MT ON ↔ OFF via Mixer hamburger menu; behavior consistent across all 3 sfizz engines + no other-engine regressions.

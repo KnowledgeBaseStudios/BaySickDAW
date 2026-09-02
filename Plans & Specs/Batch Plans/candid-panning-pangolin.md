@@ -24,7 +24,7 @@ under its file loudness. Tracing it exposed:
 2. A pan system that is two systems: mixer strips/buses/master run a project
    Pan Law that is SKIPPED at dead center (so the selected law never runs on an
    untouched knob and jumps 3 or 6 dB on the first tick), while every engine
-   pan (BaySickPlayer, Harmless, timeline clips, our SFZ loader) hardcodes
+   pan (BaySickPlayer, BaySickSolstice, timeline clips, our SFZ loader) hardcodes
    cos/sin and sits at -3 dB at center, ignoring the setting. Two of the three
    menu laws are wrong against FL ("Triangular" is a -6 dB crossfade no DAW
    has; "Square" is FL's Triangular) and the third is skipped.
@@ -43,7 +43,7 @@ plays through it.
 
 **Risk.** Task 1 changes every project's absolute level (+1.9 dB from the
 Master Gain removal; panned strips get louder under Ramped). Task 2 lifts
-Harmless / BaySickPlayer / clips by +3 dB at default pan. Both are Jeff's
+BaySickSolstice / BaySickPlayer / clips by +3 dB at default pan. Both are Jeff's
 rulings (SC-1, SC-4). Pre-v1: no load shims, no migrations.
 
 **Dependencies.** None external. The QA-Manuals ruling-B work (offline session
@@ -59,9 +59,9 @@ on Jeff's approval as its own QA-Manuals commit before Task 1's commit.
 | SC-1 | **Delete the hidden `masterGain` parameter outright** (not set to 1.0). The master chain multiplies by the fader alone. Old projects carrying a stored value ignore it. | "This is something you did that I never once asked for... That needs to be removed." Every fader now tells the truth. |
 | SC-2 | **Two pan laws, both center-unity, continuous through center, no center skip.** `Ramped` (FL Circular: cos/sin scaled so center = 1.0 and the near side rises to +3 dB at 100%). `Flat` (FL Triangular: near side holds 1.0, far side tapers linearly to 0). The third menu entry is deleted. Labels are `Ramped` / `Flat`; the dropdown rows carry hover tooltips. | FL manual lists exactly two laws; FL measured center-unity / +3 dB at the extreme; every DAW researched converges on center-unity. Jeff's own FL measurement confirmed center reads 0. |
 | SC-3 | **FL fold at all three mixer stages** (strip, bus, master): center is identity; as you pan, the far side crossfades INTO the near side; at 100% both sides land in the near channel at 0.707 each. | Jeff measured it in FL: left-only material panned 100% right reads -3; both-sides material "doubles" (+3 dB) on the near side. Pins the coefficient at 0.707. |
-| SC-4 | **Every pan knob follows the one project law.** Engine pans (BaySickPlayer engine pan, Harmless master pan, the Clips-page pan that drives timeline clip decode) use the law: mono placement form for synthesized / mono-sample voices, balance form for stereo material. The resulting **+3 dB lift** of those engines at default pan is **accepted** (2 = a). | FL's own SDK has the host compute every native instrument's per-voice L/R gains. The lift also closes the hidden 3 dB gap where BaySickSynth and hosted plugins were already hotter. |
+| SC-4 | **Every pan knob follows the one project law.** Engine pans (BaySickPlayer engine pan, BaySickSolstice master pan, the Clips-page pan that drives timeline clip decode) use the law: mono placement form for synthesized / mono-sample voices, balance form for stereo material. The resulting **+3 dB lift** of those engines at default pan is **accepted** (2 = a). | FL's own SDK has the host compute every native instrument's per-voice L/R gains. The lift also closes the hidden 3 dB gap where BaySickSynth and hosted plugins were already hotter. |
 | SC-5 | **Note pan combines with engine pan as one POSITION; the law is evaluated once per voice** (4 = a). Never two laws multiplied. | FL hands its host one Pan value per voice. Multiplying laws double-attenuates or overshoots. |
-| SC-6 | **Harmless unison spread stays engine-internal** (3 = a). **Strip stereo width knobs and BaySickPlayer "stereo" are mid/side width controls, not pans - untouched.** | No synth routes spread through a host law; width controls place nothing. |
+| SC-6 | **BaySickSolstice unison spread stays engine-internal** (3 = a). **Strip stereo width knobs and BaySickPlayer "stereo" are mid/side width controls, not pans - untouched.** | No synth routes spread through a host law; width controls place nothing. |
 | SC-7 | **SlideSampler's SFZ `pan` opcode, vendored sfizz, hosted VST3: unchanged.** | Instrument-file content and third-party internals own their pan everywhere; no plugin standard can carry a pan law. Their law-following pan is the strip they sit on. |
 | SC-8 | Player Volume default stays 0.8 (D = a). | - |
 | SC-9 | **Export row menu targets:** every existing Clip/Vox/Inst page, then "a new Clip Page / Vox Page / Inst Page", then **"Direct to Master"** appended (1 = b). No Move/Copy question. | The shipped (dead) menu already had the first two groups; Jeff keeps them. |
@@ -109,8 +109,8 @@ Everything else is locked above.
 **Task 2 - engine pan sites + note pan**
 - `Source/BaySickPlayer/BaySickPlayerDSP.cpp:1212-1219` `setPan`; `:1162-1174` note-pan multiply -> combined position.
 - `Source/BaySickPlayer/BaySickPlayerProcessor.cpp:184` pan push change-gate (+ law in the key).
-- `Source/Harmless/AdditiveVoice.cpp:786-792` `setPan`; `:726-728` note pan. `:1110-1116` unison LEFT ALONE.
-- `Source/Harmless/HarmlessProcessor.cpp:637` change-gate.
+- `Source/BaySickSolstice/AdditiveVoice.cpp:786-792` `setPan`; `:726-728` note pan. `:1110-1116` unison LEFT ALONE.
+- `Source/BaySickSolstice/BaySickSolsticeProcessor.cpp:637` change-gate.
 - `Source/BaySickSynth/BaySickSynthVoice.cpp:912-914` note pan (no engine pan: note position alone through the law).
 - `Source/PluginProcessor.cpp:1010-1013` clip decode pan (stereo file -> balance form; mono -> placement); `:1776-1781` apply.
 - `Source/SlideSampler/SlideSampler.cpp:1032` LEFT ALONE. `libs/sfizz` LEFT ALONE.
@@ -197,14 +197,14 @@ void apply (juce::AudioBuffer<float>&, const StereoMatrix& from, const StereoMat
 
 ### Task 2 - every engine pan follows the law; note pan as one position
 
-- [ ] Engines receive the law pointer from EngineRig; each folds the law value into its existing pan change-gate (`HarmlessProcessor.cpp:637`, `BaySickPlayerProcessor.cpp:184`) so gains recompute only when pan OR law changed (CPU Safeguarding).
+- [ ] Engines receive the law pointer from EngineRig; each folds the law value into its existing pan change-gate (`BaySickSolsticeProcessor.cpp:637`, `BaySickPlayerProcessor.cpp:184`) so gains recompute only when pan OR law changed (CPU Safeguarding).
 - [ ] BaySickPlayer voice: `setPan` -> `pan::monoGains (enginePan + notePan clamped, law)`; delete the `npLOf` / `npROf` multiply (`BaySickPlayerDSP.cpp:1162-1174`). Note-pan ramps (CC89 glide) keep ramping the POSITION.
-- [ ] Harmless: `AdditiveVoice::setPan` same shape; delete the `npL/npR` multiply at `:726-728`. Unison `:1110-1116` untouched.
+- [ ] BaySickSolstice: `AdditiveVoice::setPan` same shape; delete the `npL/npR` multiply at `:726-728`. Unison `:1110-1116` untouched.
 - [ ] BaySickSynth: note position alone through `monoGains` (`BaySickSynthVoice.cpp:912-914`).
 - [ ] Clip decode (`PluginProcessor.cpp:1010-1013`): stereo file -> `pan::balance`; mono file -> `monoGains`; applied at `:1776-1781` unchanged in shape.
 - [ ] Confirm by grep that no cos/sin pan remains outside unison, SlideSampler and libs.
 - [ ] Build gate.
-- [ ] **Tell Jeff:** (1) Harmless, BaySickPlayer and a clip row at default pan all read +3 dB louder than before; BaySickSynth and a hosted plugin tab do not move; the engine families now sit level with each other. (2) Harmless pan knob sweep under Ramped then Flat behaves exactly like the strip pan did in Task 1. (3) Piano roll: a note with note-pan hard left on a Layers tab whose engine pan is hard right plays CENTERED (positions add), not silent. (4) Harmless unison spread sounds unchanged.
+- [ ] **Tell Jeff:** (1) BaySickSolstice, BaySickPlayer and a clip row at default pan all read +3 dB louder than before; BaySickSynth and a hosted plugin tab do not move; the engine families now sit level with each other. (2) BaySickSolstice pan knob sweep under Ramped then Flat behaves exactly like the strip pan did in Task 1. (3) Piano roll: a note with note-pan hard left on a Layers tab whose engine pan is hard right plays CENTERED (positions add), not silent. (4) BaySickSolstice unison spread sounds unchanged.
 - [ ] Commit -> surface -> wait. Running notes.
 
 ### Task 3 - browser right-click lives; Show in Explorer everywhere; Direct to Master in the menu
@@ -278,8 +278,8 @@ void apply (juce::AudioBuffer<float>&, const StereoMatrix& from, const StereoMat
 
 ## Verification (end-to-end smoke)
 
-1. Project 132 at defaults: master reads +1.9 dB over the last QA-Manuals build; Harmless / clips / BaySickPlayer tabs +3 dB on top; BaySickSynth + hosted plugin tabs unchanged relative to the master.
-2. Pan law menu: Ramped / Flat with tooltips; strip, bus, master, Harmless knob and BaySickPlayer knob all sweep the same way; no step at center anywhere; a stereo clip at 100% folds.
+1. Project 132 at defaults: master reads +1.9 dB over the last QA-Manuals build; BaySickSolstice / clips / BaySickPlayer tabs +3 dB on top; BaySickSynth + hosted plugin tabs unchanged relative to the master.
+2. Pan law menu: Ramped / Flat with tooltips; strip, bus, master, BaySickSolstice knob and BaySickPlayer knob all sweep the same way; no step at center anywhere; a stereo clip at 100% folds.
 3. Export `Clean.wav` -> Add to Project > Direct to Master -> play from bar 1 -> analyzer integrated = the file's true loudness (-19.2 + the 1.9 the old build stole = what the live mix now reads).
 4. Rename that export on disk, reopen: Locate / Proceed / Remove all behave per SC-12.
 5. Three playback passes -> one session report, three takes; interactive selection math matches the app; export two, remove one.

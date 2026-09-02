@@ -104,7 +104,7 @@ Documented QA-H scope-out (test plan H-3, ghostly-riffing-moth.md:166). So this 
 | S-4 | **Porta** = same single-voice (cut base + retrigger) but glides over a per-note **"Porta Length In Beats"** value, **ignoring the block length** — uses only the note's start point. New per-note field, default **1 beat**. |
 | S-5 | The **base-note cut** for RT + Porta = a mono-cut on the retrigger path: stop the glide-source voice at the moment the slide note starts (advance its note-off to the slide start). RP does NOT cut (it reuses the source voice). |
 | S-6 | **Issue 5A:** the RP path also emits the note's per-note expression (velocity/pan/finePitch/cutoff/reso/release) — mirror `emitPianoNoteOn`'s expression block. |
-| S-7 | **Issue 5B (app-wide):** add a CC10 pan consumer + a per-voice pan stage to each engine voice (BaySickSynth, BaySickBass, Harmless/AdditiveVoice, VibePlayer). Fixes panning for ALL notes, not just slides. |
+| S-7 | **Issue 5B (app-wide):** add a CC10 pan consumer + a per-voice pan stage to each engine voice (BaySickSynth, BaySickBass, BaySickSolstice/AdditiveVoice, VibePlayer). Fixes panning for ALL notes, not just slides. |
 | S-8 | **Issue 6:** double-click-return-to-default on the 6 Note Properties sliders + the new Porta Length box. Neutral defaults: Velocity 80, Release 50, Fine Pitch 0, Panning 0, Filter Cutoff 50, Resonance 50, Porta Length 1 beat. |
 | S-9 | **Issue 7:** add a **Close** button at the bottom of the Note Properties popup (dismisses the CallOutBox; the dtor commit already fires on dismiss). Grow the panel height one row. |
 | S-10 | The **"Porta Length In Beats"** control lives in the Note Properties popup, a type-in box like the BPM box, **greyed/disabled unless the note type is Porta**. |
@@ -126,7 +126,7 @@ Documented QA-H scope-out (test plan H-3, ghostly-riffing-moth.md:166). So this 
 ## Files to modify (by task)
 
 - **Task 1 (slide DSP):** Source/PluginProcessor.cpp (scheduler :2300-2359, `findGlideSourcePitch` :104, `findRampAnchorPitch` :153, `emitPianoNoteOn` :58, `emitRampSlide` :182, the base-note mono-cut); Source/PatternManager.h (`PianoNote` — new `portaLengthBeats` field + serialization in PatternManager.cpp).
-- **Task 2 (slide expression + panning):** Source/PluginProcessor.cpp (RP expression emit); Source/BaySickSynth/BaySickSynthVoice.h/.cpp, Source/Harmless/AdditiveVoice.h/.cpp, Source/VibePlayer/VibePlayerDSP.h/.cpp (+ BaySickBass shares BaySickSynthDSP) — CC10 consumer + per-voice pan stage.
+- **Task 2 (slide expression + panning):** Source/PluginProcessor.cpp (RP expression emit); Source/BaySickSynth/BaySickSynthVoice.h/.cpp, Source/BaySickSolstice/AdditiveVoice.h/.cpp, Source/VibePlayer/VibePlayerDSP.h/.cpp (+ BaySickBass shares BaySickSynthDSP) — CC10 consumer + per-voice pan stage.
 - **Task 3 (Note Properties popup):** Source/Standalone/PianoRoll.cpp (NotePropsPanel :1378-1465 — Porta Length box + greying, double-click defaults, Close button, +1 row height).
 - **Task 4 (tiling):** Source/PatternManager.cpp/.h (`getEffectivePatternLoopBeats` → per-index variant, e.g. `getPatternContentBeats(int idx)`); Source/PluginProcessor.cpp:2419; Source/Standalone/BuilderPage.cpp:2333 + :2363.
 - **Task 5 (slice):** Source/Standalone/PianoRoll.cpp (`sliceNotesOnLine` :960-1000 finite-segment; `mouseDrag` :1995 shift-snap; snap helpers :522/:538); Source/PluginProcessor.cpp:2309 (contentLo clamp-and-play, B-3); Source/Standalone/BuilderPage.cpp:2363 (preview clamp) + :5337-5410 (drag-line slice, guard/snap, seam, per-piece window note-cut) + ArrangementGrid mouseDrag :5682 + paint.
@@ -143,7 +143,7 @@ Documented QA-H scope-out (test plan H-3, ghostly-riffing-moth.md:166). So this 
 
 ### Task 2 — Slide expression + app-wide panning (Issue 5, S-6/S-7)
 - [ ] S-6: RP path emits the note's expression CCs (mirror `emitPianoNoteOn`'s CC10/pitchwheel/CC74/CC71/CC72 block).
-- [ ] S-7: add a CC10 pan consumer to each engine voice + a per-voice pan stage in the render loop (BaySickSynth, BaySickBass, Harmless, VibePlayer). Verify pan works for a plain note first, then a slide.
+- [ ] S-7: add a CC10 pan consumer to each engine voice + a per-voice pan stage in the render loop (BaySickSynth, BaySickBass, BaySickSolstice, VibePlayer). Verify pan works for a plain note first, then a slide.
 - [ ] Build gate → `/draft-doc running-notes`.
 
 ### Task 3 — Note Properties popup (Issues 6-7, S-8/S-9/S-10)

@@ -19,9 +19,9 @@ the following *incidentally* — none of it was being looked for:
 | `addParamsForEffectRack` — 6 slots x 15 params PER TRACK, zero readers | PluginProcessor | dead registration |
 | Menu items 120/121 with no dispatch case — silent no-ops | StandaloneEditor | dead UI |
 | `doNew`/`doSave`/`doOpen`/`doExport` stub quartet, zero callers | BuilderPage:7718 | dead code |
-| "lfo_rate / lfo_shape ripped" — both params live, consumed, attached | HarmlessEditor:538 | **lying comment** (cost 2 knobs their automation) |
+| "lfo_rate / lfo_shape ripped" — both params live, consumed, attached | BaySickSolsticeEditor:538 | **lying comment** (cost 2 knobs their automation) |
 | CLAUDE.md wrong about `oeq_mix` (claimed absent; present since 2026-04-19) | CLAUDE.md | lying doc |
-| "invisible by never being addAndMakeVisible'd" — it IS added | HarmlessEditor:293 | lying comment |
+| "invisible by never being addAndMakeVisible'd" — it IS added | BaySickSolsticeEditor:293 | lying comment |
 | InstPage.h claims Vox hosts NAM/IR as Inst does — it does not | InstPage.h:19 | lying comment |
 | Song-end math duplicated between transport + export | StandaloneEditor / BuilderPage | drift risk |
 | Pedals state tag colliding with the APVTS child — worked by tree-order accident | BaySickPedalsProcessor | latent data bug |
@@ -79,7 +79,7 @@ Known-in-advance starting points, from the pre-measured surface:
 - Task 1: the 29 `juce::String err;` sites (concentrations: `BaySickNAMIREditor.cpp` 8,
   `BaySickPedalsEditor.cpp` 4, `SlotComponent.cpp` 3) + the `existsAsFile()` load-guard subset
 - Task 2: `Source/Standalone/BuilderPage.cpp:7718-7736` (the stub quartet, already logged by QA-Export)
-- Task 3: `Source/Harmless/HarmlessEditor.cpp:293`, `Source/Inst/InstPage.h:19` (both already
+- Task 3: `Source/BaySickSolstice/BaySickSolsticeEditor.cpp:293`, `Source/Inst/InstPage.h:19` (both already
   identified as lying), plus whatever the sweep finds
 
 ## Tasks
@@ -137,14 +137,14 @@ findings, and fixing a non-bug is worse than missing a real one — it churns wo
 ### Task 3 — Comment + doc truth audit
 
 - [ ] Sweep for comments that contradict the code they describe. This class caused real damage:
-  two visible Harmless knobs had no automation for months because a comment said their params were
+  two visible BaySickSolstice knobs had no automation for months because a comment said their params were
   "ripped" when they were live, consumed and attached.
 - [ ] Fix wrong comments **wherever they live**, not only in edited regions
   (`feedback_no_docs_only_commit_fix_wrong_comments` — Rule 6's edited-regions scoping governs STYLE
   audits, not factual errors).
 - [ ] Include `CLAUDE.md` in the sweep — it was wrong about `oeq_mix`, and a wrong entry there
   propagates into every future session's assumptions.
-- [ ] Known starting points: `HarmlessEditor.cpp:293` (addAndMakeVisible claim), `InstPage.h:19`
+- [ ] Known starting points: `BaySickSolsticeEditor.cpp:293` (addAndMakeVisible claim), `InstPage.h:19`
   (Vox/NAM-IR hosting claim).
 - [ ] Build gate.
 
@@ -284,7 +284,7 @@ heron), which strengthens its premise — it audits the post-inversion, post-she
 
 1. **Re-measure the pre-measured surface at open.** The 2026-07-25 counts (29 err-string
    sites, 27 outErr functions, 150 existsAsFile) predate the largest churn of the QA era.
-2. **Ownership dedupe with deep-packing-badger Task 9:** the HarmlessEditor.cpp:293 comment,
+2. **Ownership dedupe with deep-packing-badger Task 9:** the BaySickSolsticeEditor.cpp:293 comment,
    the InstPage.h:19 hosting claim, and the `kStateVersion` decision are ALSO badger Task 9
    items. Check badger's close state before sweeping these — no double-fix, no double-claim.
 3. **Stale context-table motivator:** "automation registry grows on tab churn, no

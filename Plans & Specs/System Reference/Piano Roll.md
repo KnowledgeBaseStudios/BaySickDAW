@@ -70,7 +70,7 @@ Beside them sits the **Swing Mix** knob for the instrument you are on. See "Swin
 | **Note type** | Shows the type new notes will be. Click it, or press `S`, to cycle Flat / RP Slide / RT Slide / Porta. With notes selected, `S` also converts them. |
 | **Undo / Redo / H** | Undo, redo, open the history window. |
 | **+ / -** | Zoom in and out. |
-| Context label | Right-aligned read-only text, e.g. "Layer 1 - Harmless". |
+| Context label | Right-aligned read-only text, e.g. "Layer 1 - BaySickSolstice". |
 
 A Stamp tool also exists but has no toolbar button - it arms itself when you pick a chord
 from the Chords menu.

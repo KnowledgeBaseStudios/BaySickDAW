@@ -74,7 +74,7 @@ The right-click menu on a control carries:
 |---|---|
 | Automate: `<name>` | Create (or jump to) the automation clip for this control. |
 | Type in value... | Type an exact value instead of dragging. |
-| Modulate envelope... | Only on engines with a modulation matrix (Harmless). Opens that control in the engine's own mod editor. |
+| Modulate envelope... | Only on engines with a modulation matrix (BaySickSolstice). Opens that control in the engine's own mod editor. |
 | MIDI Learn / MIDI Forget / Save MIDI mappings as global default | See *MIDI Learn*. |
 
 Two more creation surfaces:
@@ -134,7 +134,7 @@ Almost everything with a value:
 - Every engine parameter on every instrument tab, including per-tab parameters
   that only exist once that tab is created.
 - Hosted VST3 plugin parameters, both instruments and effects.
-- Harmless's per-target modulation depth and length.
+- BaySickSolstice's per-target modulation depth and length.
 - **Tempo**, via right-clicking the BPM field in the transport bar. The tempo
   lane is a live override - it drives playback without rewriting the project's
   stored base tempo.

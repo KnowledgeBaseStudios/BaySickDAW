@@ -53,7 +53,7 @@ Read `Plans & Specs/Main Plan.md` §0 ("Document Formatting Conventions") at the
 When drafting an Implemented Work Log entry, you must assign one or more buckets. Map by what the batch's CHANGES TOUCH, not its name:
 
 - Touches `Source/DSP/*`, `Source/EffectRack.*`, `Source/Standalone/EffectsPage.*` → **Effects**
-- Touches `Source/Harmless/`, `Source/BaySick*/`, `Source/VibePlayer/`, `Source/Standalone/LayersPage.*`, `BassPage.*`, `DrumPage.*` → **Players**
+- Touches `Source/BaySickSolstice/`, `Source/BaySick*/`, `Source/VibePlayer/`, `Source/Standalone/LayersPage.*`, `BassPage.*`, `DrumPage.*` → **Players**
 - Touches `Source/VibeGraph.*`, `Source/Standalone/MixerPage.*`, `MixerTrackStrip.*` → **Mixer / Routing**
 - Touches `Source/Standalone/BuilderPage.*`, project XML save/load → **System Pages**
 - Touches `VibeLAF`, palette, theme, layout → **UI / L&F / Theming**

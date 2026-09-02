@@ -272,7 +272,7 @@ change nothing unprompted).
 ## Verification (authors into Master Test Plan §B)
 
 1. Multi-surface unwind: place notes -> move a mixer fader -> load a rack effect -> add a
-   pattern -> add a tempo marker -> rename a pattern -> drag a Harmless macro. Seven Ctrl+Z
+   pattern -> add a tempo marker -> rename a pattern -> drag a BaySickSolstice macro. Seven Ctrl+Z
    presses restore the exact starting state, in reverse order; Ctrl+Alt+Z replays all seven.
 2. Knob drag on any engine editor = ONE history row, labeled with the tab + control name;
    double-click reset = one row.

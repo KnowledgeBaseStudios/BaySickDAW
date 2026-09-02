@@ -436,7 +436,7 @@ parent-managed preset-cluster width so the knob sits left of it. (3)
 controls, idempotent on re-entry (source swaps re-run hosting). (4) `setReservedTrailingWidth(px)`
 — G-14 empty slots. Layout right→left: [parent hint][hosted][reserved][knob].
 
-**In-house editors ×4 (Harmless / BaySickSynth / BaySickBass / VibePlayer).** Inline
+**In-house editors ×4 (BaySickSolstice / BaySickSynth / BaySickBass / VibePlayer).** Inline
 `enableSwingKnob` forward (sets hint 88 = their preset button); pages wire it at editor creation:
 LayersPage → `swing_layer_{i}_*`, BassPage → `swing_bass_{i}_*`, DrumPage → `swing_drum_{i}_*` —
 family = the PAGE, so a BaySickPlayer under a Drums tab binds drum params.
@@ -957,7 +957,7 @@ strip pass)".
 **Files this round** (all uncommitted, on top of the batch's prior work):
 Source/Standalone/BuilderPage.cpp, Source/Standalone/BaySickRustyDrumsPage.cpp,
 Source/VibePlayer/VibePlayerDSP.h/.cpp, Source/BaySickSynth/BaySickSynthVoice.cpp,
-Source/Harmless/AdditiveVoice.cpp, Source/SlideSampler/SlideSampler.cpp,
+Source/BaySickSolstice/AdditiveVoice.cpp, Source/SlideSampler/SlideSampler.cpp,
 Source/DSP/OctaveStyleDSP.h/.cpp, Source/Standalone/GlobalTransportBar.cpp,
 Source/Standalone/BaySickTitleBar.cpp, Source/G3PlayheadDiag.h, Source/PluginProcessor.cpp.
 
@@ -984,7 +984,7 @@ for a re-test after the fix.
 
 **Stuck audition notes while moving (Jeff, Debug) — ROOT CAUSE + FIX, all four in-house
 engines.** The press-and-hold audition channels (auditionNoteOn/Off) were SINGLE-SLOT atomics in
-HarmlessProcessor, BaySickSynthProcessor, BaySickBassProcessor, VibePlayerProcessor: each store
+BaySickSolsticeProcessor, BaySickSynthProcessor, BaySickBassProcessor, VibePlayerProcessor: each store
 overwrites the last, so when a note-drag crossed two pitches inside one audio block, the first
 noteOff was overwritten before processBlock read it — that voice never got its off and rang until
 Stop's all-notes-off. (Debug pacing bunches more UI events per block = more frequent there.)
@@ -1015,18 +1015,18 @@ value popup); cleared by clearTabSlots so non-player pages (Clips/Vox) never sho
 StandaloneEditor wires it per page-show for Layers/Bass/Inst/Drum (`swing_<family>_<idx>`) +
 Rusty (`swing_rusty`). REMOVED: the five pages' editor-title-bar wiring
 (LayersPage/BassPage/DrumPage/InstPage/BaySickRustyDrumsPage), the four editor-header
-enableSwingKnob forwards (Harmless/BaySickSynth/BaySickBass/VibePlayer editors), and
+enableSwingKnob forwards (BaySickSolstice/BaySickSynth/BaySickBass/VibePlayer editors), and
 BaySickTitleBar's enableSwingKnob + nested SwingKnobSlider + truncate members (the bar keeps the
 G-16 hosted / G-14 reserved machinery). Transport's global knob (SW-1) unchanged.
 
 **Files this round** (all uncommitted, on top of the batch's prior work):
-Source/Harmless/HarmlessProcessor.h/.cpp,
+Source/BaySickSolstice/BaySickSolsticeProcessor.h/.cpp,
 Source/BaySickSynth/BaySickSynthProcessor.h/.cpp, Source/BaySickBass/BaySickBassProcessor.h/.cpp,
 Source/VibePlayer/VibePlayerProcessor.h/.cpp, Source/Standalone/PianoRoll.h/.cpp,
 Source/Standalone/BaySickRustyDrumsPage.cpp, Source/Standalone/SharedUI.h/.cpp,
 Source/Standalone/StandaloneEditor.cpp, Source/Standalone/LayersPage.cpp,
 Source/Standalone/BassPage.cpp, Source/Standalone/DrumPage.cpp, Source/Inst/InstPage.cpp,
-Source/Standalone/BaySickTitleBar.h/.cpp, Source/Harmless/HarmlessEditor.h,
+Source/Standalone/BaySickTitleBar.h/.cpp, Source/BaySickSolstice/BaySickSolsticeEditor.h,
 Source/BaySickSynth/BaySickSynthEditor.h, Source/BaySickBass/BaySickBassEditor.h,
 Source/VibePlayer/VibePlayerEditor.h.
 
@@ -1156,7 +1156,7 @@ retired once the next build archives the current pair.
   since Jeff kept all diagnostics.
 
 **Files this pass:** .gitignore, Source/SlideSampler/SlideSampler.h/.cpp,
-Source/Harmless/HarmlessProcessor.cpp, Source/BaySickSynth/BaySickSynthProcessor.cpp,
+Source/BaySickSolstice/BaySickSolsticeProcessor.cpp, Source/BaySickSynth/BaySickSynthProcessor.cpp,
 Source/BaySickBass/BaySickBassProcessor.cpp, Source/VibePlayer/VibePlayerProcessor.cpp,
 Source/Standalone/SharedUI.cpp, Source/Standalone/BaySickTitleBar.h/.cpp,
 Source/Standalone/StandaloneEditor.cpp.
@@ -1348,7 +1348,7 @@ All uncommitted on top of HEAD `d6abc38b`, interleaved with the four prior uncom
 
 - **New:** `Source/G3PlayheadDiag.h` (the SlideSampler rewrites ride the lynx-created files).
 - **Scheduler / transport / data model:** `Source/PluginProcessor.h/.cpp`, `Source/PatternManager.h/.cpp`.
-- **In-house voices + processors:** `Source/BroadcastSynthesiser.h`, `Source/BaySickSynth/BaySickSynthVoice.h/.cpp`, `Source/Harmless/AdditiveVoice.h/.cpp`, `Source/VibePlayer/VibePlayerDSP.h/.cpp`, `Source/Harmless/HarmlessProcessor.h/.cpp`, `Source/BaySickSynth/BaySickSynthProcessor.h/.cpp`, `Source/BaySickBass/BaySickBassProcessor.h/.cpp`, `Source/VibePlayer/VibePlayerProcessor.h/.cpp`.
+- **In-house voices + processors:** `Source/BroadcastSynthesiser.h`, `Source/BaySickSynth/BaySickSynthVoice.h/.cpp`, `Source/BaySickSolstice/AdditiveVoice.h/.cpp`, `Source/VibePlayer/VibePlayerDSP.h/.cpp`, `Source/BaySickSolstice/BaySickSolsticeProcessor.h/.cpp`, `Source/BaySickSynth/BaySickSynthProcessor.h/.cpp`, `Source/BaySickBass/BaySickBassProcessor.h/.cpp`, `Source/VibePlayer/VibePlayerProcessor.h/.cpp`.
 - **Slide stack + sfizz engines:** `Source/SlideSampler/SlideRegionMap.h/.cpp`, `Source/SlideSampler/SlideSampler.h/.cpp`, `Source/BaySickGuitars/BaySickGuitarsProcessor.h/.cpp`, `Source/BaySickBasses/BaySickBassesProcessor.h/.cpp`, `Source/BaySickRustyDrums/BaySickRustyDrumsProcessor.cpp`, `Source/Engine/Tasks/InstStripTask.cpp`, `Source/Inst/InstPage.h/.cpp`.
 - **Pages / grids / UI:** `Source/Standalone/PianoRoll.h/.cpp`, `Source/Standalone/PianoRollPage.h/.cpp`, `Source/Standalone/DrumKitGrid.h/.cpp`, `Source/Standalone/BuilderPage.h/.cpp`, `Source/Standalone/StandaloneEditor.h/.cpp`, `Source/Standalone/KeyBindings.cpp`, `Source/Standalone/GlobalTransportBar.h/.cpp`, `Source/Standalone/BaySickTitleBar.h/.cpp`, `Source/Standalone/SharedUI.h/.cpp`, `Source/Standalone/AriaControlPanel.h`, `Source/Standalone/BaySickRustyDrumsPage.cpp`, `Source/BaySickNAMIR/BaySickNAMIREditor.cpp`, `Source/Standalone/LayersPage.cpp`, `Source/Standalone/BassPage.cpp`, `Source/Standalone/DrumPage.cpp`, the four engine-editor headers.
 - **DSP:** `Source/DSP/OctaveStyleDSP.h/.cpp`.

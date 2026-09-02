@@ -61,7 +61,7 @@ Formatting Conventions".  Local layout for this doc:
   one-liner) so cross-doc grep `^## <BucketName>` finds the section
   in every doc.
 - `### <Sub-cluster>` — sub-cluster inside a bucket (`### §1 ChorusDSP`,
-  `### §P1 Harmless`, `### Fire-Hose net-new effect modules`, etc.).
+  `### §P1 BaySickSolstice`, `### Fire-Hose net-new effect modules`, etc.).
 - `- **[<ID> / <TAG>]** <Title> — <description>.` — single-line entry.
 
 Grep patterns:
@@ -379,30 +379,30 @@ DSP modules + FX rack mechanics + future / restoration effects.
 
 ## Players
 
-Every sound-producing engine: Harmless, BaySickPlayer, BaySick family
+Every sound-producing engine: BaySickSolstice, BaySickPlayer, BaySick family
 (Synth + Bass), dynamic-drum work (Phase D), BaySickVocal, BaySickPedals,
 BaySickRustyDrums, BaySickGuitars, BaySickBasses, BaySickNAM/IR + future
 engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 
-### §P1 Harmless
+### §P1 BaySickSolstice
 - **[BLU-330 / AQ]** Harmonizer module (T3-Harm) — re-add 6 `harm_*` + Harmonizer panel + DSP. PRESET-SAFE.
 - **[BLU-331 / AQ]** Image resynthesis (T3-Img) — drag PNG → 516 partials.
 - **[BLU-332 / AQ]** Audio resynthesis (T3-Aud) — drag WAV → harmonic analysis.
 - **[BLU-333 / AQ]** Spectral unit-order reordering (T3-Reorder) — Advanced tab drag-to-reorder.
-- **[BLU-334 / AQ]** Up to 9-voice unison expansion (T3-9Voice) — if T2-C ships smaller. **SHIPPED in v1 (Harmless S3 T2-C, predates this repo's history)** - the contingency never fired: T2-C shipped at full size rather than smaller, so there is nothing left to expand. The UNISON box's VOICES knob is 1-9 (`unison_voices`, HarmlessProcessor.cpp:211) and AdditiveVoice renders all nine slots (kMaxUnison = 9, per-slot detune / stereo pan / start-phase stagger), not a capped-at-fewer control.
+- **[BLU-334 / AQ]** Up to 9-voice unison expansion (T3-9Voice) — if T2-C ships smaller. **SHIPPED in v1 (BaySickSolstice S3 T2-C, predates this repo's history)** - the contingency never fired: T2-C shipped at full size rather than smaller, so there is nothing left to expand. The UNISON box's VOICES knob is 1-9 (`unison_voices`, BaySickSolsticeProcessor.cpp:211) and AdditiveVoice renders all nine slots (kMaxUnison = 9, per-slot detune / stereo pan / start-phase stagger), not a capped-at-fewer control.
 - **[BLU-335 / AQ]** Curve editor enhancements (T3-Curve) — Bezier tension, looping segments.
 - **[BLU-336 / AQ]** Legato curve-shape toggles (T3-LegatoCurves) — Linear/exp/log/S-curve. PRESET-SAFE.
 - **[BLU-337 / AQ]** Filter osc rate knob (T3-FltOsc) — Filter-FM modulation. PRESET-SAFE.
 - **[BLU-338 / AQ]** Filter secondary topology dropdown (T3-FltShape) — 2-pole/4-pole/ladder/SVF. PRESET-SAFE.
-- **[BLU-339 / AQ]** Pluck curve-shape toggle (T3-PluckCurve) — alternative pluck-decay envelopes. PRESET-SAFE. **One alternative SHIPPED in v1 (Harmless S1 T2-N, predates this repo's history); the multi-shape toggle is STILL OPEN** - a per-part BLUR toggle (`pluck_blur` / `partB_pluck_blur`) sits beside the PLUCK knob and rounds the pluck by halving the per-partial decay rate. That is one alternative, not the set of alternative decay envelopes this entry asks for: the curve is always the same exponential (`amps[i] *= exp(-rate * i)` in `PluckModule`), only its rate changes. Note also that Harmless.md calls BLUR "a softened attack curve"; the code has no attack stage - it tilts the harmonic stack.
+- **[BLU-339 / AQ]** Pluck curve-shape toggle (T3-PluckCurve) — alternative pluck-decay envelopes. PRESET-SAFE. **One alternative SHIPPED in v1 (BaySickSolstice S1 T2-N, predates this repo's history); the multi-shape toggle is STILL OPEN** - a per-part BLUR toggle (`pluck_blur` / `partB_pluck_blur`) sits beside the PLUCK knob and rounds the pluck by halving the per-partial decay rate. That is one alternative, not the set of alternative decay envelopes this entry asks for: the curve is always the same exponential (`amps[i] *= exp(-rate * i)` in `PluckModule`), only its rate changes. Note also that BaySickSolstice.md calls BLUR "a softened attack curve"; the code has no attack stage - it tilts the harmonic stack.
 - **[BLU-340 / AQ]** Phaser LFO waveform dropdown (T3-PhaserShape) — Triangle/Sine/Saw/Square. PRESET-SAFE.
 - **[BLU-341 / AQ]** EQ output-curve dropdown (T3-EQShape) — Peak/shelf/parametric beyond tilt. PRESET-SAFE.
 - **[BLU-342 / AQ]** Per-source A/B/Both routing (T3-PerPartModRouting) — re-adds GLOBAL toggle. PRESET-SAFE.
-- **[BLU-343 / AQ]** Harmor-style Advanced envelope tab (T3-HarmlessADV) — unit order, poly-rel, ramp. PRESET-SAFE.
-- **[BLU-344 / AQ]** Pattern-time automation of mod editor knobs (T3-ModMatrixAutomation) — DEPTH/LENGTH not APVTS-backed. PRESET-SAFE. **SHIPPED in v1 (QA-ModelShell TS3 1dd08437)** - DEPTH/LENGTH lanes per (target x source) against the shared HarmlessModLength table, live + offline.
+- **[BLU-343 / AQ]** Harmor-style Advanced envelope tab (T3-BaySickSolsticeADV) — unit order, poly-rel, ramp. PRESET-SAFE.
+- **[BLU-344 / AQ]** Pattern-time automation of mod editor knobs (T3-ModMatrixAutomation) — DEPTH/LENGTH not APVTS-backed. PRESET-SAFE. **SHIPPED in v1 (QA-ModelShell TS3 1dd08437)** - DEPTH/LENGTH lanes per (target x source) against the shared BaySickSolsticeModLength table, live + offline.
 - **[BLU-345 / AQ]** Note duration plumbing (T3-NoteDurationAwareEnvelopes) — custom MIDI CC pair. PRESET-SAFE.
 - **[BLU-346 / WP]** Explicit sustain markers (T3-PerPointSustain) — right-click point Mark as sustain. PRESET-SAFE.
-- **[BLU-347 / AQ]** Harmor IMG tab (T3-HarmlessImgTab) — spectral image resynthesis. PRESET-SAFE.
+- **[BLU-347 / AQ]** Harmor IMG tab (T3-BaySickSolsticeImgTab) — spectral image resynthesis. PRESET-SAFE.
 - **[BLU-348 / AQ]** Real-time per-voice additive synthesis (T3-RealTimeAdditive) — true Harmor architecture. PRESET-SAFE.
 
 ### §P2 BaySickPlayer (VibePlayer-prefix retained)
@@ -441,7 +441,7 @@ engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 ### §P8 VST3 Instrument Hosting
 - **[BLU-447 / OT]** VST3 Instrument Hosting — 3rd-party VST3 instruments per tab. ~1-2 weeks. **SHIPPED in v1 (QA-ModelShell TS6 4ddf25fa creation half; TS7 a055d7ef consumption half - the tab was half-built behind ~30 per-kind enumeration sites, 41 defects closed; + 93bb158e)** - Plugins tab with own bus (13 / base 900), strip, piano roll, _sendTo routing under Layers/Bass.
 
-### Fire-Hose new synth engines (peer to Harmless / BaySickSynth / BaySickBass)
+### Fire-Hose new synth engines (peer to BaySickSolstice / BaySickSynth / BaySickBass)
 - **[CL-001 / AQ]** Wavetable synthesizer (`BaySickWavetable`) — full standalone engine with morph, harmonics editor, multi-frame wavetables, FFT-based distort/transform, drag-WAV-to-wavetable import.
 - **[CL-002 / AQ]** FM synthesizer (`BaySickFM`) — 4-op or 6-op DX-style with algorithm presets, ratio + fixed Hz operator modes, integrated envelopes per op.
 - **[CL-003 / AQ]** Subtractive analog synth (`BaySickAnalog`) — Minimoog-style 3-osc + LFO + filter envelope + amp envelope with character-specific drift modeling.
@@ -486,10 +486,10 @@ engines (Wavetable / FM / Analog / Modal / Strings / Vocoder / etc.).
 - **[CL-221 / AQ]** Sample slicing with realtime score extraction — one-shot loop → auto-slice → per-slice MIDI score extraction with tails-mode (overlapping slice releases stay audible). Distinct from CL-010 (drum-machine playback). _(Inspired by: Serum 2)_ HIGH
 
 ### Voice-stealing & polyphony architecture
-- **[CL-275 / AQ]** Voice-stealing tier hierarchy (Off > Release > Sustain > Decay > Attack with age tie-break) — replace oldest-active-only at `Source/VibePlayer/VibePlayerDSP.cpp:944-960`; mirror to BaySickSynth/Bass/Harmless. _(Source: daw-architecture-research-2026-05-08.md §4)_ **BaySickPlayer half SHIPPED in v1 (QA-VoicePool Task 3, 0dcfe506)** - `VibeSynth::findStealCandidate` replaced the oldest-active-only scan with a 3-tier classifier (ADSR release / note-off queued this block or key already up / key physically held) with an oldest-by-age tie-break inside each tier, plus a same-block note-off look-ahead so an about-to-release voice demotes out of the protected tier instead of letting a held lead note get taken. Three tiers, not the entry's five - Sustain / Decay / Attack are one protected tier, so there is no Decay-vs-Attack distinction. The mirror is NOT done: BaySickSynth, BaySickBass (which wraps BaySickSynthDSP) and Harmless still add a flat 16-voice pool to a plain `juce::Synthesiser` and rely on JUCE's built-in `findVoiceToSteal`.
+- **[CL-275 / AQ]** Voice-stealing tier hierarchy (Off > Release > Sustain > Decay > Attack with age tie-break) — replace oldest-active-only at `Source/VibePlayer/VibePlayerDSP.cpp:944-960`; mirror to BaySickSynth/Bass/BaySickSolstice. _(Source: daw-architecture-research-2026-05-08.md §4)_ **BaySickPlayer half SHIPPED in v1 (QA-VoicePool Task 3, 0dcfe506)** - `VibeSynth::findStealCandidate` replaced the oldest-active-only scan with a 3-tier classifier (ADSR release / note-off queued this block or key already up / key physically held) with an oldest-by-age tie-break inside each tier, plus a same-block note-off look-ahead so an about-to-release voice demotes out of the protected tier instead of letting a held lead note get taken. Three tiers, not the entry's five - Sustain / Decay / Attack are one protected tier, so there is no Decay-vs-Attack distinction. The mirror is NOT done: BaySickSynth, BaySickBass (which wraps BaySickSynthDSP) and BaySickSolstice still add a flat 16-voice pool to a plain `juce::Synthesiser` and rely on JUCE's built-in `findVoiceToSteal`.
 - **[CL-276 / AQ]** Soft-stop on voiceCap eviction (3-10 ms fade) — replace hard-kill at `Source/VibePlayer/VibePlayerDSP.cpp:960`; force short release override on stolen voices if natural release is multi-second. _(Source: daw-architecture-research-2026-05-08.md §4)_ **SHIPPED in v1 (QA-VoicePool Task 3, 0dcfe506)** - `VibeVoice::initiateSteal` saves the user's ADSR into `mPreStealAdsrParams` and overrides release to 1.5 ms, then the caller issues `stopNote(0.f, true)` so the evicted voice fades out naturally inside `renderNextBlock` instead of being hard-killed; `startNote` restores the saved params and `setAdsr` parks any user edit made during an override, so a long-release patch never loses its release. Two deviations, both deliberate: the fade is 1.5 ms rather than 3-10 ms (Jeff's verbatim "instantly fade it out" ruling), and the release override is unconditional rather than conditional on a multi-second natural release. VibePlayer only, which is this entry's whole named scope - no other engine has a voice-cap eviction path to soft-stop.
 - **[CL-277 / AQ]** User-visible voice priority mode APVTS enum (Last / Highest / Lowest) — Surge / Cherry vocabulary; per-engine. Tier-3 disambiguation only; engine-stage priority (Tier 1/2) stays internal default. _(Source: daw-architecture-research-2026-05-08.md §4)_
-- **[CL-278 / AQ]** Benchwarmer pool (1-2 preallocated extra voices per engine for parallel fade-out) — pairs with CL-276 soft-stop to enable click-free voice eviction. _(Source: daw-architecture-research-2026-05-08.md §4)_ **BaySickPlayer half SHIPPED in v1 (QA-VoicePool Task 3, 0dcfe506)** - physical pool over-provisioned to `kMaxVoices` = 24 against a `kLogicalCap` of 16, with `setVoiceCap` clamping the user-facing param to 16 so the reserve can never be consumed; stealing fires at active >= cap rather than at the physical pool size, so the replacement note always lands on a free reserve slot while the evicted voice finishes its 1.5 ms fade. Eight reserves rather than the entry's 1-2. The "per engine" half is unmet - BaySickSynth, BaySickBass and Harmless each allocate a flat 16-voice pool with no reserve above the user-facing limit.
+- **[CL-278 / AQ]** Benchwarmer pool (1-2 preallocated extra voices per engine for parallel fade-out) — pairs with CL-276 soft-stop to enable click-free voice eviction. _(Source: daw-architecture-research-2026-05-08.md §4)_ **BaySickPlayer half SHIPPED in v1 (QA-VoicePool Task 3, 0dcfe506)** - physical pool over-provisioned to `kMaxVoices` = 24 against a `kLogicalCap` of 16, with `setVoiceCap` clamping the user-facing param to 16 so the reserve can never be consumed; stealing fires at active >= cap rather than at the physical pool size, so the replacement note always lands on a free reserve slot while the evicted voice finishes its 1.5 ms fade. Eight reserves rather than the entry's 1-2. The "per engine" half is unmet - BaySickSynth, BaySickBass and BaySickSolstice each allocate a flat 16-voice pool with no reserve above the user-facing limit.
 
 ### BaySickRustyDrums (sfizz kit playability)
 - **[CL-298 / WP]** Drummer-conventional drum-note remap for BaySickRustyDrums — OPTIONAL per-kit remap that packs the Big Rusty Drums kit's useful drums (scattered across MIDI 24-96 with gaps: mechanical noises + kick-no-damp below 36, GM-style core drums 35-59, sizzle/stir/click articulations 60-96) into a tight contiguous range playable on a 61-key controller. Revives the never-implemented "J-7b drummer-conventional remap" that lives only as a comment in `StandaloneEditor.cpp` (`registerBaySickRustyDrumsPianoRoll`, ~line 5922) — current dispatch passes notes through unremapped (`BaySickRustyDrumsProcessor.cpp:214`). Design fork to resolve at scoping: (a) thin keyboard-input-only remap (small blast radius, but roll display won't match what was played) vs (b) full conventional note-space across roll + keyboard + storage, translating to kit-native only at playback dispatch (consistent, wider surface). DRUMS-ONLY — guitars/basses are pitched + keyswitch-driven and must NOT be remapped. The sfizz engine stays safe (always receives native notes; remap is upstream) — do NOT edit the vendored SFZ keymap (breaks GM-standard kick/snare, misaligns the kit graphic, diverges from kit docs). Every UI/data boundary must translate or desync: keyboard input, roll display, keyboard labels (`getPianoRollKeymap` is native), the kit graphic (native), stored pattern notes, and MIDI export (remapped notes only valid in-app unless translated on export). Needs per-kit layouts (Rusty-full vs -basic vs future kits). Next step when picked up: architecture-research pass on FL Studio FPC + other DAWs' drum-pad-to-note mapping before locking a design. _(Shelved to Future State 2026-07-01 at QA-EffectsReview (composed-foraging-rose) while investigating live-MIDI mapping for the sfizz Aria engines. Playability enhancement, not a bug.)_
@@ -615,7 +615,7 @@ knob styling, look-and-feel cross-cuts.
 - **[LDT-422 / WP]** GLSL/OpenGL shader rendering (LRX-8) — complexity + GPU compatibility.
 
 ### Batch-surfaced (QA-Layout 2026-08-05)
-- **[CL-306 / WP]** Compact layouts for the player windows — a second, smaller arrangement for each engine editor (Harmless, BaySickSynth, BaySickBass, BaySickPlayer, BaySickGuitars, BaySickBasses, BaySickRustyDrums) so a player can be usable well below its measured "smallest still readable" size, e.g. two players side by side in the 1534x724 workspace. Was QA-Layout Task 8 ("Window-6 collapse"), scoped as generic chrome: a content `resized()` threshold plus title-strip pseudo-tab slots, with the collapse states riding T5's stores. DEFERRED at the T8 ruling 2026-08-05. Reasoning Jeff accepted: the generic mechanism is bounded, but a *good* compact view still needs a per-player decision about which sections group together and in what order, so it collapses into a bespoke second design per engine — and the Harmless re-layout in T16 is the cost evidence (one player, one size, most of a session with Jeff correcting each pass). Also a feature landing inside a QA batch. Consequence recorded at the same ruling: content minimums were briefly SUSPENDED pending T8 and are now RESTORED at the measured sizes, so `setDefaultWindowSize` sets both the opening size and the minimum — the measured numbers are the smallest-still-readable ones, so a window that refuses to go below its own is correct rather than limiting. Whoever picks this up: the reusable view-swap mechanics already exist (CL-307), so this is layout work per engine, not machinery. Open question NOT answered: whether the real driver is "two players at once", in which case window tabbing or the fill/restore toggle may solve it more cheaply than seven compact designs, and the scope should be only the players that actually get paired. _(Source: QA-Layout T8 ruling 2026-08-05 — Jeff asked whether compact for V1 was reasonable given it may mean redesigning every player, and ruled to stop here.)_
+- **[CL-306 / WP]** Compact layouts for the player windows — a second, smaller arrangement for each engine editor (BaySickSolstice, BaySickSynth, BaySickBass, BaySickPlayer, BaySickGuitars, BaySickBasses, BaySickRustyDrums) so a player can be usable well below its measured "smallest still readable" size, e.g. two players side by side in the 1534x724 workspace. Was QA-Layout Task 8 ("Window-6 collapse"), scoped as generic chrome: a content `resized()` threshold plus title-strip pseudo-tab slots, with the collapse states riding T5's stores. DEFERRED at the T8 ruling 2026-08-05. Reasoning Jeff accepted: the generic mechanism is bounded, but a *good* compact view still needs a per-player decision about which sections group together and in what order, so it collapses into a bespoke second design per engine — and the BaySickSolstice re-layout in T16 is the cost evidence (one player, one size, most of a session with Jeff correcting each pass). Also a feature landing inside a QA batch. Consequence recorded at the same ruling: content minimums were briefly SUSPENDED pending T8 and are now RESTORED at the measured sizes, so `setDefaultWindowSize` sets both the opening size and the minimum — the measured numbers are the smallest-still-readable ones, so a window that refuses to go below its own is correct rather than limiting. Whoever picks this up: the reusable view-swap mechanics already exist (CL-307), so this is layout work per engine, not machinery. Open question NOT answered: whether the real driver is "two players at once", in which case window tabbing or the fill/restore toggle may solve it more cheaply than seven compact designs, and the scope should be only the players that actually get paired. _(Source: QA-Layout T8 ruling 2026-08-05 — Jeff asked whether compact for V1 was reasonable given it may mean redesigning every player, and ruled to stop here.)_
 
 ## Cross-cutting Infrastructure
 
@@ -650,7 +650,7 @@ audio-device infrastructure, performance / efficiency optimization.
 - **[CL-197 / AQ]** Inter-Sample-Peak (ISP) detection on saturation/clipper output meters — every saturation Type's output meter measures inter-sample peaks when signal driven beyond ~-0.5 dBFS. CL-036 already covers master ISP; this is per-effect-output sweep. _(Inspired by: Kazrog KClip 3 32x oversampling + UAD Studer + Saturn 2 32x oversampling)_ HIGH
 
 ### FFT plan caching (architecture 2026-05-08)
-- **[CL-269 / PE]** FftPlanCache keyed by FFT order, owned by VibeGraph — `std::shared_ptr<const juce::dsp::FFT>` shared across linear-phase EQ8 instances + PhaseVocoder + Harmless wavetable; eliminates per-instance twiddle-factor table duplication (3.2 MB at 2048 / 12.8 MB worst-case at 4096). Concrete 7-file impl sketch in source. _(Source: daw-architecture-research-2026-05-08.md §2)_
+- **[CL-269 / PE]** FftPlanCache keyed by FFT order, owned by VibeGraph — `std::shared_ptr<const juce::dsp::FFT>` shared across linear-phase EQ8 instances + PhaseVocoder + BaySickSolstice wavetable; eliminates per-instance twiddle-factor table duplication (3.2 MB at 2048 / 12.8 MB worst-case at 4096). Concrete 7-file impl sketch in source. _(Source: daw-architecture-research-2026-05-08.md §2)_
 - **[CL-270 / PE]** Per-thread-pool FFT instances (MT engine fallback variant) — only if tsan flags shared-FFT issues post-QA-Md; cache key becomes `(order, threadIndex % poolSize)`. _(Source: daw-architecture-research-2026-05-08.md §2)_
 - **[CL-271 / PE]** FFTW wisdom file for deterministic startup — only relevant if we ever swap `juce::dsp::FFT` -> FFTW; deferred until then. _(Source: daw-architecture-research-2026-05-08.md §2)_
 
@@ -823,9 +823,9 @@ Every sub-category appears as a `## ` header even when empty (canonical-structur
 
 ## Won't do — design / scope (18)
 
-### Harmless UI items dropped during QA-A STYLE / Phase 5F-3 (12)
+### BaySickSolstice UI items dropped during QA-A STYLE / Phase 5F-3 (12)
 
-These were proposed in the source docs but explicitly dropped during the Harmless layout / SLA audit work. Confirmed drop in QA-Inventory walk.
+These were proposed in the source docs but explicitly dropped during the BaySickSolstice layout / SLA audit work. Confirmed drop in QA-Inventory walk.
 
 - **[BLU-629 / OT]** Timbre Fade horizontal slider (#4) — right-click-modulate covers the use case. PRESET-SAFE.
 - **[BLU-630 / OT]** Routing Matrix 6 LED toggles (#6) — S1 work already covered. PRESET-SAFE.
@@ -842,7 +842,7 @@ These were proposed in the source docs but explicitly dropped during the Harmles
 
 ### Drum engine option dropped (1)
 
-- **[BLU-423 / OT]** Harmless as 3rd engine option for drums — not drum-tuned. Confirmed drop in walk.
+- **[BLU-423 / OT]** BaySickSolstice as 3rd engine option for drums — not drum-tuned. Confirmed drop in walk.
 
 ### Spec items dropped as ambiguous / N/A (3)
 

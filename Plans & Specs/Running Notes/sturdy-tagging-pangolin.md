@@ -73,7 +73,7 @@ keep or delete. §B.28 QV-9 verifies it stops growing.
    ABSOLUTE path, so a moved/missing `.nam` file is a silent no-load; (b) per-DSP field
    completeness of the EQ / Tuner pedal serializers is unverified by desk-read.
 2. **`kStateVersion` is written but never read.** `captureFullState` sets a `version` property
-   and no reader anywhere checks it. Harmless, and arguably the right shape for a future format
+   and no reader anywhere checks it. BaySickSolstice, and arguably the right shape for a future format
    change — noted rather than removed, since deleting it would remove the only hook a real
    migration would use.
 3. **Two stale comments referenced the deleted `pedalsLog`.** The grep the running notes promised
@@ -160,7 +160,7 @@ row is Jeff's call, per the QA-NativeDialogs precedent.)*
 #### Found along the way
 
 1. **Routing-note watch items, unchanged and NOT in scope** (carried from the scout via the plan's Rule 3 note): (a) NAM pedal state restores by **absolute path**, so a moved or missing `.nam` file is a silent no-load; (b) per-DSP field completeness of the EQ and Tuner pedal serializers is unverified by desk-read.
-2. **`kStateVersion` is written but never read.** `captureFullState` sets a `version` property and `savePedalboardPreset` sets a `version` attribute; no reader anywhere in the tree checks either. Harmless, and arguably the right shape to leave in place for a future format change.
+2. **`kStateVersion` is written but never read.** `captureFullState` sets a `version` property and `savePedalboardPreset` sets a `version` attribute; no reader anywhere in the tree checks either. BaySickSolstice, and arguably the right shape to leave in place for a future format change.
 3. **`InstPage`'s `slot.engineRootTag = "BaySickPedalsState"` is now arguably misleading** — post-Task-1 it names the APVTS type rather than the blob root. It is inert for this engine (see the Task 1 false-alarm bullet), so it reads as a stale label rather than a bug.
 4. **Two stale comments referenced the deleted `pedalsLog`** (`ClipDropDiag.h:13`, `G3PlayheadDiag.h:13`), naming it as a logger-convention exemplar.
 

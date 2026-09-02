@@ -372,7 +372,7 @@ allocation, and the audition atomics - all rebuilt from scratch on load.
 
 Carry-Forward's "Engine audition pattern" row states that **4** engine
 processors carry `auditionNote(int)`. There are now **7**: the four it lists
-(BaySickSynth, BaySickBass, Harmless, BaySickPlayer) plus BaySickGuitars,
+(BaySickSynth, BaySickBass, BaySickSolstice, BaySickPlayer) plus BaySickGuitars,
 BaySickBasses and BaySickRustyDrums, whose signature takes a velocity as well
 (`auditionNote(int midiNote, int velocity = 100)`). BaySickPlayer additionally
 has the hold pair `auditionNoteOn` / `auditionNoteOff`, where the "off" side

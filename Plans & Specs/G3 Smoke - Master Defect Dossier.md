@@ -330,7 +330,7 @@ Single paint site: `PianoRoll.cpp:2664-2695` in `PianoRollGrid::paint`.
   `VibePlayerDSP.h:354-366`). Emit-ordering obstacle: the ramp must be armed in
   the CC10 handler before CC5/37 arrive, so either reorder the emit or add a
   dedicated pan-ramp CC (cleaner; naturally satisfies "pan only"). **Engines:**
-  BaySickSynth + BaySickBass share a voice (one fix), Harmless (one fix),
+  BaySickSynth + BaySickBass share a voice (one fix), BaySickSolstice (one fix),
   VibePlayer (one fix). **NOTE: withdrawn for BaySickGuitars/Basses — they have
   no per-note pan control reachable in their properties panel; CC10 emit is
   harmless there (panning stays at default center).**
@@ -655,7 +655,7 @@ in, `Pattern::drumRolls[pageIndex]`. Row→drum via `rowToPageIndex`
 9. **Humanize defaults (#16):** Start Range 10%, Duration Range 10%, Velocity
    Range 20%, offsets 0.
 10. **Pan ramp (#11):** ramp pan-only over the glide on RP/RT for IN-HOUSE engines
-    (BaySickSynth/Bass, Harmless, VibePlayer) + fix the broadcast-to-all-voices
+    (BaySickSynth/Bass, BaySickSolstice, VibePlayer) + fix the broadcast-to-all-voices
     pop + `mNotePan` reset. **Withdrawn for Guitars/Basses** (no reachable pan
     control).
 11. **Playhead domain (#30 latent):** 8A — store block start as absolute beats,

@@ -128,7 +128,7 @@
   the old onEngineChanged flow).
 - **Dormant UndoManager pre-wire COMPLETE (task 8, conflict call 2=b):** processor-owned
   `mUndoManager` declared BEFORE apvts and bound into it; all 7 page-family engine APVTS
-  ctors gained `juce::UndoManager* undoMgr = nullptr` (Harmless / BaySickSynth /
+  ctors gained `juce::UndoManager* undoMgr = nullptr` (BaySickSolstice / BaySickSynth /
   BaySickBass / VibePlayer / BaySickVocal — which forwards to its embedded NAM/IR — /
   BaySickPedals / BaySickNAMIR); the rig's factory passes the processor's manager. The
   sfizz trio's PRIVATE UndoManagers left untouched (repointing them = semantics change).
@@ -537,10 +537,10 @@
   variants (Saturation/Overdrive/Delay/Reverb umbrellas + pedal-native 100+ — ~20+
   tables; Reverb includes the 0/1 `freeze` def; the (type, variant) key + one-home
   mapping-math rules are HARD-WON, do not relearn); retire the 19 engine-editor wrapper
-  sites (vocal capture-lock veto moves with them; Harmless A/B keeps both ids); pedals
+  sites (vocal capture-lock veto moves with them; BaySickSolstice A/B keeps both ids); pedals
   model-side registration; `_fader`/`_pan` lane remap + permanent-strip shim
   retirement; EQ band lane ownership off the display; statics re-seed simplification +
-  `onIsParamStale` re-widen; BLU-344 Harmless mod-editor targets.
+  `onIsParamStale` re-widen; BLU-344 BaySickSolstice mod-editor targets.
 
 - **Lane-resolver rules for step 3 (derived from source, do not relearn):** the live
   replay ([PluginProcessor.cpp:2794-2868](../../Source/PluginProcessor.cpp:2794)) walks
@@ -565,15 +565,15 @@
 - **The 19 wrapper sites confirmed exactly (grep of the five `VKnobAutomation::register*Automation`
   helpers, whole tree):** BaySickBassEditor:392 (wireID slider lambda) / BaySickSynthEditor:398
   (same) / VibePlayerEditor:221 (same) + :260 :261 :262 (button) + :263 (selector) /
-  HarmlessEditor:486 (wireMeta slider) + :563 (wireBtn button) + :639 (regDualParam PARAM) /
-  HarmlessFilterRow:61 :62 :63 :65 (sliders) + :74 (combo) / HarmlessRoutingMatrix:38 /
-  HarmlessXYZPad:46 / BaySickNAMIREditor:18 (PARAM, whole-APVTS loop) /
+  BaySickSolsticeEditor:486 (wireMeta slider) + :563 (wireBtn button) + :639 (regDualParam PARAM) /
+  BaySickSolsticeFilterRow:61 :62 :63 :65 (sliders) + :74 (combo) / BaySickSolsticeRoutingMatrix:38 /
+  BaySickSolsticeXYZPad:46 / BaySickNAMIREditor:18 (PARAM, whole-APVTS loop) /
   BaySickVocalEditor:659 (PARAM, whole-APVTS loop + `kCaptureGated` veto).  Count = 19.
   Five of the five helpers are view-scoped: even the two PARAM-targeting ones die with their
   `lifetimeGuard` Component, so destroy-on-close kills them exactly like the widget ones.
 - **TS1's `registerModelEngineAutomation` already covers 17 of the 19 by construction** — it walks
   the engine APVTS and registers null-owner param-targeting entries for EVERY RangedAudioParameter,
-  which subsumes every per-knob/-button/-combo/-selector wrapper AND Harmless's dual A/B pair (both
+  which subsumes every per-knob/-button/-combo/-selector wrapper AND BaySickSolstice's dual A/B pair (both
   part ids are separate APVTS params, so both lanes register — the QA-ApvtsAutomation semantics hold
   for free).  The two that do NOT survive retirement as-is: the vocal `kCaptureGated` veto
   (`suppressWhen`) and the NAM/IR prefixing, which the model hook already prefixes but without the
@@ -710,7 +710,7 @@
   keys, param-targeting. So the wrappers were a second, view-scoped claim on keys the model already
   owned — and since the editor is built AFTER the engine, the view claim was WINNING. Retiring them is
   what makes TS1's registration actually take effect.
-- **Harmless A/B preserved by construction, not by special-casing.** Both part ids are separate APVTS
+- **BaySickSolstice A/B preserved by construction, not by special-casing.** Both part ids are separate APVTS
   params, so the model's parameter-list walk registers both, param-targeting. The `regDualParam` pair
   that used to guarantee this was guarded by the very slider that Part A/B rebinding destroys and
   rebuilds — strictly worse than what replaces it.
@@ -761,14 +761,14 @@
 ## 2026-07-27 — TS3 — BLU-344: the mod editor's DEPTH + LENGTH become automatable
 
 - **The one target class in this batch that is neither an APVTS param nor a rack DSP.** DEPTH and
-  LENGTH are fields on `ModSourceState` inside `HarmlessModRegistry`, addressed by (target paramId,
+  LENGTH are fields on `ModSourceState` inside `BaySickSolsticeModRegistry`, addressed by (target paramId,
   source). Lane ids `<targetParamId>_mod<sourceIdx>_depth` / `_length` — no APVTS param can collide
   with that shape, since the target id is itself a full engine param id.
-- **The 13-step LENGTH table moved to `HarmlessModLength`** in HarmlessModRegistry.h, beside the field
+- **The 13-step LENGTH table moved to `BaySickSolsticeModLength`** in BaySickSolsticeModRegistry.h, beside the field
   it writes, with a `nearestIndex` inverse. The editor had the forward table in one function and a
   hand-rolled copy of the inverse in another; both now call the shared one, and the automation
   applicator lands on exactly the same 13 values the knob offers.
-- **Registered model-side** at engine creation (`registerHarmlessModAutomation`, a no-op for non-Harmless
+- **Registered model-side** at engine creation (`registerBaySickSolsticeModAutomation`, a no-op for non-BaySickSolstice
   engines) for every (target x source). Applicators re-resolve rig -> tab -> engine -> registry at
   apply time and call `publishSnapshot()` so voices observe the change on their next block — the same
   contract the editor's own edits use. LENGTH is registered only for Envelope + LFO: the editor hides
@@ -1055,12 +1055,12 @@ Known going in:
   full-width rows out of the page's own content area.  Relocating them reclaims that height for
   the layout -- which matters more now that a page is sized to a window rather than to the whole
   content rect.
-- **Harmless does not fit at maximum window size**, and some of its knobs render LARGER than they
+- **BaySickSolstice does not fit at maximum window size**, and some of its knobs render LARGER than they
   did pre-shell (Jeff, observed 2026-07-28 with the window maximised).  Likely the same root
   cause: these pages were written assuming they get the FULL content rect, and now receive a
   window's content area minus chrome, so anything laying out from fixed offsets rather than
   proportionally drifts.  NOT investigated -- deliberately left for the review.
-- Every other page needs the same pass; Harmless is just the one that surfaced first.
+- Every other page needs the same pass; BaySickSolstice is just the one that surfaced first.
 - **Audit every drawn overlay for the child-peer z-order trap** (Jeff, 2026-07-28, added after it
   bit twice in one day).  With the windowed shell, anything that is a DRAWN component parented to
   the editor and expected to cover the workspace is now invisible behind the contained windows,
@@ -3414,13 +3414,13 @@ pay for themselves in unrelated directions.
 ## TEMPO-SYNC WAS NEVER FOLLOWING PROJECT TEMPO (found + fixed 2026-07-30)
 
 **Genuinely pre-existing — and I checked before using the word this time.**  The fallback it exposes
-is annotated "S4 Batch 2b" (`HarmlessProcessor.cpp:82-84`), long before QA-ModelShell opened, and
+is annotated "S4 Batch 2b" (`BaySickSolsticeProcessor.cpp:82-84`), long before QA-ModelShell opened, and
 nothing in this batch touches it.  That is the standard: pre-existing means older than the batch's
 open commit, not older than this afternoon.
 
 **The bug.**  `AudioProcessor::setPlayHead` is called on exactly TWO sites tree-wide, both on the
 top-level processor (the offline render's swap and its restore).  It is never called on a CHILD
-engine.  So `getPlayHead()` returns null inside Harmless, BaySickSynth and BaySickBass, and each one
+engine.  So `getPlayHead()` returns null inside BaySickSolstice, BaySickSynth and BaySickBass, and each one
 silently takes its documented "no transport" path:
 
     double bps = 2.0;   // 120 BPM default
@@ -4023,7 +4023,7 @@ not unilaterally.)*
   runtime-moving rate bound) + `affectsLatency` (the bus-PDC poke the lookahead knobs lost at
   badger). All 19 wrapper sites retired, the five `VKnobAutomation::register*Automation`
   helpers deleted; views only stamp componentIDs; the vocal capture-lock veto moved to
-  `BaySickVocalProcessor::isCaptureGated`; Harmless A/B keeps both lanes by construction.
+  `BaySickVocalProcessor::isCaptureGated`; BaySickSolstice A/B keeps both lanes by construction.
   `setSlotContext` stamp-only + a display-only 10 Hz refresh via `EffectParamMap::readNatural`
   (fixes the already-shipped frozen-knob regression on Compressor/output_vol). Pedals
   registered model-side (`onSlotAutomationChanged`) incl. the offline branch TS2 deferred.
@@ -4034,7 +4034,7 @@ not unilaterally.)*
   retired; `ParametricEQDisplay::registerAutomationForBoundEQ` deleted (band lanes move to
   param materialization via `onMixerStripParamsCreated`); the owner index + the
   ComponentListener base removed; `onIsParamStale` re-widened. BLU-344: mod-editor
-  DEPTH/LENGTH automatable against the shared `HarmlessModLength` table, live + offline. Dead
+  DEPTH/LENGTH automatable against the shared `BaySickSolsticeModLength` table, live + offline. Dead
   TapePanel deleted AND the unreachable TapeDSP class removed with its CMake entry (Jeff's
   rulings; legacy-preset XML tag migration kept).
 - **TS4 `05b248a8` -- the shell.** New WorkspaceWindow/Workspace native-child window family --
@@ -4259,7 +4259,7 @@ not unilaterally.)*
     already shipped** as PagePresetIO (verified after Jeff challenged the outstanding claim).
 18. **A held scope accumulated for the LAYOUT BATCH** (Jeff 2026-07-28/29): whole-app layout
     review under the windowed shell, preset dropdown + engine pickers onto title bars,
-    Harmless overflow, the drawn-overlay z-order audit, hosted-plugin STRETCH scaling,
+    BaySickSolstice overflow, the drawn-overlay z-order audit, hosted-plugin STRETCH scaling,
     "Live Instrument" rename, the three-lifetime window-state persistence model (crash-survival
     ruling still OPEN), and the instance-cap re-evaluation (+ the PR-target-shift hazard).
 19. **CL-043 and CL-282 had been silently narrowed** -- one algorithm with no picker; an

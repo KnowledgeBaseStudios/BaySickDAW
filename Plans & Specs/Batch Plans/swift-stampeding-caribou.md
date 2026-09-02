@@ -44,7 +44,7 @@ Recent closes silently absorbed chunks of the remaining §5 scopes. Verified sta
 - **QA-NativeDialogs (~4-7h → ~2-3h).** All 17 juce::FileChooser sites are ALREADY OS-native (launchAsync default). Sole conversion target: ProjectBrowserWindow (ProjectBrowserWindow.h:16, custom Open Project browser). Remaining bulk = default-folder routing audit across the 17 sites.
 - **QA-G (~4-6h → ~2-4h).** kNumRows already 50 (BuilderPage.h:423, plan assumed 32→100); zoom already float (mPPBar float :555). Remaining: bump to target count + scroll height, confirm/fix ruler pin (BUILD-02), zoom alignment fix (BUILD-03).
 - **QA-H (~8-12h → ~6-9h).** NAV-05 Builder hamburger ALREADY REMOVED (BuilderMenuBar replaced it, BuilderPage.h:1011); folded #15 WAV-drop auto-navigate ALREADY REMOVED (StandaloneEditor.cpp:2046-2104 has no selectTab). Ghost notes = dormant, feed unwired (setGhostData has zero callers — needs a producer). 's' keybind exists but cycles note type (PianoRoll.cpp:1027) — BUILD-05's "dead" claim needs re-spec. Humanize (MIDI-04) doesn't exist — real build.
-- **QA-VibeSlider (~5-8h → ~3-5h).** Real count: ~115-120 declaration lines / ~190-200 widgets, concentrated in 5 instrument editors (Harmless 54, Synth 16, Bass 16, VibePlayer 15, Vocal 9). The "~493" figure was total slider-family controls incl. already-themed VKnobs — not swap targets. VibeSlider is a drop-in juce::Slider subclass → mechanical.
+- **QA-VibeSlider (~5-8h → ~3-5h).** Real count: ~115-120 declaration lines / ~190-200 widgets, concentrated in 5 instrument editors (BaySickSolstice 54, Synth 16, Bass 16, VibePlayer 15, Vocal 9). The "~493" figure was total slider-family controls incl. already-themed VKnobs — not swap targets. VibeSlider is a drop-in juce::Slider subclass → mechanical.
 
 **Confirmed full-scope (no absorption):**
 - **QA-TempoMap — FULLY OPEN.** (One agent called it done; REJECTED — it verified QA-Ed's shipped single anchor, which is TempoMap's precondition, not its scope.) Replace single re-basing seqlock anchor (StandaloneApp.h:82-85, publishAnchor/deriveBeat StandaloneApp.cpp:145-171) with a sample-indexed multi-change tempo map. Writers: setBPM :228-234, StandaloneEditor.cpp:608/:758/:10741, global_tempo applicator :604.
@@ -216,7 +216,7 @@ Sections, in this shape:
 9. QA-DirtyFlag: confirm audit filter (live-state mutations only; detached-tree serialization stays nullptr) + which UndoManager becomes global authority.
 10. QA-K: DSP-08 Tascam hardware availability window; DSP-11 in-or-out.
 11. QA-TempoMap: map data model (tempo-change list UI entry point — tempo automation lane vs markers).
-12. QA-Audit pre-release decisions docket (AlertWindow migration / security agent / crash pipeline / DSP-meter cap / MT-diag compile flag / HarmlessLAF zero-px root cause).
+12. QA-Audit pre-release decisions docket (AlertWindow migration / security agent / crash pipeline / DSP-meter cap / MT-diag compile flag / BaySickSolsticeLAF zero-px root cause).
 13. QA-Templates: factory preset quantities + genre template list confirm.
 14. D-1: Phase 7 doc-drafting overlap with the campaign.
 15. Optional scope-cut lever (Jeff's call, no lean): net-new features that could defer post-V1 for more speed — QA-Chords, QA-Fc, QA-Eb, QA-Drum-Polish, QA-Ec′ Resample-follow, Manuals 2-3 post-release. Or keep all.
@@ -292,7 +292,7 @@ answers land per each batch's normal close routing (Rule 3 / R2), not eagerly.
 | 12c | Crash reporting | V1 = OS-native WER + per-release .pdb archival; no third-party SDK / symbol server. |
 | 12d | DSP meter cap | 2.0 (200%) for V1 Release (applied in Phase 6). |
 | 12e | MT diagnostic | Compile-flag gate (#if BAYSICKDAW_MT_DIAGNOSTIC) — out of V1 Release builds. |
-| 12f | HarmlessLAF zero-px | Investigate root cause at QA-Audit as planned. |
+| 12f | BaySickSolsticeLAF zero-px | Investigate root cause at QA-Audit as planned. |
 | 13a | Genre templates | Based on the on-disk preset style groups (verified: no Jazz/Rock group exists on disk); specific genre picks at QA-Templates open with /preset-gaps in hand. |
 | 13b | Factory presets | Existing presets' correctness = campaign §E (locked). QA-Templates authoring is gap-driven: /preset-gaps reports, Jeff decides what gets authored at batch open. |
 | 14 | D-1 + test cadence | D-1 = YES: draft Manuals/Framework during the campaign (all code done by then; campaign fixes fold into drafts). Group boundaries stay smoke + ear-check only (model as approved — full section walks happen once, in the campaign). |

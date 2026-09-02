@@ -890,7 +890,7 @@ block removal, no Delete button, Builder redraw).
 *(Bucket set is a HELD Jeff call — §5.5 lists this batch as System Pages + Cross-cutting Infrastructure
 only. PENDING ledger item 6 already flags the docket-18 additions (Mixer / Routing, UI / L&F /
 Theming); the re-plan's diffs additionally touch Players (VibePlayer writers, Rusty page + processor,
-Harmless comment) and Effects (`EffectParamMap`, EffectsPage, EffectEditorPanels, pedals tags).
+BaySickSolstice comment) and Effects (`EffectParamMap`, EffectsPage, EffectEditorPanels, pedals tags).
 Confirm all four additions at G4 close, not unilaterally.)*
 
 #### Done

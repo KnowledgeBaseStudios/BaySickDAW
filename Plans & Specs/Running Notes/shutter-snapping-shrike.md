@@ -27,11 +27,11 @@ master pixels, so parity keeps page layout stable), not the plan's "2x";
 --scale exists for when the generator learns scaled rendering.
 
 17 figures shipping from the first run, dimensions landing on the masters
-(Harmless 1306x566 EXACT, Bass crop 651x441 EXACT, Rusty Keys 704x1029
+(BaySickSolstice 1306x566 EXACT, Bass crop 651x441 EXACT, Rusty Keys 704x1029
 EXACT): the six BaySickSynth tabs + BaySickBass (rig-created engines,
 WorkspaceWindow chrome dressed by hand - center title, preset button at
 88, dummy swing binding so the knob renders; a public selectTabForShot
-hook on BaySickSynthEditor, inherited by Bass), Harmless, Transport Bar
+hook on BaySickSynthEditor, inherited by Bass), BaySickSolstice, Transport Bar
 (bar + the two editor-owned satellites composed at the editor's own
 coordinates, position readout flipped to time mode), Ribbon Tab Bar
 (ribbon + perf readout with deterministic values; the "+" slot verified
@@ -121,7 +121,7 @@ glyph respins).
 agents): the manual references 40 menu figures and four on-disk menu
 PNGs are orphans (BaySickSynth/BaySickPlayer/BaySickBass/Hosted Plugin
 Menu - all superseded; the live pair is the shared
-BaySickSynth-BaySickPlayer-Harmless image + BaySickBass Menu Updated).
+BaySickSynth-BaySickPlayer-BaySickSolstice image + BaySickBass Menu Updated).
 Premise corrections that shaped the build: there is no Recording
 menubar menu (the six are File/Edit/Patterns/View/Options/Help;
 Recording Menu is the transport record chevron, Ribbon + Menu is the

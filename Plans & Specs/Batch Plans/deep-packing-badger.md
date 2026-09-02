@@ -125,7 +125,7 @@ as today's engine refs, noted in the §B walk).
   per-effect DSP headers (step 3: `setParamByKey` / suffix tables)
 - Task 8: `Source/SampleLibrary.cpp/.h` or a new resolver home, plus the ~43 call sites that
   currently spell `Documents\BaySickDAW` by hand
-- Task 9: `Source/Harmless/HarmlessEditor.cpp` (mPartSel comment), `Source/Inst/InstPage.cpp`
+- Task 9: `Source/BaySickSolstice/BaySickSolsticeEditor.cpp` (mPartSel comment), `Source/Inst/InstPage.cpp`
   (engineRootTag label), `Source/BaySickPedals/BaySickPedalsProcessor.*` (kStateVersion)
 - Task 10: `Source/Standalone/StandaloneEditor.cpp` (File menu :9546-9550 + dispatch :9698-9701;
   doFileNewFromTemplate REMOVED; showTemplateMenu REMOVED; new submenu builder;

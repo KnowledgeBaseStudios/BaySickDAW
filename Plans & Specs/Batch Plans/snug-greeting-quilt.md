@@ -253,7 +253,7 @@ QA-DispatcherAffinity was inserted into Main Plan §5 / §6 / §9 on 2026-05-28 
 - [ ] Tell Jeff: "Run `do_build.bat`. In Debug:
   - **(1)** Re-run the 6-cymbal crash MT-on test. Verify bit-crusher ABSENT (Task 3 fix + Sub-K retired = clean MT execution).
   - **(2)** Re-run BaySickGuitars + BaySickBasses tests with sfizz-driven kits to confirm no regression (Sub-K had defensive pinning on these engines too; retirement removes that defense — the Task 3 fix must cover them as well).
-  - **(3)** Re-run Harmless / BaySickSynth / BaySickPlayer tests to confirm no regression on non-sfizz engines.
+  - **(3)** Re-run BaySickSolstice / BaySickSynth / BaySickPlayer tests to confirm no regression on non-sfizz engines.
   - **(4)** Re-test in Release."
 - [ ] Wait for Jeff's verify result.
 - [ ] On verify pass: dispatch `/draft-commit`. Surface drafted message + git status. Commit on approval via `git commit -F .git/COMMIT_EDITMSG_QA-DispatcherAffinity-task-4.txt`; `rm` temp file.
@@ -281,7 +281,7 @@ After Task 4 commit lands (or Task 3 commit if Task 4 is skipped):
 2. **BaySickRustyDrums 6-cymbal crash MT-on test.** Bit-crusher absent (the primary verify gate).
 3. **BaySickGuitars MT-on test** with the Aria-host kit that previously triggered RR loss (QA-Sfizz Item 2 Branch A baseline). No regression on RR behavior (kit-content limitation persists per QA-Sfizz close; not a QA-DispatcherAffinity scope).
 4. **BaySickBasses MT-on test** with the same kit. No regression.
-5. **Harmless / BaySickSynth / BaySickPlayer MT-on test.** No CPU regression vs pre-batch baseline (Sub-K retirement returns more tasks to the worker pool; net-positive on CPU expected).
+5. **BaySickSolstice / BaySickSynth / BaySickPlayer MT-on test.** No CPU regression vs pre-batch baseline (Sub-K retirement returns more tasks to the worker pool; net-positive on CPU expected).
 6. **MT-off test (Multi-core Rendering disabled via Mixer hamburger).** All 4 sfizz engines clean (Sub-K was a no-op when MT was off; serial-diagnostic mode unchanged).
 7. **Trace instrumentation fully stripped** (confirmed via `grep` for `gTraceTaskTimestamps` / `recordTraceEvent` / `[QA-DispatcherAffinity TRACE]` returning zero matches in `Source/`).
 8. **No `mAudioThreadOnly` references** in `Source/` (confirmed via `grep`).

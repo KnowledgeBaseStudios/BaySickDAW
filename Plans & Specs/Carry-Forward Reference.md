@@ -336,7 +336,7 @@ findings in [Implemented Work Log.md](Implemented Work Log.md) instead.
 
 | Item | Batch | Note |
 |------|-------|------|
-| DSP-01 | QA-K | Harmless lazersaw silent — needs preset audit harness |
+| DSP-01 | QA-K | BaySickSolstice lazersaw silent — needs preset audit harness |
 | DSP-02 / 03 / 05 | QA-F | Vox FX bypassed, pitch correction inert, BaySickAlign review |
 | DSP-04 | QA-Fa | BaySickPitch missing audio import (additive) |
 | DSP-06 | QA-J | Multi-clip stacking attenuation |
@@ -407,7 +407,7 @@ new abstractions for similar problems.
 | ASCII-only UI strings | (memory + 94-occurrence sweep) | Every user-facing string literal must be pure ASCII. Non-ASCII renders as box glyphs in current font setup. |
 | Single source of truth for filesystem paths | (memory + audio_settings.xml fix) | Every reader+writer of a path calls the central resolver function. Never hardcode parallel path strings. |
 | Switch-style toggle is opt-in | (memory) | `juce::ToggleButton` with VibeLAF renders as checkbox by default. Opt into switch filmstrip via `getProperties().set("switchToggle", true)`. Reserved for FX rack slot, player switch panels, mixer pre/post send. |
-| Engine audition pattern | (CLAUDE.md key technical notes) | All 4 engine processors (BaySickSynth/Bass/Harmless/VibePlayer) have `auditionNote(int midiNote)` + `std::atomic<int> mAuditionNote { -1 }`. processBlock opens with `int n = mAuditionNote.exchange(-1); if (n >= 0) { noteOff-any, noteOn n }`. |
+| Engine audition pattern | (CLAUDE.md key technical notes) | All 4 engine processors (BaySickSynth/Bass/BaySickSolstice/VibePlayer) have `auditionNote(int midiNote)` + `std::atomic<int> mAuditionNote { -1 }`. processBlock opens with `int n = mAuditionNote.exchange(-1); if (n >= 0) { noteOff-any, noteOn n }`. |
 | CPU safeguarding standing rule | (CLAUDE.md) | Every DSP update function must guard numeric setters with value-change comparisons. Only call setter if new value differs from current DSP state. |
 | Lock-after-pick for picker buttons | (CLAUDE.md Phase D) | Picker button transforms to show current selection name with `[L]` prefix when locked; both clicks (left + post-lock) open per-page context menu. Used in DrumPage / LayersPage / BassPage. |
 | Composite RenderTask (NEW — to be established by QA-0) | new in QA-0 | When two render flows target the same channel id, build a composite task that owns both internally and sums them before insert DSP. Reusable by QA-J for multi-clip stacking. |

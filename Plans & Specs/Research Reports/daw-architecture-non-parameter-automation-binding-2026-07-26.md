@@ -80,7 +80,7 @@ Three widget-dies-without-tab-close paths, verified in source:
 2. FX rack channel switch — `EffectsPage.cpp:24` then `:494` `setRack(rack)`
 3. Pedal slot rebuild — `BaySickPedalsEditor.cpp:224-240`
 
-Plus `HarmlessEditor::rebindToPart`, which is why `registerParameterAutomation` exists at all.
+Plus `BaySickSolsticeEditor::rebindToPart`, which is why `registerParameterAutomation` exists at all.
 
 We did get one thing right that a major DAW gets wrong: our rack + pedal automation keys are slot
 UUIDs, not slot indices. See REAPER below.

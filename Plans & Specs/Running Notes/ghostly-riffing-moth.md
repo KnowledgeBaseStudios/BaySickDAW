@@ -78,12 +78,12 @@ connected ramp chain (rampChainDurationBeats; clamped by offHi so sliced/tiled w
 stay bounded). Chained ramps work (the juce voice keeps the anchor note number, which is
 also what the extended off matches).
 
-**Engines (BaySickSynth+Bass shared voice / Harmless AdditiveVoice / VibePlayer VibeVoice):**
+**Engines (BaySickSynth+Bass shared voice / BaySickSolstice AdditiveVoice / VibePlayer VibeVoice):**
 CC71 res offset + CC72 release scale as pending->active-at-startNote stashes (a sounding
 voice keeps its own values when the next note's CCs land); release scale applied over
 stored base ADSR params (setters are change-guarded, so voices re-apply per note);
 per-note glide: ratio glide (synth), tau=t/3 coefficient glide w/ in-loop land-check
-(Harmless), 64-sample-chunk resample-ratio ramp (player). Porta fallback 60 ms where the
+(BaySickSolstice), 64-sample-chunk resample-ratio ramp (player). Porta fallback 60 ms where the
 engine glide param is 0/absent (player always) — calibration under the plan's per-engine
 latitude, campaign-tunable. CC85 ramp handler bends the voice whose juce playing note ==
 CC84 anchor; EVERY voice clears the glide stash at CC85 (no leak into later noteOns).
@@ -93,7 +93,7 @@ channel-gated — idle/cleared voices (channel 0) never receive CCs, so the CC-b
 stash missed whenever the next noteOn allocated a cold voice.** Batch E's CC74 cutoff
 shipped with this hole (worked only when allocation reused a warm voice). Fix: new
 `Source/BroadcastSynthesiser.h` (broadcasts controllerMoved to every voice; pitch wheel
-keeps stock startVoice replay) — HarmlessSynth.mSynth + BaySickSynthDSP.mSynth swapped
+keeps stock startVoice replay) — BaySickSolsticeSynth.mSynth + BaySickSynthDSP.mSynth swapped
 (the :427 const_cast retyped to match).
 
 **FINDING (real pre-existing bug, fixed): VibeSynth dispatches noteOns SYNCHRONOUSLY in
@@ -103,7 +103,7 @@ Fix: expression CCs (5/37/71/72/74/84/85) broadcast inline in buffer order and c
 
 **Known seams (logged for campaign):** sfizz-family rolls (Inst/Rusty/Vox) ignore the
 glide CCs + per-note consume (plan scopes the 4 engine families); BaySickSynth Legato mode
-dispatches noteOns in preprocess so a fresh legato voice's CCs lag one block; Harmless
+dispatches noteOns in preprocess so a fresh legato voice's CCs lag one block; BaySickSolstice
 strum staggers chord noteOns after the chord's CCs (mixed per-chord-note expression under
 strum = last-emitted wins); poly chords under one ramp slide: every overlapping note's off
 extends, only the anchor-matched voice bends (mono-lead is the use case); ramp slide whose
@@ -253,12 +253,12 @@ QA-G doc stragglers per plan).
   broken chain = silent) and Retrigger Slide (own attack, glides in from the previous
   pitch over the note) — labels "RP Slide"/"RT Slide", Standard displays as **"Flat"**;
   Porta = retrigger + engine-glide (60 ms fallback). Per-engine implementations on
-  BaySickSynth+Bass / Harmless / BaySickPlayer via a CC transport (CC84 source, CC5/37
+  BaySickSynth+Bass / BaySickSolstice / BaySickPlayer via a CC transport (CC84 source, CC5/37
   time, CC85 ramp target, CC71/72 resonance/release as pending->active-at-startNote
   stashes). **Three real transport bugs fixed in-batch:** skip-at-neutral emits let
   neutral notes inherit the previous note's pan/bend/cutoff (all five expression values
   now emit unconditionally); juce's channel-gated handleController never reached cold
-  voices (new `Source/BroadcastSynthesiser.h` broadcasts — Harmless + Synth/Bass);
+  voices (new `Source/BroadcastSynthesiser.h` broadcasts — BaySickSolstice + Synth/Bass);
   VibeSynth delivered CCs one note late (deferred while noteOns dispatched
   synchronously — expression CCs now broadcast inline in order).
 - **Task 3 — Humanize (FL replica):** Start/Duration/Velocity Range+Offset pairs,
@@ -297,7 +297,7 @@ header; #6 muted-length; #17 shutdown UAF; #19 silent return; stale Zoom tooltip
 #### Known seams (campaign-visible, logged in running notes)
 
 sfizz-family rolls (Inst/Rusty/Vox) ignore glide + per-note consume CCs; BaySickSynth
-Legato-mode first-note CC lag; Harmless strum staggers chord noteOns after the chord's
+Legato-mode first-note CC lag; BaySickSolstice strum staggers chord noteOns after the chord's
 CCs; poly chords under one ramp slide extend every overlapping off but bend only the
 anchor voice; ramp slides whose anchor is masked by a slice/tile window are silent;
 porta 60 ms fallback + Humanize/Randomize/Riff parity calibrations tuned at campaign

@@ -49,7 +49,7 @@ No sub-spec calls open — all locked in the 2026-07-17 G3 docket rounds.
   song-length math counts muted blocks (#6)
 - `Source/PluginProcessor.cpp` — `emitPianoNoteOn` (:49-85): emit release/resonance (CC line
   per engine mapping) + note.type consumption; per-engine glide for Slide/Porta (BaySickSynth/
-  Bass mono `_glide` precedent :4841; Harmless; BaySickPlayer)
+  Bass mono `_glide` precedent :4841; BaySickSolstice; BaySickPlayer)
 - Engine processors — consume release + resonance + slide/porta glide (each engine's voice)
 - `Source/Standalone/BuilderPage.cpp/.h` — #17 BrowserPanel teardown (member order
   `mAudioTree`/`mAudioRoot` .h:302-303, no dtor), #19 `placeAudioLibraryEntry` silent return

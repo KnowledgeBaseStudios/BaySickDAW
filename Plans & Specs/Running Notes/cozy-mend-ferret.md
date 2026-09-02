@@ -91,7 +91,7 @@ captured in the pre-batch checkpoint below)*
   total** (MT-path Inst, MT-path Rusty, serial-path Inst, serial-path
   Rusty).  Surfaced 4 spec calls to Jeff before drafting the plan.
 - Explore agent confirmed `mAuditionNote` is private on all 7 engines
-  (BaySickPlayer, BaySickSynth, BaySickBass, Harmless, BaySickGuitars,
+  (BaySickPlayer, BaySickSynth, BaySickBass, BaySickSolstice, BaySickGuitars,
   BaySickBasses, BaySickRustyDrums); no public read accessor existed.
   QA-C scope therefore expanded to add `isAuditionPending()` to the 3
   sfizz engines (Guitars / Basses / RustyDrums) the predicates reference.
@@ -136,7 +136,7 @@ captured in the pre-batch checkpoint below)*
    `mAuditionNote` directly.  Explore agent confirmed it's private on
    every engine — Guitars / Basses / RustyDrums had no public state-flag
    accessor for audition state.  Scope expanded to add the accessor on
-   all 3.  Player / Synth / Bass / Harmless are not touched by QA-C
+   all 3.  Player / Synth / Bass / BaySickSolstice are not touched by QA-C
    (their predicate sites are not in the 4-site set), so their internal
    audition handling remains untouched this batch.
 

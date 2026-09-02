@@ -49,7 +49,7 @@
 
 #### Phase 3 — Sweep existing title bars
 
-- **Task 3.1 - HarmlessEditor (commit `9882630`)**: `mTitleBar { "Harmless", juce::Colour (HarmlessLAF::kAccent), /*bloom*/ true }`.  `kHdrH` 36 -> 32.  Bloomed paint block at lines 631-642 of the old `HarmlessEditor.cpp` deleted; the new path-stroke halo replaces it.  Preset button laid out via `getTrailingArea(86)`.
+- **Task 3.1 - BaySickSolsticeEditor (commit `9882630`)**: `mTitleBar { "BaySickSolstice", juce::Colour (BaySickSolsticeLAF::kAccent), /*bloom*/ true }`.  `kHdrH` 36 -> 32.  Bloomed paint block at lines 631-642 of the old `BaySickSolsticeEditor.cpp` deleted; the new path-stroke halo replaces it.  Preset button laid out via `getTrailingArea(86)`.
 - **Task 3.2 - BaySickSynthEditor (commit `1face93`)**: `mTitleBar { "BaySickSynth", juce::Colour (BaySickSynthLAF::kGreen) }`.  STYLE-06 fix — preset dropdown moved LEFT -> RIGHT via `getTrailingArea(88)`.  Title text now in FL green on the left.
 - **Task 3.3 - BaySickBassEditor (commit `4a02615`)**: same shape as Synth.  `mTitleBar { "BaySickBass", juce::Colour (BaySickBassLAF::kGreen) }`.  Preset L -> R; B1 neon green title.
 - **Task 3.4 - BaySickNAMIREditor (NOT YET COMMITTED — see In-flight)**: `mTitleBar { "BaySickNAM/IR", juce::Colour (0xFFE0303F) }` (Mesa red).  `kHeaderH` 28 -> 32 (4 px more chrome).  Slot A/B buttons re-anchored via `getTrailingArea(2 * kSlotABtnW)`.  Old title-strip fill + divider lines deleted.
@@ -57,27 +57,27 @@
 #### Mid-Phase plan-doc edits
 
 - **Commit `d529602`**: scope expansion of Phase 4 — added Task 4.3 (AriaControlPanel `Binding` extension), Task 4.4 (InstPage `kHeaderRowH` removal + BaySickGuitars / BaySickBasses wiring), Task 4.5 (BaySickRustyDrumsPage title bar).  Per-engine accent table grew from 7 entries to 10.  Pre-amble note explains the scope expansion.  See Found-along-the-way item 7.
-- **Commit `0c4431d`**: casing correction sweep — engine names in source files + plan doc converted from ALL CAPS ("HARMLESS" / "BAYSICKPLAYER" / etc.) back to brand mixed-case ("Harmless" / "BaySickPlayer" / etc.).  Also corrected Task 4.2's title text from "BaySickGuitars" -> "BaySickPedals" (Pedals and Guitars are distinct engines; original STYLE-04 phrasing conflated them).  See Found-along-the-way item 4.
+- **Commit `0c4431d`**: casing correction sweep — engine names in source files + plan doc converted from ALL CAPS ("HARMLESS" / "BAYSICKPLAYER" / etc.) back to brand mixed-case ("BaySickSolstice" / "BaySickPlayer" / etc.).  Also corrected Task 4.2's title text from "BaySickGuitars" -> "BaySickPedals" (Pedals and Guitars are distinct engines; original STYLE-04 phrasing conflated them).  See Found-along-the-way item 4.
 
 ### In-flight
 
-- **Phase 3.4 NAMIR** — code edits applied, builds, but the commit is pending behind a defensive HarmlessLAF guard (see Found-along-the-way item 5).  Both will land in the next commit pair.
+- **Phase 3.4 NAMIR** — code edits applied, builds, but the commit is pending behind a defensive BaySickSolsticeLAF guard (see Found-along-the-way item 5).  Both will land in the next commit pair.
 - **Uncommitted source files**:
-  - `Source/Harmless/HarmlessLAF.h` defensive early-return at top of `LinearVertical` branch in `drawLinearSlider` when `width <= 0 || height <= 0`.
+  - `Source/BaySickSolstice/BaySickSolsticeLAF.h` defensive early-return at top of `LinearVertical` branch in `drawLinearSlider` when `width <= 0 || height <= 0`.
   - `Source/BaySickNAMIR/BaySickNAMIREditor.h` + `.cpp` — title bar adoption.
 - **Uncommitted doc files**: this Running Notes file + a `Main Plan.md` §0 update documenting the new `Running Notes/` subfolder + a memory entry update for the new file location.
 
 ### Found along the way
 
-1. **Bloom math iterated three times.** Original Step 1 implementation used a size-delta bloom (17 pt underlay at offset (-1, -1), 16 pt overlay at (0, 0)).  Jeff caught it on Harmless verification — read as a directional shadow, not a halo, because both texts share the left-aligned edge so the larger underlay only extended right + top + bottom, not left.  First fix attempt: removed the (-1, -1) offset, kept size delta — still read as directional shadow for the same reason.  Final fix (commit `9c915c2`): convert engine name to `juce::GlyphArrangement` -> `juce::Path`, stroke at 2.5 px / 30% accent alpha, then fill the same path crisp on top.  Symmetric halo on every glyph contour.  Bloom default flipped to `true` per Jeff's approval.  Future engines opt out via `bloom = false` if their visual identity calls for it.
+1. **Bloom math iterated three times.** Original Step 1 implementation used a size-delta bloom (17 pt underlay at offset (-1, -1), 16 pt overlay at (0, 0)).  Jeff caught it on BaySickSolstice verification — read as a directional shadow, not a halo, because both texts share the left-aligned edge so the larger underlay only extended right + top + bottom, not left.  First fix attempt: removed the (-1, -1) offset, kept size delta — still read as directional shadow for the same reason.  Final fix (commit `9c915c2`): convert engine name to `juce::GlyphArrangement` -> `juce::Path`, stroke at 2.5 px / 30% accent alpha, then fill the same path crisp on top.  Symmetric halo on every glyph contour.  Bloom default flipped to `true` per Jeff's approval.  Future engines opt out via `bloom = false` if their visual identity calls for it.
 
-2. **SettableTooltipClient detour during Phase 3.4 NAMIR.** Original BaySickNAMIR title label had a hover tooltip ("Neural Amp Modeler + IR cabinet").  Tried extending `BaySickTitleBar` to inherit from `juce::SettableTooltipClient` to preserve it.  After rebuild, picking Harmless crashed in `HarmlessLAF::drawLinearSlider`.  Reverted the SettableTooltipClient base; restored the original `setInterceptsMouseClicks(false, true)` line.  Tooltip dropped permanently per Jeff's call (option 1 of 3 surfaced via plain text discussion).  The Harmless crash turned out to be a separate latent bug, not caused by the SettableTooltipClient change — see item 5.
+2. **SettableTooltipClient detour during Phase 3.4 NAMIR.** Original BaySickNAMIR title label had a hover tooltip ("Neural Amp Modeler + IR cabinet").  Tried extending `BaySickTitleBar` to inherit from `juce::SettableTooltipClient` to preserve it.  After rebuild, picking BaySickSolstice crashed in `BaySickSolsticeLAF::drawLinearSlider`.  Reverted the SettableTooltipClient base; restored the original `setInterceptsMouseClicks(false, true)` line.  Tooltip dropped permanently per Jeff's call (option 1 of 3 surfaced via plain text discussion).  The BaySickSolstice crash turned out to be a separate latent bug, not caused by the SettableTooltipClient change — see item 5.
 
 3. **Plan-mirror rule revised mid-batch.** Plan-mode forces the planning file to `~/.claude/plans/<silly-name>.md` for its UI; the project canonical location is `Plans & Specs/Batch Plans/<silly-name>.md`.  Original behavior: mirror to the canonical path on ExitPlanMode, then `cp` back to the home-dir copy after any mid-batch edit "to keep them in sync."  Jeff caught the duplicate.  Revised rule: mirror once on ExitPlanMode AND DELETE the home-dir copy, so only one version exists from then on.  Memory file `feedback_plan_mirror_one_way.md` created and indexed.
 
-4. **Casing correction.** Steps 2 / 3 / 4 / 5 shipped with engine names in ALL CAPS ("HARMLESS" / "BAYSICKPLAYER" / "BAYSICKSYNTH" / "BAYSICKBASS") because the legacy paint code had it that way.  Jeff caught the unilateral up-casing during Phase 3.4.  Locked convention: brand mixed-case ("Harmless" / "BaySickPlayer" / etc.) for every UI surface; never up-case unilaterally even when a legacy source string had it that way.  Commit `0c4431d` swept source files + per-engine accent table in the plan doc + every in-task ctor / verify reference.  Memory file `feedback_match_jeff_text_casing.md` created and indexed.
+4. **Casing correction.** Steps 2 / 3 / 4 / 5 shipped with engine names in ALL CAPS ("HARMLESS" / "BAYSICKPLAYER" / "BAYSICKSYNTH" / "BAYSICKBASS") because the legacy paint code had it that way.  Jeff caught the unilateral up-casing during Phase 3.4.  Locked convention: brand mixed-case ("BaySickSolstice" / "BaySickPlayer" / etc.) for every UI surface; never up-case unilaterally even when a legacy source string had it that way.  Commit `0c4431d` swept source files + per-engine accent table in the plan doc + every in-task ctor / verify reference.  Memory file `feedback_match_jeff_text_casing.md` created and indexed.
 
-5. **HarmlessLAF latent bug surfaced by Phase 3.1.**  Picking Harmless crashed in `HarmlessLAF::drawLinearSlider` -> `g.fillRoundedRectangle` -> Direct2D `coordsToRectangle` assert on NaN/negative coords.  Root cause: when a vertical slider has zero-sized bounds (not yet laid out, or computed to 0), `fh = (float)height = 0` makes the `norm` calc divide by zero, NaN propagates through `thumbY` and the cap rect into Direct2D's clip-list assert.  Latent bug; Phase 3.1's `kHdrH 36 -> 32` shift in HarmlessEditor body layout surfaced it on Harmless engine pick.  **Defensive fix queued for next commit**: early-return at top of `LinearVertical` branch when `width <= 0 || height <= 0`.  The upstream "why is the slider 0 px in the first place" question stays open as a Phase 6 follow-up.
+5. **BaySickSolsticeLAF latent bug surfaced by Phase 3.1.**  Picking BaySickSolstice crashed in `BaySickSolsticeLAF::drawLinearSlider` -> `g.fillRoundedRectangle` -> Direct2D `coordsToRectangle` assert on NaN/negative coords.  Root cause: when a vertical slider has zero-sized bounds (not yet laid out, or computed to 0), `fh = (float)height = 0` makes the `norm` calc divide by zero, NaN propagates through `thumbY` and the cap rect into Direct2D's clip-list assert.  Latent bug; Phase 3.1's `kHdrH 36 -> 32` shift in BaySickSolsticeEditor body layout surfaced it on BaySickSolstice engine pick.  **Defensive fix queued for next commit**: early-return at top of `LinearVertical` branch when `width <= 0 || height <= 0`.  The upstream "why is the slider 0 px in the first place" question stays open as a Phase 6 follow-up.
 
 6. **BaySickPedals title text correction.** Original plan had Phase 4.2's BaySickPedalsEditor title text as "BaySickGuitars" per STYLE-04's literal phrasing.  Jeff clarified mid-execution that BaySickPedals is a distinct engine from BaySickGuitars (the latter is sfizz-driven and shares AriaControlPanel; the former is the FX rack).  Title text corrected to "BaySickPedals" in the plan doc; original STYLE-04 phrasing documented as historical at Task 4.2 step 4.2.3 and in the per-engine accent table.
 
@@ -103,7 +103,7 @@
 - **D6**: Phase 4 scope expanded to include AriaControlPanel-shared engines (BaySickGuitars / BaySickBasses) and BaySickRustyDrums.  Each gets its own title bar.  AriaControlPanel's `Binding` struct gains optional `engineName` + `accentColor` fields.
 - **D7**: Pedals + Guitars + Basses share navy accent #1C3A8A (Inst tab active color).  RustyDrums uses Drums tab red #CC2222.  Confirmed via AskUserQuestion 2026-05-09.
 - **D8**: BaySickNAMIR title-label tooltip dropped permanently (no SettableTooltipClient base on `BaySickTitleBar`).
-- **D9**: HarmlessLAF zero-bounds NaN crash gets a defensive guard now; the upstream "why is the slider 0 px" question gets routed to Phase 6 (QA-Audit / QA-Cleanup) — not chased inside QA-A.
+- **D9**: BaySickSolsticeLAF zero-bounds NaN crash gets a defensive guard now; the upstream "why is the slider 0 px" question gets routed to Phase 6 (QA-Audit / QA-Cleanup) — not chased inside QA-A.
 - **D10**: Title text "BaySickPedals" (corrected from "BaySickGuitars" per the original STYLE-04 phrasing).  Pedals and Guitars are distinct engines.
 - **D11**: Running notes get a new subfolder home: `Plans & Specs/Running Notes/<silly-name>.md`.  §0 approved-subfolders list updated 2026-05-09.
 
@@ -117,7 +117,7 @@
 **Modified (committed):**
 - `CMakeLists.txt`
 - `Source/VibePlayer/VibePlayerEditor.h` + `.cpp`
-- `Source/Harmless/HarmlessEditor.h` + `.cpp`
+- `Source/BaySickSolstice/BaySickSolsticeEditor.h` + `.cpp`
 - `Source/BaySickSynth/BaySickSynthEditor.h` + `.cpp`
 - `Source/BaySickBass/BaySickBassEditor.h` + `.cpp`
 - `Plans & Specs/Batch Plans/twinkling-herding-twilight.md` (Task 0 mirror; commits `d529602` + `0c4431d` for scope expansion + casing)
@@ -125,7 +125,7 @@
 
 **Modified (working tree, uncommitted):**
 - `Source/BaySickNAMIR/BaySickNAMIREditor.h` + `.cpp` (Phase 3.4 NAMIR refactor)
-- `Source/Harmless/HarmlessLAF.h` (defensive zero-bounds guard)
+- `Source/BaySickSolstice/BaySickSolsticeLAF.h` (defensive zero-bounds guard)
 - `Plans & Specs/Main Plan.md` (Running Notes subfolder added to §0 approved list — current edit batch)
 
 **Created during batch (memory):**
@@ -142,13 +142,13 @@
 | `d9a95be` | Phase 1 | scaffold BaySickTitleBar shared component (skeleton) — amended once from `582ab46` to drop stray "VibePlayer" mention |
 | `9c915c2` | Phase 1b | BaySickTitleBar bloom uses path-stroke halo, on by default — amended once from `c2e1669` to fix stray backslashes in body |
 | `8fd4584` | Phase 2 | BaySickPlayer editor adopts BaySickTitleBar (PoC) |
-| `9882630` | Phase 3.1 | Harmless editor adopts BaySickTitleBar |
+| `9882630` | Phase 3.1 | BaySickSolstice editor adopts BaySickTitleBar |
 | `1face93` | Phase 3.2 | BaySickSynth editor adopts BaySickTitleBar |
 | `4a02615` | Phase 3.3 | BaySickBass editor adopts BaySickTitleBar |
 | `d529602` | plan-doc | expand plan scope to cover BaySickGuitars / BaySickBasses / BaySickRustyDrums |
 | `0c4431d` | plan-doc + source | correct engine title casing to brand mixed-case |
 | `c900f55` | meta-doc | establish Running Notes/ subfolder + §0 update + seed twinkling-herding-twilight.md |
-| `679af33` | source | guard HarmlessLAF::drawLinearSlider against zero-sized bounds |
+| `679af33` | source | guard BaySickSolsticeLAF::drawLinearSlider against zero-sized bounds |
 | `27a10bd` | Phase 3.4 | BaySickNAM/IR editor adopts BaySickTitleBar |
 | `8c5924c` | running-notes | append Phase 3 close checkpoint |
 | `1a31aba` | Phase 4.1 | BaySickVocal cluster (Vocals + Align + Pitch via BaySickEngineLabel) |
@@ -163,7 +163,7 @@
 
 - Phase 1 (component scaffold + bloom upgrade) — DONE.
 - Phase 2 (BaySickPlayer PoC) — DONE.
-- Phase 3 (sweep existing title bars: Harmless / BaySickSynth / BaySickBass / BaySickNAM/IR) — DONE.
+- Phase 3 (sweep existing title bars: BaySickSolstice / BaySickSynth / BaySickBass / BaySickNAM/IR) — DONE.
 - Phase 4 (BaySickVocal STYLE-03 / BaySickPedalsEditor + preset btn migration / AriaControlPanel extension / InstPage cleanup / BaySickRustyDrumsPage) — ALL pending.
 - Phase 5 (STYLE-01 ribbon truncation) — pending.
 - Phase 6 (cross-engine consistency check) — pending.
@@ -171,7 +171,7 @@
 
 ### Next action
 
-Commit the Running Notes infrastructure (this file + §0 update + memory entry update) as the meta-doc commit, then the HarmlessLAF defensive guard, then the Phase 3.4 NAMIR refactor.  After all three commits land, proceed to Phase 4.1 (BaySickVocalEditor STYLE-03).
+Commit the Running Notes infrastructure (this file + §0 update + memory entry update) as the meta-doc commit, then the BaySickSolsticeLAF defensive guard, then the Phase 3.4 NAMIR refactor.  After all three commits land, proceed to Phase 4.1 (BaySickVocalEditor STYLE-03).
 
 Going forward: every mid-batch checkpoint dispatches `/draft-doc running-notes` and the parent applies the returned text by appending a new `## YYYY-MM-DD HH:MM PT — <summary>` block to this file.
 
@@ -180,14 +180,14 @@ Going forward: every mid-batch checkpoint dispatches `/draft-doc running-notes` 
 ## 2026-05-09 14:12 PT — Phase 3 close + Running Notes infra landed
 
 > Checkpoint after the four commits closing Phase 3 of QA-A.  Phase 3 is now
-> fully done across Harmless / BaySickSynth / BaySickBass / BaySickNAM/IR.
+> fully done across BaySickSolstice / BaySickSynth / BaySickBass / BaySickNAM/IR.
 > Running Notes home is established and memory-locked.
 
 ### Done since last checkpoint
 
 - **`0c4431d` — QA-A: correct engine title casing to brand mixed-case.**  Casing fix swept across the four already-shipped player editors (HARMLESS / BAYSICKPLAYER / BAYSICKSYNTH / BAYSICKBASS) plus the per-batch plan doc.  Convention locked 2026-05-09: brand mixed-case for every UI surface, never up-case unilaterally even when legacy source had it that way.  Memory file `feedback_match_jeff_text_casing.md` indexed.
 - **`c900f55` — QA-A: establish Running Notes subfolder + seed twinkling-herding-twilight.**  New `Plans & Specs/Running Notes/` subfolder added to §0's approved list; per-batch running-notes file paired with the batch plan by silly-name.  Initial entry in this file is the retrospective backfill committed in this commit.  Memory file `feedback_draft_doc_running_notes_every_checkpoint.md` updated with the concrete file location.
-- **`679af33` — QA-A: guard HarmlessLAF::drawLinearSlider against zero-sized bounds.**  Defensive early-return at top of the `LinearVertical` branch when `width <= 0 || height <= 0`.  Stops the NaN-coord Direct2D `coordsToRectangle` assert that surfaced after Phase 3.1's `kHdrH 36 -> 32` shift in HarmlessEditor body layout.  Latent root cause ("why is the slider 0 px in the first place") stays open as a Phase 6 follow-up per D9.
+- **`679af33` — QA-A: guard BaySickSolsticeLAF::drawLinearSlider against zero-sized bounds.**  Defensive early-return at top of the `LinearVertical` branch when `width <= 0 || height <= 0`.  Stops the NaN-coord Direct2D `coordsToRectangle` assert that surfaced after Phase 3.1's `kHdrH 36 -> 32` shift in BaySickSolsticeEditor body layout.  Latent root cause ("why is the slider 0 px in the first place") stays open as a Phase 6 follow-up per D9.
 - **`27a10bd` — QA-A Step 6: BaySickNAM/IR editor adopts BaySickTitleBar.**  Phase 3.4 close.  `mTitleBar { "BaySickNAM/IR", juce::Colour (0xFFE0303F) }` (Mesa red).  `kHeaderH` 28 -> 32 (4 px more chrome).  A/B slot toggles right-anchor via `getTrailingArea(2 * kSlotABtnW)`.  Old title-strip fill + divider lines deleted.  Tooltip dropped permanently per D8.
 
 ### Findings / decisions added
@@ -432,7 +432,7 @@ commit).
 
 ### Next action
 
-Phase 6 — cross-engine consistency check across every refactored editor + page (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickNAM/IR, BaySickVocal cluster, BaySickPedals, BaySickGuitars, BaySickBasses, BaySickRustyDrums + InstPage chrome) for title-bar visual parity, accent-color compliance with D7 / D14, and the new ribbon variable-width layout's behavior at window widths the bake didn't cover.  Phase 7 follows: mandatory close sequence (`/draft-doc batch-close` -> `/review-batch` -> apply close -> commit).
+Phase 6 — cross-engine consistency check across every refactored editor + page (BaySickSolstice, BaySickPlayer, BaySickSynth, BaySickBass, BaySickNAM/IR, BaySickVocal cluster, BaySickPedals, BaySickGuitars, BaySickBasses, BaySickRustyDrums + InstPage chrome) for title-bar visual parity, accent-color compliance with D7 / D14, and the new ribbon variable-width layout's behavior at window widths the bake didn't cover.  Phase 7 follows: mandatory close sequence (`/draft-doc batch-close` -> `/review-batch` -> apply close -> commit).
 
 ---
 
@@ -442,7 +442,7 @@ Phase 6 — cross-engine consistency check across every refactored editor + page
 > scope was "verification-only" — a visual sweep across every refactored
 > engine title bar to confirm parity, with the plan saying skip the
 > commit if all consistent.  In practice the sweep surfaced four real
-> inconsistencies across the five engine title bars (Harmless,
+> inconsistencies across the five engine title bars (BaySickSolstice,
 > BaySickPlayer, BaySickSynth, BaySickBass, BaySickPedals), driving a
 > real Phase 6 commit and a new shared `BaySickPresetButton` component.
 > Test-on-Pedals approach per Jeff's request: applied the new chevron
@@ -453,21 +453,21 @@ Phase 6 — cross-engine consistency check across every refactored editor + page
 
 - **`4689f0f` — QA-A Step 13: unify engine preset buttons via BaySickPresetButton.**  Phase 6 close.  Six interlocked edits in one commit:
   - **New `BaySickPresetButton` class** in `Source/Standalone/BaySickTitleBar.h` + `.cpp`.  `juce::TextButton` subclass that paints a label ("Preset" by default; ctor takes a `juce::String`) on the left and a path-drawn 5x4 px filled down-chevron triangle on the right.  Triangle geometry matches `MetroArrowButton` (transport bar) pixel-for-pixel so all chevrons across the app render identically.  Pins itself to `VibeLAF::get()` via `setLookAndFeel(...)` in the ctor and clears the LAF pointer in the dtor (standard JUCE pattern when assigning a non-owned LookAndFeel).  Otherwise behaves exactly like `juce::TextButton` — onClick / setBounds / setTooltip / setColour all transparent.  Per D26 / D27 / D28.
-  - **Engine editor swaps (5 editors):**  Harmless / VibePlayer / BaySickSynth / BaySickBass / BaySickPedals each swapped their `juce::TextButton mPresetBtn { "Preset v" };` member for `BaySickPresetButton mPresetBtn { "Preset" };`.  Per-engine onClick / showPresetMenu / withTargetComponent wiring untouched per Jeff's guardrail "transferring look and feel only, since the preset boxes all have different setups" (per D31).
+  - **Engine editor swaps (5 editors):**  BaySickSolstice / VibePlayer / BaySickSynth / BaySickBass / BaySickPedals each swapped their `juce::TextButton mPresetBtn { "Preset v" };` member for `BaySickPresetButton mPresetBtn { "Preset" };`.  Per-engine onClick / showPresetMenu / withTargetComponent wiring untouched per Jeff's guardrail "transferring look and feel only, since the preset boxes all have different setups" (per D31).
   - **InstPage popup-anchor bug fix.**  `BaySickPedalsEditor::getPedalboardPresetButton() noexcept` accessor added returning the preset button as a `juce::Component*`.  `InstPage::showPedalboardPresetMenu` dynamic_casts the editor (matches existing pattern at `InstPage.cpp:102`) and anchors `withTargetComponent` to the button instead of the editor root.  Closes the bug where the popup opened at the app's top-left because the editor root component is pinned at the app's top-left.  Per finding 23.
   - **VibePlayer `?` help button removed.**  `mHelpBtn { "?" }` member, ctor onClick lambda, addAndMakeVisible, resized() setBounds, and the hardcoded AlertWindow popup logic all deleted.  Trailing-area math in `resized()` reduced from `(110 + 8 + 24)` to `88`.  Was a leftover Jeff never asked for (spec drift).  Per D30.
-  - **Width unification.**  Preset button width fixed at 88 px across every engine title bar.  VibePlayer 110 -> 88; Harmless 86 -> 88; Synth/Bass/Pedals were already 88.  Per D29.
-  - **Verification (Jeff confirmed):** all five engines (Harmless / BaySickPlayer / BaySickSynth / BaySickBass / BaySickPedals) now show the path-drawn down-chevron, identical button color via `VibeLAF`, identical 88 px width.  No `?` button on BaySickPlayer.  No popup-position bug on BaySickPedals.
+  - **Width unification.**  Preset button width fixed at 88 px across every engine title bar.  VibePlayer 110 -> 88; BaySickSolstice 86 -> 88; Synth/Bass/Pedals were already 88.  Per D29.
+  - **Verification (Jeff confirmed):** all five engines (BaySickSolstice / BaySickPlayer / BaySickSynth / BaySickBass / BaySickPedals) now show the path-drawn down-chevron, identical button color via `VibeLAF`, identical 88 px width.  No `?` button on BaySickPlayer.  No popup-position bug on BaySickPedals.
 
 ### Findings / decisions added
 
 - **Finding 21 — Phase 6's "verification-only" framing was wrong.**  Plan said "if all consistent, skip the commit."  Cross-engine visual sweep surfaced four real inconsistencies that needed real code fixes, not zero.  Drove the Phase 6 commit (Step 13).  Going forward, "verification-only" phases should still budget for the possibility that the sweep finds work — never assume cross-engine parity until measured.
-- **Finding 22 — Engine LAF overrides leak into shared components.**  First-pass propagation of `BaySickPresetButton` rendered black on the four LAF-overriding engines (HarmlessLAF / BaySickSynthLAF / BaySickBassLAF / VibePlayerLAF) because each engine's local LAF propagates to its child components.  Pedals already rendered grey because InstPage uses the global VibeLAF.  Wrong fix attempt: self-paint with hardcoded VC palette colors (changed Pedals' look in the wrong direction).  Right fix: lock the button's LAF to `VibeLAF::get()` in the ctor so it renders the same way Pedals already did regardless of host page.  Drove D28.
+- **Finding 22 — Engine LAF overrides leak into shared components.**  First-pass propagation of `BaySickPresetButton` rendered black on the four LAF-overriding engines (BaySickSolsticeLAF / BaySickSynthLAF / BaySickBassLAF / VibePlayerLAF) because each engine's local LAF propagates to its child components.  Pedals already rendered grey because InstPage uses the global VibeLAF.  Wrong fix attempt: self-paint with hardcoded VC palette colors (changed Pedals' look in the wrong direction).  Right fix: lock the button's LAF to `VibeLAF::get()` in the ctor so it renders the same way Pedals already did regardless of host page.  Drove D28.
 - **Finding 23 — InstPage anchored its preset popup to the editor root.**  `InstPage::showPedalboardPresetMenu` used `withTargetComponent (mPedalsEditor.get())` — the editor root component, which JUCE pins at the editor's top-left = the app's top-left.  Menu opened at the app's top-left instead of below the button.  Same pattern bug exists nowhere else in the engine editors (the four others anchor `withTargetComponent (mPresetBtn)` correctly because the menu logic lives inside the editor itself, not in the parent page).  Fix: new `getPedalboardPresetButton()` accessor; InstPage anchors to that instead.
 - **D26 — `BaySickPresetButton` shared component owns the standardized title-bar preset button visual.**  Subclass of `juce::TextButton`; preserves all standard Button API surfaces.  Lives alongside `BaySickTitleBar` + `BaySickEngineLabel` in `Source/Standalone/BaySickTitleBar.h` + `.cpp`.
 - **D27 — Path-drawn 5x4 px filled triangle replaces the UTF-8 down-chevron + the literal 'v' fake chevron everywhere on title-bar preset buttons.**  Matches `MetroArrowButton` geometry pixel-for-pixel.  Eliminates the unreliable UTF-8 glyph fallback that drove engine editors to use a literal lowercase 'v' as a fake chevron in their button text ("Preset v").
-- **D28 — Title-bar preset button is locked to `VibeLAF` via `setLookAndFeel(&VibeLAF::get())` in the ctor (cleared in dtor).**  Bypasses every engine editor's local LAF override (HarmlessLAF / BaySickSynthLAF / BaySickBassLAF / VibePlayerLAF) so the button always paints the same way regardless of host page.  Refines D1's "no LAF coupling" rule for `BaySickTitleBar` itself by carving out the preset button as the explicit exception — visual parity required pinning the LAF, not avoiding it.
-- **D29 — Title-bar preset button width is 88 px on every engine.**  Harmless 86 -> 88, VibePlayer 110 -> 88; the rest were already at 88.  88 px is the locked width going forward.
+- **D28 — Title-bar preset button is locked to `VibeLAF` via `setLookAndFeel(&VibeLAF::get())` in the ctor (cleared in dtor).**  Bypasses every engine editor's local LAF override (BaySickSolsticeLAF / BaySickSynthLAF / BaySickBassLAF / VibePlayerLAF) so the button always paints the same way regardless of host page.  Refines D1's "no LAF coupling" rule for `BaySickTitleBar` itself by carving out the preset button as the explicit exception — visual parity required pinning the LAF, not avoiding it.
+- **D29 — Title-bar preset button width is 88 px on every engine.**  BaySickSolstice 86 -> 88, VibePlayer 110 -> 88; the rest were already at 88.  88 px is the locked width going forward.
 - **D30 — VibePlayer's `?` help button removed.**  Was a leftover Jeff never asked for (popped a hardcoded AlertWindow about how to use the player).  Spec drift; deleted.
 - **D31 — Per-engine preset-menu wiring (onClick / showPresetMenu / withTargetComponent) is OUT of scope for the unification.**  Only the visual class is swapped.  Each engine keeps its own preset menu logic.  Per Jeff's instruction during the test-on-Pedals phase: "transferring look and feel only, since the preset boxes all have different setups."
 
@@ -479,8 +479,8 @@ Phase 6 — cross-engine consistency check across every refactored editor + page
 
 - `Source/Standalone/BaySickTitleBar.h` (+30 net)
 - `Source/Standalone/BaySickTitleBar.cpp` (+83 net)
-- `Source/Harmless/HarmlessEditor.h` (+2 / -2 net)
-- `Source/Harmless/HarmlessEditor.cpp` (+3 / -1 net)
+- `Source/BaySickSolstice/BaySickSolsticeEditor.h` (+2 / -2 net)
+- `Source/BaySickSolstice/BaySickSolsticeEditor.cpp` (+3 / -1 net)
 - `Source/VibePlayer/VibePlayerEditor.h` (+2 / -3 net)
 - `Source/VibePlayer/VibePlayerEditor.cpp` (+5 / -16 net)
 - `Source/BaySickSynth/BaySickSynthEditor.h` (+2 / -2 net)
@@ -499,6 +499,6 @@ Phase 7 — mandatory close sequence: `/draft-doc batch-close` -> `/review-batch
 ## Bucket assignment (for batch-close drafter at QA-A close)
 
 - **UI / L&F / Theming** (primary): the BaySickTitleBar component + every engine-editor refactor.
-- **Players**: every refactored engine editor (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickNAM/IR, BaySickVocal, BaySickPedals, BaySickGuitars, BaySickBasses, BaySickRustyDrums).
+- **Players**: every refactored engine editor (BaySickSolstice, BaySickPlayer, BaySickSynth, BaySickBass, BaySickNAM/IR, BaySickVocal, BaySickPedals, BaySickGuitars, BaySickBasses, BaySickRustyDrums).
 - **System Pages**: InstPage chrome cleanup (Phase 4.4), BaySickRustyDrumsPage layout (Phase 4.5), RibbonTabBar truncation fix (Phase 5).
 - **Meta**: plan-doc edits (`d529602`, `0c4431d`), Running Notes subfolder + §0 update, memory entries created during the batch.

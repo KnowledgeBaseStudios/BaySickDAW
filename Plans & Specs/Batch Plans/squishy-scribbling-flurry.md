@@ -107,7 +107,7 @@ No sub-spec calls open at plan-mode exit. All four (S1-S4) locked pre-plan-mode 
 - [ ] DELETE `mFxBusPeakDb / mFxBusPeakDbLRun / mFxBusPeakDbRRun / mFxBusPeakDbRun` declarations at [PluginProcessor.h:454-456](Source/PluginProcessor.h:454). **KEEP** the snapshot mirrors `mFxBusPeakDb / mFxBusPeakDbL / mFxBusPeakDbR` at `:415-417` — UI still polls those.
 - [ ] DELETE the `*Run` initialisers for FX in [PluginProcessor.cpp:155-163 + the FxBus equivalents](Source/PluginProcessor.cpp:155).
 - [ ] Tell Jeff: "Run `do_build.bat`. Then in Debug:
-  - **(1)** New project. Open Effects page; drop any DSP module (e.g., Compressor) onto the FX Bus rack. Open Mixer page; route a Layer strip to the FX Bus via the per-strip cable. Drop a Layers tab → Harmless or BaySickSynth. Trigger sound (audition the keyboard, or play a pattern). Verify the FX Bus mixer strip's meter reads activity on the LED bar (matches the meter behavior of Layers/Bass/Drums/Master).
+  - **(1)** New project. Open Effects page; drop any DSP module (e.g., Compressor) onto the FX Bus rack. Open Mixer page; route a Layer strip to the FX Bus via the per-strip cable. Drop a Layers tab → BaySickSolstice or BaySickSynth. Trigger sound (audition the keyboard, or play a pattern). Verify the FX Bus mixer strip's meter reads activity on the LED bar (matches the meter behavior of Layers/Bass/Drums/Master).
   - **(2)** Stop sound. Verify the FX Bus meter decays to silence (no stuck peak).
   - **(3)** Switch Multi-core Rendering OFF (Mixer hamburger → 'Multi-core Rendering' toggle). Repeat (1). Verify FX Bus meter still reads correctly in serial-diagnostic mode.
   - **(4)** Switch Multi-core Rendering ON. Save the project, reload. Trigger sound. Verify FX Bus meter reads correctly post-reload."

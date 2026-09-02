@@ -35,9 +35,9 @@ belong to the law, and what shape should the single helper take.
   one of them sits at 0.707 (-3 dB per channel) at dead center today:
   timeline clip decode `Source/PluginProcessor.cpp:1010-1013`; BaySickPlayer
   voice pan `Source/BaySickPlayer/BaySickPlayerDSP.cpp:1212-1219` (multiplied
-  with note pan at `:1162-1174`); Harmless master pan
-  `Source/Harmless/AdditiveVoice.cpp:786-792` (multiplied with note pan at
-  `:726-728`); Harmless unison spread `:1110-1116`; our SFZ loader
+  with note pan at `:1162-1174`); BaySickSolstice master pan
+  `Source/BaySickSolstice/AdditiveVoice.cpp:786-792` (multiplied with note pan at
+  `:726-728`); BaySickSolstice unison spread `:1110-1116`; our SFZ loader
   `Source/SlideSampler/SlideSampler.cpp:1032-1033`. BaySickSynth has NO engine
   pan, so it is the one engine at unity at center.
 - Per-note pan: linear opposite-side-only taper, unity at center
@@ -47,11 +47,11 @@ belong to the law, and what shape should the single helper take.
   table, `tickPan` = L *= cos(p*pi/2), R *= cos((1-p)*pi/2) = sin(p*pi/2),
   per voice; 0.707 each at center. `width` (`:101-111`) uses the same table.
 - Engines gate their pan push on a cached value
-  (`Source/Harmless/HarmlessProcessor.cpp:637`,
+  (`Source/BaySickSolstice/BaySickSolsticeProcessor.cpp:637`,
   `Source/BaySickPlayer/BaySickPlayerProcessor.cpp:184`), so the law would
   need to be part of that cache key.
 - Baseline level picture for an untouched project: mixer stages 0 dB at
-  center x3; Harmless / BaySickPlayer / clip decode / SlideSampler output
+  center x3; BaySickSolstice / BaySickPlayer / clip decode / SlideSampler output
   -3 dB at center; BaySickSynth and hosted VST3 0 dB. The engines are already
   3 dB apart from each other at default pan.
 
@@ -389,18 +389,18 @@ Level consequences for a default centered mix, relative to today:
 
 ### 3. Which pan sites follow the project law
 - Mixer strip / bus / master: yes (stereo matrix form of the law).
-- Engine pan knobs (BaySickPlayer pan, Harmless master pan, the Clips-page
+- Engine pan knobs (BaySickPlayer pan, BaySickSolstice master pan, the Clips-page
   pan that drives timeline clip decode): yes -- FL precedent is exactly this
   (channel pan -> host ComputeLRVol). Use the MONO form for synthesized /
   mono-sample voices and the balance form for stereo samples and stereo clip
   files (SFZ-spec semantics: placement for mono, balance for stereo).
   CONSEQUENCE: these sites sit at -3 dB today (cos/sin, no center bypass);
-  center-unity laws lift Harmless, BaySickPlayer, timeline clips and
+  center-unity laws lift BaySickSolstice, BaySickPlayer, timeline clips and
   SlideSampler by +3 dB at default pan. BaySickSynth (no engine pan) and
   hosted VST3 do not move, so the relative balance between engine families
   shifts by 3 dB. Two ways to handle it, spec call: (a) accept the +3 dB
   (removes today's hidden inconsistency where BaySickSynth is already 3 dB
-  hotter than Harmless at default), or (b) fold a fixed -3 dB into each
+  hotter than BaySickSolstice at default), or (b) fold a fixed -3 dB into each
   affected engine's output trim so nothing moves.
 - Per-note pan: yes, but combine POSITIONS, not gains. FL hands the host one
   Pan value per voice (`FinalLevels.Pan`), not two stages multiplied. Sum the
@@ -455,7 +455,7 @@ One header-only unit, `Source/DSP/PanLaw.h`, `namespace baysick::pan`:
   creation with `setPanLawSource (const std::atomic<int>*)` (mirrors how
   model-side registration already works); each engine does one relaxed load
   per block and folds the law into its existing change-gate
-  (`HarmlessProcessor.cpp:637`, `BaySickPlayerProcessor.cpp:184`) so gains
+  (`BaySickSolsticeProcessor.cpp:637`, `BaySickPlayerProcessor.cpp:184`) so gains
   are only recomputed when pan OR law changed (CPU Safeguarding rule).
   Retire `BlockContext::panLaw` and the dead `processBus` argument in the
   same pass.

@@ -31,13 +31,13 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 2. **Color API:** `juce::Colour` accent passed in by each parent editor at construction. Each engine keeps its own color (existing engines reuse their LAF's accent; new entries get colors picked from RibbonTabBar's tab palette OR Mesa red for NAMIR — see per-engine table below). Zero LAF coupling inside the TitleBar component.
 3. **Refactor staging:** Component-first + one-editor proof (VibePlayer) + sweep the rest.
 4. **STYLE-01 root cause:** Ribbon slot too narrow — `g.drawText` clips. Fix in ribbon paint / slot sizing.
-5. **Bloom support:** BaySickTitleBar takes an optional `bool bloom = false` ctor flag. HarmlessEditor opts in (`true`) so its long-standing orange-glow signature is preserved. Other engines stay flat / single-pass; future engines can opt in if their visual identity demands it.
+5. **Bloom support:** BaySickTitleBar takes an optional `bool bloom = false` ctor flag. BaySickSolsticeEditor opts in (`true`) so its long-standing orange-glow signature is preserved. Other engines stay flat / single-pass; future engines can opt in if their visual identity demands it.
 
 ### Existing per-editor header geometry (current state, before refactor)
 
 | Editor | Header height | Title text now | Title color | Preset position |
 |--------|---------------|----------------|-------------|-----------------|
-| `HarmlessEditor` | `kHdrH = 36` ([:7](Source/Harmless/HarmlessEditor.cpp:7)) | "Harmless" (bloomed twice — paint at [:637-642](Source/Harmless/HarmlessEditor.cpp:637)) | `HarmlessLAF::kAccent = 0xFFFF6600` | RIGHT — `(getWidth()-92, 4, 86, kHdrH-8)` ([:773](Source/Harmless/HarmlessEditor.cpp:773)) |
+| `BaySickSolsticeEditor` | `kHdrH = 36` ([:7](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:7)) | "BaySickSolstice" (bloomed twice — paint at [:637-642](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:637)) | `BaySickSolsticeLAF::kAccent = 0xFFFF6600` | RIGHT — `(getWidth()-92, 4, 86, kHdrH-8)` ([:773](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:773)) |
 | `VibePlayerEditor` | `kHdrH = 36` ([:5](Source/VibePlayer/VibePlayerEditor.cpp:5)) | "BaySickPlayer" via `juce::Label` ([:47-50](Source/VibePlayer/VibePlayerEditor.cpp:47)) | `0xFFE0E0E0` (white) | RIGHT — `(w-200-kPad, 7, 110, 22)` + help btn `(w-82-kPad, 7, 24, 22)` ([:404-406](Source/VibePlayer/VibePlayerEditor.cpp:404)) |
 | `BaySickSynthEditor` | 32 (hardcoded) | none — only preset btn | n/a | **LEFT** — `(6, 5, 88, 22)` ([:537](Source/BaySickSynth/BaySickSynthEditor.cpp:537)) |
 | `BaySickBassEditor` | 32 (hardcoded) | none — only preset btn | n/a | **LEFT** — `(6, 5, 88, 22)` ([:529](Source/BaySickBass/BaySickBassEditor.cpp:529)) |
@@ -45,13 +45,13 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 | `BaySickVocalEditor::BaySickVocalsPanel` (inner) | section header inside panel | "PAGE CONTROLS" via `g.drawText` ([:294](Source/BaySickVocal/BaySickVocalEditor.cpp:294)) | `Colours::white.withAlpha(0.5f)` | n/a |
 | `BaySickPedalsEditor` | none | none | n/a | n/a |
 
-**Standardize at 32 px height** — Harmless + VibePlayer shrink 4px (4px more body), BaySickNAMIR grows 4px (4px less body), BaySickSynth + BaySickBass unchanged.
+**Standardize at 32 px height** — BaySickSolstice + VibePlayer shrink 4px (4px more body), BaySickNAMIR grows 4px (4px less body), BaySickSynth + BaySickBass unchanged.
 
 **Per-engine accent color (confirmed by Jeff via AskUserQuestion 2026-05-09; expanded 2026-05-09 to cover BaySickGuitars / BaySickBasses / BaySickRustyDrums):**
 
 | Engine | Title text | Accent | Source |
 |--------|-----------|--------|--------|
-| Harmless | "Harmless" | `HarmlessLAF::kAccent` (#FF6600 orange) | Existing engine LAF. Bloom default flipped on at Step 1b so all engines get the halo. |
+| BaySickSolstice | "BaySickSolstice" | `BaySickSolsticeLAF::kAccent` (#FF6600 orange) | Existing engine LAF. Bloom default flipped on at Step 1b so all engines get the halo. |
 | VibePlayer (BaySickPlayer) | "BaySickPlayer" | `0xFFD4A017` (amber / gold) | Same as Clips + Builder tab active color (`VC::Warm`); see [RibbonTabBar.cpp:11,15](Source/Standalone/RibbonTabBar.cpp:11) and [SharedUI.h:26](Source/Standalone/SharedUI.h:26) |
 | BaySickSynth | "BaySickSynth" | `BaySickSynthLAF::kGreen` (#A0DB2B FL green) | Existing engine LAF (STYLE-06) |
 | BaySickBass | "BaySickBass" | `BaySickBassLAF::kGreen` (#33FF88 B1 neon green) | Existing engine LAF (STYLE-06) |
@@ -74,7 +74,7 @@ QA-A is the next batch in the post-Batch-10 QA plan after QA-Md (closed 2026-05-
 
 **Modify (7 player editors):**
 - `Source/VibePlayer/VibePlayerEditor.h` + `.cpp` (proof-of-concept).
-- `Source/Harmless/HarmlessEditor.h` + `.cpp`.
+- `Source/BaySickSolstice/BaySickSolsticeEditor.h` + `.cpp`.
 - `Source/BaySickSynth/BaySickSynthEditor.h` + `.cpp` (STYLE-06: preset L→R, green accent).
 - `Source/BaySickBass/BaySickBassEditor.h` + `.cpp` (STYLE-06: preset L→R, green accent).
 - `Source/BaySickNAMIR/BaySickNAMIREditor.h` + `.cpp` (STYLE-05: black-bar removal via standardized paint).
@@ -118,7 +118,7 @@ Full code shown so the parent editor refactor tasks have something concrete to c
     Optional bloom (per-engine opt-in, decided 2026-05-09): paints the engine
     name twice when enabled - 17pt bold underlay at 15% accent opacity, offset
     by (-1, -1), creating a halo around the standard 16pt bold overlay. Used
-    today by HarmlessEditor to preserve its long-standing orange-glow signature;
+    today by BaySickSolsticeEditor to preserve its long-standing orange-glow signature;
     other engines can opt in later if their visual identity calls for it. */
 class BaySickTitleBar : public juce::Component
 {
@@ -211,7 +211,7 @@ juce::Rectangle<int> BaySickTitleBar::getTrailingArea (int trailingWidth) const
 
 void BaySickTitleBar::paint (juce::Graphics& g)
 {
-    // Standardized dark background (matches existing Harmless/VibePlayer tone).
+    // Standardized dark background (matches existing BaySickSolstice/VibePlayer tone).
     g.fillAll (juce::Colour (0xFF141618));
 
     // 1px bottom divider for visual separation against the panel below.
@@ -225,7 +225,7 @@ void BaySickTitleBar::paint (juce::Graphics& g)
     if (mBloom)
     {
         // Halo underlay: 1pt larger font, 15% alpha, offset by (-1, -1).
-        // Mirrors the original HarmlessEditor bloom (16pt underlay + 15pt
+        // Mirrors the original BaySickSolsticeEditor bloom (16pt underlay + 15pt
         // overlay) but pinned to standard 16pt visible text so all engines'
         // crisp glyphs render at the same size.
         g.setColour (mAccentColor.withAlpha (0.15f));
@@ -392,28 +392,28 @@ mHelpBtn.setBounds   (trailing.getX() + 110 + 8,     btnY,  24, 22);
 
 Each editor follows the same shape: replace the existing title row with `BaySickTitleBar`, route trailing widgets through `getTrailingArea`. Per memory `feedback_commit_at_checkpoints` and `feedback_every_commit_via_draft_commit`, every editor lands as its own verified commit through `/draft-commit`.
 
-#### Task 3.1: HarmlessEditor
+#### Task 3.1: BaySickSolsticeEditor
 
 **Files:**
-- Modify: `Source/Harmless/HarmlessEditor.h` (add member + include).
-- Modify: `Source/Harmless/HarmlessEditor.cpp` (delete bloomed paint, swap to TitleBar, route preset via `getTrailingArea`).
+- Modify: `Source/BaySickSolstice/BaySickSolsticeEditor.h` (add member + include).
+- Modify: `Source/BaySickSolstice/BaySickSolsticeEditor.cpp` (delete bloomed paint, swap to TitleBar, route preset via `getTrailingArea`).
 
-Current paint at [:626-642](Source/Harmless/HarmlessEditor.cpp:626) draws header background + bottom border + bloomed "Harmless" text twice (alpha 0.15 underlay + full-alpha overlay). Standardize to single-pass via `BaySickTitleBar`. Bloom is sacrificed — accent color preserves the engine identity.
+Current paint at [:626-642](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:626) draws header background + bottom border + bloomed "BaySickSolstice" text twice (alpha 0.15 underlay + full-alpha overlay). Standardize to single-pass via `BaySickTitleBar`. Bloom is sacrificed — accent color preserves the engine identity.
 
-- [ ] **Step 3.1.1:** Add `#include "../Standalone/BaySickTitleBar.h"` to `HarmlessEditor.h`.
-- [ ] **Step 3.1.2:** Add `BaySickTitleBar mTitleBar { "Harmless", juce::Colour (HarmlessLAF::kAccent), /*bloom*/ true };` member in `HarmlessEditor`. The `true` opts into the orange-glow bloom (17pt bold halo at 15% opacity behind the crisp 16pt text) so the long-standing Harmless visual signature is preserved.
+- [ ] **Step 3.1.1:** Add `#include "../Standalone/BaySickTitleBar.h"` to `BaySickSolsticeEditor.h`.
+- [ ] **Step 3.1.2:** Add `BaySickTitleBar mTitleBar { "BaySickSolstice", juce::Colour (BaySickSolsticeLAF::kAccent), /*bloom*/ true };` member in `BaySickSolsticeEditor`. The `true` opts into the orange-glow bloom (17pt bold halo at 15% opacity behind the crisp 16pt text) so the long-standing BaySickSolstice visual signature is preserved.
 - [ ] **Step 3.1.3:** In ctor, `addAndMakeVisible (mTitleBar);`. (Find the section that adds existing widgets; place near `mPresetBtn`.)
-- [ ] **Step 3.1.4:** Update `kHdrH = 36` at [HarmlessEditor.cpp:7](Source/Harmless/HarmlessEditor.cpp:7) to `BaySickTitleBar::kStandardHeight` (32).
-- [ ] **Step 3.1.5:** In `paint()`, delete lines [:631-642](Source/Harmless/HarmlessEditor.cpp:631) (`// ── Header bar ──` block + bloomed title text). Keep the `g.fillAll (HarmlessLAF::kChassis)` body fill above it.
-- [ ] **Step 3.1.6:** In `resized()` at [:768-773](Source/Harmless/HarmlessEditor.cpp:768), insert `mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);` BEFORE the existing `bounds.removeFromTop (kHdrH);` line.
-- [ ] **Step 3.1.7:** Replace `mPresetBtn.setBounds (getWidth() - 92, 4, 86, kHdrH - 8);` at [:773](Source/Harmless/HarmlessEditor.cpp:773) with:
+- [ ] **Step 3.1.4:** Update `kHdrH = 36` at [BaySickSolsticeEditor.cpp:7](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:7) to `BaySickTitleBar::kStandardHeight` (32).
+- [ ] **Step 3.1.5:** In `paint()`, delete lines [:631-642](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:631) (`// ── Header bar ──` block + bloomed title text). Keep the `g.fillAll (BaySickSolsticeLAF::kChassis)` body fill above it.
+- [ ] **Step 3.1.6:** In `resized()` at [:768-773](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:768), insert `mTitleBar.setBounds (0, 0, getWidth(), BaySickTitleBar::kStandardHeight);` BEFORE the existing `bounds.removeFromTop (kHdrH);` line.
+- [ ] **Step 3.1.7:** Replace `mPresetBtn.setBounds (getWidth() - 92, 4, 86, kHdrH - 8);` at [:773](Source/BaySickSolstice/BaySickSolsticeEditor.cpp:773) with:
   ```cpp
   const auto trailing = mTitleBar.getTrailingArea (86);
   const int btnY = (BaySickTitleBar::kStandardHeight - 22) / 2;
   mPresetBtn.setBounds (trailing.getX(), btnY, 86, 22);
   ```
-- [ ] **Step 3.1.8:** Tell Jeff to `do_build.bat` → Debug verify (open Harmless engine in a Layers tab → screenshot title bar → confirm "Harmless" in orange) → Release verify.
-- [ ] **Step 3.1.9:** Surface git status, `/draft-commit`, commit only `Source/Harmless/HarmlessEditor.h` + `.cpp`.
+- [ ] **Step 3.1.8:** Tell Jeff to `do_build.bat` → Debug verify (open BaySickSolstice engine in a Layers tab → screenshot title bar → confirm "BaySickSolstice" in orange) → Release verify.
+- [ ] **Step 3.1.9:** Surface git status, `/draft-commit`, commit only `Source/BaySickSolstice/BaySickSolsticeEditor.h` + `.cpp`.
 
 #### Task 3.2: BaySickSynthEditor (STYLE-06: preset L→R, green title)
 
@@ -615,7 +615,7 @@ Pick the smallest fix once confirmed by reading paint code; do not unilaterally 
 
 #### Task 6.1: Visual sweep
 
-- [ ] **Step 6.1.1:** Tell Jeff to launch Debug exe; open every player engine tab in turn (Layers VibePlayer, Layers Harmless, Layers BaySickSynth, Bass, Drums, Vox, Inst BaySickGuitars, Inst BaySickNAM/IR). Screenshot each title bar.
+- [ ] **Step 6.1.1:** Tell Jeff to launch Debug exe; open every player engine tab in turn (Layers VibePlayer, Layers BaySickSolstice, Layers BaySickSynth, Bass, Drums, Vox, Inst BaySickGuitars, Inst BaySickNAM/IR). Screenshot each title bar.
 - [ ] **Step 6.1.2:** Cross-compare screenshots: same height (32px), same font (16pt bold), same horizontal padding (8px), each shows correct engine name in correct accent color, trailing widgets correctly right-aligned without overlap.
 - [ ] **Step 6.1.3:** If anything looks inconsistent, identify the editor + apply a final tweak. If all consistent, skip.
 
@@ -683,7 +683,7 @@ End-to-end test after Phase 6:
 - ✓ Spec coverage: STYLE-01 (Phase 5) / STYLE-02 (Phase 1 component + accent palette + standardized 32px height across all editors) / STYLE-03 (Task 4.1) / STYLE-04 (Task 4.2) / STYLE-05 (Task 3.4) / STYLE-06 (Tasks 3.2 + 3.3).
 - ✓ No placeholders. Every step has concrete file path + line range + code or command.
 - ✓ Type consistency: `BaySickTitleBar` API (ctor / `kStandardHeight` / `getTrailingArea`) is used identically in every editor refactor task.
-- ✓ ASCII-only UI strings: "BaySickPlayer" / "Harmless" / "BaySickSynth" / "BaySickBass" / "BaySickNAM/IR" / "BaySickVocals" / "BaySickGuitars" — all ASCII.
+- ✓ ASCII-only UI strings: "BaySickPlayer" / "BaySickSolstice" / "BaySickSynth" / "BaySickBass" / "BaySickNAM/IR" / "BaySickVocals" / "BaySickGuitars" — all ASCII.
 - ✓ Per-commit `/draft-commit` rule honored — every commit step says "dispatch `/draft-commit`".
 - ✓ "Surface FULL git status" rule honored — every commit step says "Surface git status".
 - ✓ "Stage specific files only" rule honored — every commit step lists the explicit file set.

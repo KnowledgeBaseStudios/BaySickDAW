@@ -394,14 +394,14 @@ engine being rebuilt. Preset loads and the internal state swap are single undoab
 
 - `BaySickSynth.md` - the same engine with general-purpose defaults; the deeper
   explanation of each waveform and of the shared DSP lives there.
-- `Harmless.md` - the additive engine, the other synth available on a Bass tab.
+- `BaySickSolstice.md` - the additive engine, the other synth available on a Bass tab.
 
 ---
 
 ## Differs from Carry-Forward
 
 - Carry-Forward's engine-audition entry says "All 4 engine processors
-  (BaySickSynth/Bass/Harmless/BaySickPlayer)". There are now **seven** engines carrying the
+  (BaySickSynth/Bass/BaySickSolstice/BaySickPlayer)". There are now **seven** engines carrying the
   `auditionNote` pattern, and BaySickBass's version has grown a press-and-hold pair
   (`auditionNoteOn` / `auditionNoteOff`) with an accumulating note-off mask alongside the
   original one-shot exchange.

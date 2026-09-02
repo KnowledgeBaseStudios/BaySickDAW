@@ -293,7 +293,7 @@ Implementation:
 - Kit-swap stability: ~30ms shield-window dropout + no crash on tab close / program change / re-load (the mProjectLoadInProgress shield does ALL the safety work now; SpinLock fallback is gone).
 - Sub-K menu item 205 + Trace menu item 204 should be GONE from the Mixer hamburger menu.
 - Mixer hamburger should still show "Multi-core Rendering" (gMultiThreadedEngineEnabled, untouched) + "Run MT Diagnostic (2s capture)" (gCaptureOn-based, untouched).
-- Non-sfizz engines (Harmless / BaySickSynth / BaySickPlayer / BaySickBass) should still work normally (they never touched the Sub-K infrastructure).
+- Non-sfizz engines (BaySickSolstice / BaySickSynth / BaySickPlayer / BaySickBass) should still work normally (they never touched the Sub-K infrastructure).
 - BaySickGuitars + BaySickBasses sfizz engines should work in MT (Sub-M=(eng-b) pinning gone; they're back on the worker pool).
 - Same in Release.
 
@@ -304,7 +304,7 @@ Implementation:
 - **Verify 1 (Mixer hamburger menu cleanup):** PASS — items 201 "Latency-compensate meters" + 202 "Multi-core Rendering" + 203 "Run MT Diagnostic (2s capture)" still present; items 204 "QA-DispatcherAffinity Trace" + 205 "Sub-K Serial Fallback" GONE.  Jeff confirmed by asking about 201 + 203 specifically (both visible to him in the post-strip menu).
 - **Verify 2 (cure verify):** PASS — 6-cymbal MT-on test, bit-crusher ABSENT with lock-free MT execution as the ONLY production path (no Sub-K fallback available).
 - **Verify 3 (kit-swap stability):** PASS — close + reopen Rusty tab + program change while audio playing → ~30 ms shield-window dropout + clean resume + no crash + no use-after-free.  The mProjectLoadInProgress shield does ALL the safety work now; SpinLock fallback is gone.
-- **Verify 4 (non-sfizz engines):** PASS — Harmless / BaySickSynth / BaySickPlayer / BaySickBass all play normally.  No regression vs Stage A baseline.
+- **Verify 4 (non-sfizz engines):** PASS — BaySickSolstice / BaySickSynth / BaySickPlayer / BaySickBass all play normally.  No regression vs Stage A baseline.
 - **Verify 5 (sfizz Guitars + Basses on MT pool):** PASS — BaySickGuitars + BaySickBasses tabs run on the worker pool (Sub-M=(eng-b) pinning gone); clean audio + normal CPU.
 - **Verify 6 (Release parity):** PASS — scenarios 1-5 repeated in Release; all PASS.
 

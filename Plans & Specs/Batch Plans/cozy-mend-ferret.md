@@ -66,7 +66,7 @@ setter.  QA-C needs to add `isAuditionPending()` to the 3 sfizz engines
 the predicates reference (Guitars / Basses / RustyDrums).
 
 Decision: only add to the 3 engines QA-C touches.  Adding to the other 4
-(BaySickSynth / BaySickBass / Harmless / VibePlayer) is parity-only with
+(BaySickSynth / BaySickBass / BaySickSolstice / VibePlayer) is parity-only with
 no functional need; deferred (no §9 entry — trivially recoverable if
 ever needed).
 
@@ -265,7 +265,7 @@ intermediate commits between Task 0 (open) and this source commit.
 ## Out of scope
 
 - Adding `isAuditionPending()` to the other 4 engines (BaySickSynth /
-  BaySickBass / Harmless / VibePlayer) — no functional need, parity-only.
+  BaySickBass / BaySickSolstice / VibePlayer) — no functional need, parity-only.
 - Refactoring the audition pattern itself (mAuditionNote ring upgrade is
   a Future State CL-272..CL-274 item, deferred per CLAUDE.md "Engine
   audition pattern" technical note).

@@ -1,6 +1,6 @@
-# Harmless
+# BaySickSolstice
 
-**Purpose** - Harmless is the app's additive synthesizer. Instead of starting from a raw
+**Purpose** - BaySickSolstice is the app's additive synthesizer. Instead of starting from a raw
 waveform and filtering it, it builds every sound out of 516 individual harmonics, reshapes
 that harmonic stack with a set of spectral tools, and only then runs it through ordinary
 filters and envelopes. It carries two independent sound layers, Part A and Part B, which
@@ -14,12 +14,12 @@ tab, and it is the widest control surface in the app.
 
 | Layer | Files | Job |
 |---|---|---|
-| Processor | `Source/Harmless/HarmlessProcessor.h` / `.cpp` | Owns the APVTS (102 parameters) and the modulation registry. Reads parameters once per block and pushes changes into the synth. |
-| Synth | `Source/Harmless/HarmlessSynth.h` / `.cpp` | Owns two `HarmonicEngine` templates (Part A and Part B), 16 `AdditiveVoice` objects in a `BroadcastSynthesiser`, the output phaser, the output tilt EQ, the strum staggerer, and the background wavetable-rebuild thread. |
-| Voice | `Source/Harmless/AdditiveVoice.h` / `.cpp` | Per-note DSP: up to 9 unison slots reading both parts' wavetables, two filters with their own envelopes, tremolo, vibrato, glide, sub oscillator, amp envelope, per-note pan. |
-| Harmonic engine | `Source/Harmless/HarmonicEngine.h` / `.cpp`, `SpectralModules.h` | Holds 516 partial amplitudes and phases; applies the spectral modules; runs a 2048-point inverse FFT into a double-buffered wavetable. |
-| Mod matrix | `Source/Harmless/HarmlessModRegistry.h` / `.cpp` | 16 modulation targets x 7 sources, each with a hand-drawn curve plus depth, length and four warp knobs. |
-| Editor | `Source/Harmless/HarmlessEditor.h` / `.cpp` | The panel, plus `HarmlessFilterRow`, `HarmlessRoutingMatrix`, `HarmlessXYZPad`, `HarmlessModEditor`, `HarmlessWaveformButton`, `VisualizerScreen` and `HarmlessLAF.h` (accent `#FF6600`). |
+| Processor | `Source/BaySickSolstice/BaySickSolsticeProcessor.h` / `.cpp` | Owns the APVTS (102 parameters) and the modulation registry. Reads parameters once per block and pushes changes into the synth. |
+| Synth | `Source/BaySickSolstice/BaySickSolsticeSynth.h` / `.cpp` | Owns two `HarmonicEngine` templates (Part A and Part B), 16 `AdditiveVoice` objects in a `BroadcastSynthesiser`, the output phaser, the output tilt EQ, the strum staggerer, and the background wavetable-rebuild thread. |
+| Voice | `Source/BaySickSolstice/AdditiveVoice.h` / `.cpp` | Per-note DSP: up to 9 unison slots reading both parts' wavetables, two filters with their own envelopes, tremolo, vibrato, glide, sub oscillator, amp envelope, per-note pan. |
+| Harmonic engine | `Source/BaySickSolstice/HarmonicEngine.h` / `.cpp`, `SpectralModules.h` | Holds 516 partial amplitudes and phases; applies the spectral modules; runs a 2048-point inverse FFT into a double-buffered wavetable. |
+| Mod matrix | `Source/BaySickSolstice/BaySickSolsticeModRegistry.h` / `.cpp` | 16 modulation targets x 7 sources, each with a hand-drawn curve plus depth, length and four warp knobs. |
+| Editor | `Source/BaySickSolstice/BaySickSolsticeEditor.h` / `.cpp` | The panel, plus `BaySickSolsticeFilterRow`, `BaySickSolsticeRoutingMatrix`, `BaySickSolsticeXYZPad`, `BaySickSolsticeModEditor`, `BaySickSolsticeWaveformButton`, `VisualizerScreen` and `BaySickSolsticeLAF.h` (accent `#FF6600`). |
 
 **How a sound is made.** Each part is a `HarmonicEngine` holding 516 partial amplitudes.
 Picking a shape (Sine / Saw / Square / Triangle) fills those amplitudes with the classic
@@ -42,9 +42,9 @@ unison slot phases advanced through both wavetables, Part A and Part B mixed by 
 velocity x blend, sub oscillator added, filter 1, filter 2 (each with its own envelope,
 keyboard tracking and cutoff offset), tremolo, amp envelope (scaled by the routing
 matrix's ENV control), per-note pan, stereo out. After the synthesiser returns,
-`HarmlessSynth` applies the output phaser, the tilt EQ, and the routing matrix's output
+`BaySickSolsticeSynth` applies the output phaser, the tilt EQ, and the routing matrix's output
 gain and saturation. The processor then applies a fixed -6 dB calibration trim
-(`kOutputHeadroom` in `HarmlessProcessor.cpp`) and replaces any non-finite sample with
+(`kOutputHeadroom` in `BaySickSolsticeProcessor.cpp`) and replaces any non-finite sample with
 zero.
 
 **Audio-thread care.** `updateFromApvts` is gated by an `ApvtsDirtyTracker` so the ~100
@@ -71,7 +71,7 @@ curve point; everything else is a leaf write.
 
 ### Where it lives
 
-Pick Harmless when you create the tab, from the ribbon's add menu (`+ Add Harmless`, on
+Pick BaySickSolstice when you create the tab, from the ribbon's add menu (`+ Add BaySickSolstice`, on
 the Layers or Bass row). **The choice locks** - a tab keeps the player it was created
 with.
 
@@ -154,7 +154,7 @@ layer. Out of the box only Part A is audible; raise VOICE B to bring the second 
 
 **BROWN** (0 to 1, default 1.0, per-part). Brownian rolloff - how fast the harmonics get
 quieter as they go up. At 1 the stack rolls off about 6 dB per octave, which is why
-Harmless sounds warm and natural on first load. At 0 no rolloff is applied and every
+BaySickSolstice sounds warm and natural on first load. At 0 no rolloff is applied and every
 harmonic keeps its full amplitude, which is much brighter and much harsher.
 
 **F1 OFS** and **F2 OFS** (-24 to +24 semitones, default 0). Shift filter 1's and
@@ -183,7 +183,7 @@ your playing.
 default Same Pitch). With Cut Self on, each new note performs an instant, click-free hard
 cut first: Same Pitch cuts only a still-ringing copy of the same note, which stops the
 doubling and phase-smearing you get from fast retriggers; Cut All cuts every ringing voice
-on each new note, which gives a choked, gated feel. Harmless is always polyphonic, so this
+on each new note, which gives a choked, gated feel. BaySickSolstice is always polyphonic, so this
 is the only way to get a cut-off behavior out of it.
 
 **AG** (toggle, caption reads **AG: REL** or **AG: ABS**, default REL). Auto-gain, which
@@ -461,8 +461,8 @@ amp release time; a note longer than LENGTH holds the curve's final value.
 ### Presets
 
 The **Preset** button on the window's title strip opens the preset menu. Factory presets
-live in `Documents\BaySickDAW\Presets\Harmless\`, with each folder becoming a submenu.
-The menu also offers **Save preset...** (which writes to `Presets\Harmless\My Presets\`)
+live in `Documents\BaySickDAW\Presets\BaySickSolstice\`, with each folder becoming a submenu.
+The menu also offers **Save preset...** (which writes to `Presets\BaySickSolstice\My Presets\`)
 and **Init (reset to default)**, which returns every control to its factory value in one
 undoable step.
 
@@ -480,7 +480,7 @@ filename.
 | CC84 (+ CC5 / CC37) | Slide: the note starts at another pitch and glides in, with an optional glide time in milliseconds |
 | CC85 / CC86 / CC89 | Slide takeover of a sounding note, with loudness and pan ramping over the same span |
 
-Harmless has no mod wheel destination, so CC1 does nothing here.
+BaySickSolstice has no mod wheel destination, so CC1 does nothing here.
 
 ---
 
@@ -488,7 +488,7 @@ Harmless has no mod wheel destination, so CC1 does nothing here.
 
 ### APVTS parameters
 
-102 parameters, ids `tk_<trackId>_harm_<name>`, where `<trackId>` is `lay_<n>` for a
+102 parameters, ids `tk_<trackId>_bso_<name>`, where `<trackId>` is `lay_<n>` for a
 Layers tab or `bas_<n>` for a Bass tab.
 
 **Timbre and parts**
@@ -601,7 +601,7 @@ range and default.
 
 ### The modulation matrix - state outside the APVTS
 
-The mod matrix is **not** an APVTS parameter set. It lives in `HarmlessModRegistry` and is
+The mod matrix is **not** an APVTS parameter set. It lives in `BaySickSolsticeModRegistry` and is
 serialized as a `harmlessMod` child ValueTree. Its shape is 16 targets x 7 sources; each
 source holds a curve point list (time, value, curve type per point), a depth, a length, a
 tempo-sync flag, a global flag, an LFO shape, and the four warp values (spd, tns, skew,
@@ -617,7 +617,7 @@ knob offers.
 ### What is saved where
 
 - **With the project** - the whole APVTS **plus** the mod matrix.
-  `HarmlessProcessor::getStateInformation` copies the APVTS state, strips any previous
+  `BaySickSolsticeProcessor::getStateInformation` copies the APVTS state, strips any previous
   matrix child, appends a fresh `mModRegistry.toValueTree()`, and writes XML to binary.
   The tab record stores that blob base64-encoded. `setStateInformation` pulls the matrix
   child out, applies it to the registry, then replaces the APVTS state.
@@ -653,13 +653,13 @@ Order that matters:
   every setter. Without that pre-warm the first block would run a dozen FFT wavetable
   rebuilds on the real-time thread.
 - Wavetable rebuilds requested by the UI run on a background `TimeSliceThread` owned by
-  `HarmlessSynth`. Per-voice rebuilds triggered by modulation stay on the audio thread by
+  `BaySickSolsticeSynth`. Per-voice rebuilds triggered by modulation stay on the audio thread by
   design (they are sparse and need to be immediately audible).
 - The registry's target pointers are stable for the registry's lifetime, which is what lets
   voices cache them; the audio thread never takes the registry's edit lock.
 - The editor installs two global right-click hooks (`sShouldOfferModulate` and
   `sOnModulateEnvelope`) and clears them in its destructor. These are process-global: with
-  two Harmless windows open, the last one opened owns the hooks.
+  two BaySickSolstice windows open, the last one opened owns the hooks.
 - Automation applicators - both the parameter lanes and the mod-matrix lanes - are
   registered **model-side** at engine creation, never against a widget, and re-resolve their
   target through the rig at apply time. That is what lets automation keep working after a
@@ -681,14 +681,14 @@ Order that matters:
 ## Differs from Carry-Forward
 
 - Carry-Forward's engine-audition entry says "All 4 engine processors
-  (BaySickSynth/Bass/Harmless/BaySickPlayer)". There are now **seven** engines carrying the
-  `auditionNote` pattern, and Harmless's version has grown a press-and-hold pair
+  (BaySickSynth/Bass/BaySickSolstice/BaySickPlayer)". There are now **seven** engines carrying the
+  `auditionNote` pattern, and BaySickSolstice's version has grown a press-and-hold pair
   (`auditionNoteOn` / `auditionNoteOff`) with an accumulating note-off mask alongside the
   original one-shot exchange.
-- Carry-Forward predates model-owned engines. Harmless is no longer owned by its page:
+- Carry-Forward predates model-owned engines. BaySickSolstice is no longer owned by its page:
   `EngineRig` owns it and the page holds a non-owning view pointer, so the engine keeps
   playing when the window is closed.
-- Carry-Forward's section 5 lists **DSP-01, "Harmless lazersaw silent - needs preset audit
+- Carry-Forward's section 5 lists **DSP-01, "BaySickSolstice lazersaw silent - needs preset audit
   harness"**, as confirmed open against batch QA-K. That entry describes a preset-library
   problem, not an engine defect, and nothing in the current engine code corresponds to it;
   its present status is not determined from the code and must be read from the Main Plan

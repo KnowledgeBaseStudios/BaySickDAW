@@ -79,7 +79,7 @@ Cross-cutting bucket reassignments at apply-time:
 
 ## In-plan (not double-added)
 
-CL-024 T-Pain hard-tune | CL-025 Chord harmonizer | CL-026 Vocal exciter | CL-027 De-noise | CL-028 De-reverb | CL-029 De-clipper | CL-030 Click/pop removal | CL-007 Vocoder | CL-008 Talkbox | CL-014 Pitch correction for instruments | CL-084 Vocal isolation | BLU-278 Vocal Rider | BLU-287 Pitch Shifter | BLU-284 Subharmonic | BLU-153 Shimmer | BLU-516 Analog Drift | BLU-293 Vibrato | BLU-330 Harmless Harmonizer | BLU-607 BaySickVocal H-1 skeleton.
+CL-024 T-Pain hard-tune | CL-025 Chord harmonizer | CL-026 Vocal exciter | CL-027 De-noise | CL-028 De-reverb | CL-029 De-clipper | CL-030 Click/pop removal | CL-007 Vocoder | CL-008 Talkbox | CL-014 Pitch correction for instruments | CL-084 Vocal isolation | BLU-278 Vocal Rider | BLU-287 Pitch Shifter | BLU-284 Subharmonic | BLU-153 Shimmer | BLU-516 Analog Drift | BLU-293 Vibrato | BLU-330 BaySickSolstice Harmonizer | BLU-607 BaySickVocal H-1 skeleton.
 
 ## Proposed additions
 
@@ -256,11 +256,11 @@ BLU-169 Asymmetric sigmoid Type D | BLU-170 Pre/de-emphasis EQ | BLU-171 Multi-s
 
 ## Already-have
 
-- Harmless 516-partial IFFT additive engine
+- BaySickSolstice 516-partial IFFT additive engine
 - BaySickSynth 10 waveforms incl. Bell FM + 2048-pt IFFT wavetable
 - BaySickPlayer (VibePlayer) sample player + SFZ + disk streaming
 - BaySickBass mirrors BaySickSynth
-- BaySickSynth + Harmless mod editor + filter envelopes + LFO + Mod XYZ pad
+- BaySickSynth + BaySickSolstice mod editor + filter envelopes + LFO + Mod XYZ pad
 - Phase D dynamic-drum architecture per-tab BaySickPlayer/Synth
 - BaySickSynth/Bass `_outVol` master output parity
 - Per-engine voice modes (Poly N / Mono) + voice cap

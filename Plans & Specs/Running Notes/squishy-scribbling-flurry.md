@@ -632,7 +632,7 @@ get retro-added with Keep when first surfaced"):
     `std::vector<float>` every 60Hz vblank (the snapshot buffer the
     Task 7 idle-flicker fix landed).
   - **M2 (MEDIUM)**: 4 engine processors miss APVTS dirty-flag pattern
-    (Harmless + VibePlayer + BaySickSynth + BaySickBass) per
+    (BaySickSolstice + VibePlayer + BaySickSynth + BaySickBass) per
     `feedback_apvts_dirty_flag_pattern.md`.
   - **M3 (MEDIUM)**: UI-side `getInsertPeakDb` / `getInsertPeakDbStereo`
     `std::map::find` per vblank (mirror of H1 on the drain side).

@@ -148,12 +148,12 @@ its own list — this batch is too large for exhaustive pre-enumeration, and ref
   `freeze` def), `Source/Standalone/EffectsPage.cpp` (registerSlotAutomation :496-594
   relocated to model triggers), `Source/BaySickPedals/BaySickPedalsEditor.cpp` (tile
   registrations :161-244 superseded by model-side), engine editors' 19 wrapper sites
-  (retire/replace: BaySickBassEditor:391, BaySickSynthEditor:397, HarmlessEditor:485/562/638,
-  HarmlessFilterRow:61-74, HarmlessRoutingMatrix:38, HarmlessXYZPad:46,
+  (retire/replace: BaySickBassEditor:391, BaySickSynthEditor:397, BaySickSolsticeEditor:485/562/638,
+  BaySickSolsticeFilterRow:61-74, BaySickSolsticeRoutingMatrix:38, BaySickSolsticeXYZPad:46,
   VibePlayerEditor:220/259-262, BaySickNAMIREditor:8-50, BaySickVocalEditor:597-663),
   `MixerTrackStrip.cpp:439-485` (fader/pan lane remap), `SharedUI.cpp:5376-5419` (EQ
   regOne ownership), `StandaloneEditor.cpp` (statics :11461-11505, stale test re-widen,
-  owner-index simplification), Harmless mod editor (BLU-344 targets).
+  owner-index simplification), BaySickSolstice mod editor (BLU-344 targets).
 - **TS4:** NEW workspace component family (native-child window frame: title strip, close,
   resize border, constrainer), `Source/Standalone/StandaloneApp.cpp` (:948-1015 fixed
   main), `StandaloneEditor.cpp/.h` (page hosting -> window management; destroy-on-close;
@@ -290,7 +290,7 @@ lane. The widget-targeting era ends.
 - [x] Pedals: tile/panel registrations superseded by model-side rack registration (the
   pedals board is model-owned after TS1; slot uuids already stable).
 - [x] Engine editors: retire all 19 widget wrapper sites; model-side per-instance param
-  registration (TS1 hook) is the replacement. Harmless dual A/B params keep param-targeting
+  registration (TS1 hook) is the replacement. BaySickSolstice dual A/B params keep param-targeting
   with BOTH ids registered (one lane per part — QA-ApvtsAutomation semantics preserved);
   vocal capture-lock veto (`kCaptureGated` suppressWhen,
   [BaySickVocalEditor.cpp:630-661](../../Source/BaySickVocal/BaySickVocalEditor.cpp:630))
@@ -306,7 +306,7 @@ lane. The widget-targeting era ends.
 - [x] Statics re-seed logic + owner-index simplification once nothing view-owned remains;
   re-widen `onIsParamStale` to "not in APVTS AND not in registry" (reverted 2026-07-26
   because panel-keyed wiring made it lie — model-side wiring makes it true).
-- [x] BLU-344: Harmless mod-editor DEPTH/LENGTH onto the non-parameter mechanism (mod
+- [x] BLU-344: BaySickSolstice mod-editor DEPTH/LENGTH onto the non-parameter mechanism (mod
   curves are model data; table-style defs against the mod editor's model).
 - [x] Build gate (gates the commit below).
 - [ ] Batch-smoke scenarios (DEFERRED to Task set 8): (1) automate one knob of EVERY

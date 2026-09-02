@@ -57,7 +57,7 @@ have. See `Sample Library.md`.
 
 | Document | Covers |
 |---|---|
-| `Harmless.md` | The additive synthesizer. Part A and Part B as simultaneous layers, the modulation matrix, and every box on its single-view panel. |
+| `BaySickSolstice.md` | The additive synthesizer. Part A and Part B as simultaneous layers, the modulation matrix, and every box on its single-view panel. |
 | `BaySickSynth.md` | The subtractive synthesizer used on Layers and Drums tabs: oscillators, filter, envelopes, LFO and modulation across six panel tabs. |
 | `BaySickBass.md` | The same engine tuned for bass, with the defaults that make it sound like a bass on the first note. |
 | `BaySickPlayer.md` | The sample player: loading a folder, a single file or an SFZ, the voice pool, and the per-voice signal path. |

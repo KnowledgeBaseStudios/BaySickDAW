@@ -350,13 +350,13 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 `InstPage.cpp` (`Source/Inst/`), `MixerPage.cpp`
 
 - **"+" menu** rebuilt to Jeff's locked order (L2/L3/L28): BaySickVocal · BaySickLiveInst ·
-  BaySickGuitars · BaySickBasses · VSTPlugin ▸ · Harmless ▸ (Layers/Bass) · BaySickSynth (flat →
+  BaySickGuitars · BaySickBasses · VSTPlugin ▸ · BaySickSolstice ▸ (Layers/Bass) · BaySickSynth (flat →
   Layers) · BaySickPlayer ▸ (Layers/Bass/Audio Clips) · BaySickBass · **BaySickDrums ▸
   (BaySickPlayer/BaySickSynth — absorbs the old drum routes)** · BaySickRustyDrums.  The VSTPlugin
   list stays alphabetical (`getAddedInstruments()`).
 - **Ribbon dropdown add rows** (Jeff map 2026-08-03): the generic "+ Add New X" rows (which made
-  ENGINELESS pages) are replaced by engine-named rows per type — Layers: Harmless/BaySickPlayer/
-  BaySickSynth; Bass: Harmless/BaySickPlayer/BaySickBass; Drums: BaySickPlayer/BaySickSynth (+
+  ENGINELESS pages) are replaced by engine-named rows per type — Layers: BaySickSolstice/BaySickPlayer/
+  BaySickSynth; Bass: BaySickSolstice/BaySickPlayer/BaySickBass; Drums: BaySickPlayer/BaySickSynth (+
   existing Rusty row); Vox: BaySickVocal (+ export submenu); Inst: BaySickLiveInst (+ Guitars/
   Basses rows); Clips: "+ Add BaySickPlayer…" (file-picker route unchanged); Plugins: "+ Add
   VSTPlugin ▸" side menu, alphabetical.  All ride `onAddEngineRequest` — the engine loads at
@@ -383,7 +383,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 ## 2026-08-03 — QA-Layout T3: window title strips — fill toggle, dissolved engine title bars, preset buttons on the strip
 
 **Files:** `WorkspaceWindow.h/.cpp`, `SharedUI.h/.cpp`, `BaySickPlayerEditor.h/.cpp`,
-`BaySickSynthEditor.h/.cpp`, `BaySickBassEditor.h/.cpp`, `HarmlessEditor.h/.cpp`,
+`BaySickSynthEditor.h/.cpp`, `BaySickBassEditor.h/.cpp`, `BaySickSolsticeEditor.h/.cpp`,
 `BaySickPedalsEditor.h/.cpp`, `LayersPage.h/.cpp`, `BassPage.h/.cpp`, `DrumPage.h/.cpp`,
 `ClipsPage.h/.cpp`, `BaySickRustyDrumsPage.cpp`, `InstPage.h`, `StandaloneEditor.cpp`
 
@@ -393,7 +393,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   drag or resize while filled clears the state.  Button order right-to-left: close, fill toggle,
   then the PageMenuBar's right-extras (preset button etc.).
 - **Engine title bars dissolved (Window-4/L2):** BaySickPlayer / BaySickSynth / BaySickBass /
-  Harmless / BaySickPedals editors lost their internal `BaySickTitleBar` (32px reclaimed —
+  BaySickSolstice / BaySickPedals editors lost their internal `BaySickTitleBar` (32px reclaimed —
   content starts at 0).  The colored player name now renders CENTERED on the window title strip
   via `PageMenuBar::setCenterTitle` (BaySickTitleBar's bloom painter, 15pt).  Each editor keeps
   its accent/name as `getEngineTitle()`/`getEngineAccent()` statics.  `BaySickPlayerEditor::
@@ -605,16 +605,16 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 
 ---
 
-## 2026-08-04 - QA-Layout T7: real floors + Harmless four-column rework + BaySickPlayer knobs + pedal tile grids
+## 2026-08-04 - QA-Layout T7: real floors + BaySickSolstice four-column rework + BaySickPlayer knobs + pedal tile grids
 
 **Files:** `WorkspaceWindow.h/.cpp`, `StandaloneEditor.h/.cpp`, `EffectWindows.h/.cpp`,
 `EffectRack.h`, `EffectPresetIO.cpp`, `EffectEditorPanels.cpp`,
-`Harmless/HarmlessEditor.h/.cpp`, `BaySickPlayer/BaySickPlayerEditor.cpp`
+`BaySickSolstice/BaySickSolsticeEditor.h/.cpp`, `BaySickPlayer/BaySickPlayerEditor.cpp`
 
 - **Real floors (Jeff's approved sizing map, full-window dims):** the diag-era
   120x80 free-for-all is over - WorkspaceWindow's setMinimumSize body restored,
   new setMinimumWindowSize for map-dim callers.  Page windows floor via
-  StandaloneEditor::floorSizeFor (engine-aware for Layers/Bass/Drums: Harmless
+  StandaloneEditor::floorSizeFor (engine-aware for Layers/Bass/Drums: BaySickSolstice
   1047x455, BaySickPlayer 490x455, Synth/BaySickBass 558x455; re-applied per
   show so Drums' live swap tracks).  Satellites: Vocal Chain 1047x723, Pitch
   1534x724, Align 1047x723, NAM/IR 843x563, Pedals board 1534x455, EQ +
@@ -622,7 +622,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   new onFloorChanged hook (Basic 691x268 / Advanced 1047x268 / pedal-native
   358x268; pushed on the poll so Mode swaps + Basic toggles re-floor).  Hosted
   plugin windows keep plugin-derived floors (T12).
-- **Harmless (Specific-2): the layout is REDONE, not re-hung** (Jeff's
+- **BaySickSolstice (Specific-2): the layout is REDONE, not re-hung** (Jeff's
   correction 2026-08-04 - re-flowing the old sections into columns was not the
   ask).  Design size is now the approved window (1035x425 content, was a tall
   960x620 box).  Two root causes fixed:
@@ -695,7 +695,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 **Files:** `SharedUI.h/.cpp`, `StandaloneEditor.cpp`, `BuilderPage.h/.cpp`,
 `AriaControlPanel.h/.cpp`, `BaySickRustyDrumsPage.cpp`, `Inst/InstPage.h/.cpp`,
 `BaySickNAMIR/BaySickNAMIREditor.h`, `BaySickVocal/BaySickPitchEditor.cpp`,
-`BaySickVocal/BaySickAlignEditor.cpp`, `Harmless/HarmlessEditor.cpp`
+`BaySickVocal/BaySickAlignEditor.cpp`, `BaySickSolstice/BaySickSolsticeEditor.cpp`
 
 - **FX Rack and Freeze are menu items, not strip buttons.**  `setFxRackSlot` /
   `setFreezeSlot` keep their registration signatures but now only store
@@ -740,7 +740,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
     extras rendered the name clipped to "BaySickRustyD...".
 - **Title text rule (Jeff, 2026-08-04):** a window with a logo shows no plain
   title text; a window without one CENTERS it instead of pinning it left.
-- **Harmless `layoutRow` scales an over-tall block down.**  Wrapping alone was
+- **BaySickSolstice `layoutRow` scales an over-tall block down.**  Wrapping alone was
   not enough: a block taller than its cell centered and spilled past both
   edges, which is what put FILTER 1 on FILTER 2 and pushed the Amp Env RAND row
   into its neighbour.  Width scales with height so knobs stay round, and since
@@ -824,12 +824,12 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
 
 ---
 
-## 2026-08-04 - QA-Layout T17: window sizing rework + Harmless re-layout
+## 2026-08-04 - QA-Layout T17: window sizing rework + BaySickSolstice re-layout
 
 **Files:** `WorkspaceWindow.h/.cpp`, `StandaloneEditor.h/.cpp`, `SharedUI.h/.cpp`,
 `RibbonTabBar.h/.cpp`, `GlobalTransportBar.h/.cpp`, `KeyBindsWindow.h`,
-`Harmless/HarmlessEditor.cpp`, `Harmless/HarmlessModEditor.h/.cpp`,
-`Harmless/HarmlessFilterRow.cpp`, `Harmless/HarmlessRoutingMatrix.cpp`
+`BaySickSolstice/BaySickSolsticeEditor.cpp`, `BaySickSolstice/BaySickSolsticeModEditor.h/.cpp`,
+`BaySickSolstice/BaySickSolsticeFilterRow.cpp`, `BaySickSolstice/BaySickSolsticeRoutingMatrix.cpp`
 
 ### Window sizing / persistence
 
@@ -868,7 +868,7 @@ shortcut. Held notes release on mode-off, octave shift, and tab switch.
   edges that actually moved -- translating the whole window is right for a drag
   and wrong for a resize.
 
-### Harmless
+### BaySickSolstice
 
 - Every knob halved (44/32 -> 22/16); all four filter knobs one size (FREQ and
   RES were 44 against ENV/KB's 32); the type combo 80 -> 56.

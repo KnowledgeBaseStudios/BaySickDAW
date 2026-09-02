@@ -15,7 +15,7 @@ You produce test-signal recommendations and expected-output ranges for a given B
 
 ## What to do
 
-1. **Locate the module's source.** Source/DSP/ is the typical home; some live elsewhere (`Source/Harmless/`, `Source/BaySickSynth/`, etc.).
+1. **Locate the module's source.** Source/DSP/ is the typical home; some live elsewhere (`Source/BaySickSolstice/`, `Source/BaySickSynth/`, etc.).
 2. **Read its public interface.** Identify the params (APVTS IDs), the `prepare()` / `process()` signatures, and any documented behavior.
 3. **Identify validation modes** worth testing:
    - **Identity check** — bypass mode, params at defaults, output should match input bit-exact (or to within float epsilon).

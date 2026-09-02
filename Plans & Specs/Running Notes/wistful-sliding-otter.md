@@ -96,11 +96,11 @@ fix. Moving to Task 2.
 ## 2026-07-20 — Task 2 — Slide expression + app-wide panning (S-6/S-7) — in progress
 
 Scope: S-6 = RP path emits the note's expression CCs; S-7 = CC10 pan consumer + per-voice pan stage in
-BaySickSynth, BaySickBass (shares BaySickSynthDSP), Harmless/AdditiveVoice, VibePlayer (fixes panning
+BaySickSynth, BaySickBass (shares BaySickSynthDSP), BaySickSolstice/AdditiveVoice, VibePlayer (fixes panning
 for EVERY note, not just slides — Issue 5B: pan was emitted as CC10 but no voice consumed it).
 
 **Source verification (CC routing):**
-- BaySickSynth + BaySickBass + Harmless all use `BroadcastSynthesiser` (broadcasts every CC to every
+- BaySickSynth + BaySickBass + BaySickSolstice all use `BroadcastSynthesiser` (broadcasts every CC to every
   voice incl. idle) — CC10 already reaches the voices; only a `cc==10` handler was missing.
 - VibePlayer uses `juce::Synthesiser` with a MANUAL CC dispatch filter (VibePlayerDSP.cpp:1436) that
   listed 5/37/71/72/74/84/85 — **it dropped CC10 too**. Added `num == 10` to the filter.
@@ -137,7 +137,7 @@ the answer so any velocity work lands in the same build.
 **SPEC CALL RESOLVED — Jeff picked (C):** full FL-style loudness ramp, base note's level -> slide
 note's level over the glide time. Implemented via a new **CC86 = slide target loudness** transport
 (verified free across Source/), emitted by `emitRampSlide` just before CC85:
-- BaySickSynth/Bass + Harmless (per-sample render loops): ramp the engine's NATIVE velocity value
+- BaySickSynth/Bass + BaySickSolstice (per-sample render loops): ramp the engine's NATIVE velocity value
   (`mCurrentVelocity` / `mNoteVelocity`) from base to target over the glide, so amplitude AND the
   velocity-tracked filter both interpolate (most FL-faithful — "every property interpolates"). Members
   `mSlideTargetVel/mVelRampTarget/mVelRampStep/mVelRampLeft`; armed in the CC85 takeover block (reuses
@@ -156,7 +156,7 @@ user sets a different velocity on the slide note (correct FL behavior). No audio
 **Diagnostics added:** none. Rule 4 catalog still empty.
 
 **Files touched (Task 2):** PluginProcessor.cpp (emitNoteExpression/emitRampSlide/RampBend/CC86);
-BaySickSynth/BaySickSynthVoice.h+.cpp; Harmless/AdditiveVoice.h+.cpp; VibePlayer/VibePlayerDSP.h+.cpp.
+BaySickSynth/BaySickSynthVoice.h+.cpp; BaySickSolstice/AdditiveVoice.h+.cpp; VibePlayer/VibePlayerDSP.h+.cpp.
 
 **Resume action:** Jeff runs `do_build.bat` (Task 2 build gate). Clean -> start Task 3. Errors -> fix.
 
@@ -448,7 +448,7 @@ stays bounded (co-starting double-RampSlide degrades to silent, not a hang).
   natural end - harmless on a mono line; only a same-pitch retrigger inside the source span would be
   cut early - this was my deliberate Task-1 tradeoff to avoid a pending-off hang); (ii) VibePlayer's
   loudness ramp finishes a few ms late on its final partial block (`applyGainRamp` over the whole
-  block - inaudible; the synth/Harmless per-sample ramps don't have it).
+  block - inaudible; the synth/BaySickSolstice per-sample ramps don't have it).
 
 **Task 7 DONE (documentation + review; NO commit).** Batch code-complete for Tasks 1-5, verified clean;
 A-1 deferred to QA-SlideSampler. HEAD unchanged (d6abc38b); nothing committed this session.
@@ -477,7 +477,7 @@ A-1 deferred to QA-SlideSampler. HEAD unchanged (d6abc38b); nothing committed th
   base->slide velocity over the glide, per-sample on synth/harmless, `applyGainRamp` on VibePlayer).
 - **S-7 (app-wide fix)** panning was DEAD — CC10 was emitted but NO voice consumed it. Added a CC10
   consumer + per-voice center-preserving-balance pan stage to BaySickSynth (covers Bass via shared
-  DSP), Harmless/AdditiveVoice, VibePlayer (whose manual CC dispatch also dropped CC10). Fixes panning
+  DSP), BaySickSolstice/AdditiveVoice, VibePlayer (whose manual CC dispatch also dropped CC10). Fixes panning
   for EVERY note, not just slides; a centered note is bit-identical.
 - **S-8/S-9/S-10** Note Properties popup: double-click-to-neutral-default on the 6 sliders; a "Porta
   Length" numeric box (BPM-box style) greyed unless the note is Porta; a Close button; +2 rows.

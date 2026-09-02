@@ -431,14 +431,14 @@ Order that matters:
 ## Cross-references
 
 - `BaySickBass.md` - the same DSP with bass-tuned defaults; read that one for the Bass tab.
-- `Harmless.md` - the additive engine, the other synth you can load on Layers and Bass.
+- `BaySickSolstice.md` - the additive engine, the other synth you can load on Layers and Bass.
 
 ---
 
 ## Differs from Carry-Forward
 
 - Carry-Forward's engine-audition entry says "All 4 engine processors
-  (BaySickSynth/Bass/Harmless/BaySickPlayer)". There are now **seven** engines carrying the
+  (BaySickSynth/Bass/BaySickSolstice/BaySickPlayer)". There are now **seven** engines carrying the
   `auditionNote` pattern (the three sfizz engines were added), and BaySickSynth's version
   has grown a press-and-hold pair (`auditionNoteOn` / `auditionNoteOff`) with an
   accumulating note-off mask alongside the original one-shot exchange.

@@ -103,8 +103,8 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   "+ Add New Layers/Bass/Drum" rows would have become dead ends once L4 deleted the engine
   pickers — they create ENGINELESS pages whose picker no longer exists.  Jeff's ruling: each
   tab type's dropdown bottom section lists the PLAYERS that type can load, engine-named.  His
-  map, confirmed row by row: Layers = Harmless / BaySickPlayer / BaySickSynth; Bass =
-  Harmless / BaySickPlayer / BaySickBass; Drums = BaySickPlayer / BaySickSynth (+ existing
+  map, confirmed row by row: Layers = BaySickSolstice / BaySickPlayer / BaySickSynth; Bass =
+  BaySickSolstice / BaySickPlayer / BaySickBass; Drums = BaySickPlayer / BaySickSynth (+ existing
   BaySickRustyDrums row); Vox = BaySickVocal (+ existing From-Export submenu); Inst =
   BaySickLiveInst (+ existing Guitars/Basses rows, all gated on the shared cap); Clips =
   "+ Add BaySickPlayer..." keeping the -3 file-picker route (BaySickPlayer implied — Jeff:
@@ -114,7 +114,7 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   `onAddEngineRequest` so the engine loads at creation — no route can create an engineless
   page anymore.
 - **showAddMenu rebuilt to the locked L2/L3/L28 order:** BaySickVocal, BaySickLiveInst,
-  BaySickGuitars, BaySickBasses, VSTPlugin submenu, Harmless > Layers/Bass, BaySickSynth
+  BaySickGuitars, BaySickBasses, VSTPlugin submenu, BaySickSolstice > Layers/Bass, BaySickSynth
   (flat -> Layers), BaySickPlayer > Layers/Bass/Audio Clips, BaySickBass, BaySickDrums >
   BaySickPlayer/BaySickSynth (new, absorbs the drum routes), BaySickRustyDrums.  The old
   "BaySickPedals" + menu string had NO code consumers (`applyEngineToNewestTabOfType`
@@ -172,9 +172,9 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   rather than restoring a stale rect.  Button order right-to-left: close, fill toggle,
   then PageMenuBar right-extras (preset).
 - **Window-4/L2 engine title bars dissolved:** VibePlayer / BaySickSynth / BaySickBass /
-  Harmless / BaySickPedals editors lost their internal BaySickTitleBar members + the 32px
+  BaySickSolstice / BaySickPedals editors lost their internal BaySickTitleBar members + the 32px
   layout row — content starts at 0 (VibePlayer's `boxRectFor` dropped its kHdrH terms,
-  Synth/Bass visualizers to y=0, Harmless dropped its removeFromTop, Pedals grid
+  Synth/Bass visualizers to y=0, BaySickSolstice dropped its removeFromTop, Pedals grid
   full-height).  Each editor keeps identity as `getEngineTitle()` / `getEngineAccent()`
   statics + `getTitleStripPresetButton()`.  `VibePlayerEditor::setInfoText` DELETED —
   caller-less API whose only target was the dead bar.  The colored player name now renders
@@ -404,8 +404,8 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   verified against the T6 checklist below before T7 starts.
 - **THE COVERAGE CHECKLIST — delivered to Jeff in chat at his request; the diag
   file is verified against it at hand-back, before T7.  Recorded in full:**
-  A. page windows — Builder, Mixer, Effects rack, Piano Roll, Layers x {Harmless,
-  BaySickPlayer, BaySickSynth}, Bass x {Harmless, BaySickPlayer, BaySickBass},
+  A. page windows — Builder, Mixer, Effects rack, Piano Roll, Layers x {BaySickSolstice,
+  BaySickPlayer, BaySickSynth}, Bass x {BaySickSolstice, BaySickPlayer, BaySickBass},
   Drums x {BaySickPlayer, BaySickSynth}, Clips, Vox, Inst x {BaySickGuitars,
   BaySickBasses}, Rusty (Drum Kit + Player views).  B. sub-page windows — Vocal
   Chain, BaySickPitch, BaySickAlign, NAM/IR (Vox + LiveInst keys, same layout),
@@ -483,7 +483,7 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   screenshots; my first two readings of the ask were wrong — the corrected scope
   is the above.)
 - **SIZING MAP APPROVED (Jeff, single approval over the 8-line list):**
-  engine-attributed page sizes — Harmless 1047x455, BaySickPlayer 490x455 (Clips
+  engine-attributed page sizes — BaySickSolstice 1047x455, BaySickPlayer 490x455 (Clips
   too), BaySickSynth + BaySickBass 558x455; Mixer 486x455, Builder 486x268,
   Effects rack 357x268, Piano Roll page 691x268, Vox 1534x455, Inst
   Guitars/Basses 1047x455 each, Rusty 1047x455; sub-pages — Vocal Chain 1047x723,
@@ -667,7 +667,7 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
 - **`STANDALONE_UI_CHANGES.md`** gained the T11 entry.
 - **Next:** T7 — real window floors from the approved sizing map + the layout reworks.
 
-## 2026-08-04 — Task 7 committed `9797f19d` — measured floors, window-placement bug (4 causes), Harmless redo, pedal tiles
+## 2026-08-04 — Task 7 committed `9797f19d` — measured floors, window-placement bug (4 causes), BaySickSolstice redo, pedal tiles
 
 - **Build gate green:** five exit codes 0, four `vcxproj -> ...exe` link lines, zero
   `error C` / `error LNK` / `error MSB` greps.  16 files, 949 insertions /
@@ -684,7 +684,7 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   tab's live engine swap tracks its floor.  Jeff's correction 2026-08-04, which drove
   the rewrite: "there is no split between a layers harmless and a bass harmless, its
   all the same size".
-- **The values as landed:** Harmless 1047x455; BaySickSynth AND BaySickBass 558x455
+- **The values as landed:** BaySickSolstice 1047x455; BaySickSynth AND BaySickBass 558x455
   (Jeff corrected a first pass that split those two and used a non-existent 586x549);
   BaySickPlayer 490x455; BaySickGuitars / BaySickBasses 1047x455; Rusty 1047x455;
   Vox 1534x455; Mixer 486x455; Builder 486x268; Effects rack 357x268; Piano Roll
@@ -734,7 +734,7 @@ Convention: Main Plan §0 "Batch Plans + Running Notes layout" (locked 2026-05-1
   placement — and then asserted the workspace genuinely was 1098x608 — also wrong, that is a
   mid-layout reading, and Jeff pointed out BaySickPitch was sized to the full 1534x724
   workspace, which proved it.
-- **Harmless (Specific-2) REDONE, not re-hung** — Jeff rejected a first attempt that only
+- **BaySickSolstice (Specific-2) REDONE, not re-hung** — Jeff rejected a first attempt that only
   re-flowed the existing sections into columns.  Two root causes fixed: `layoutRow` laid
   every item in ONE row and let wide sets overflow their cell (Output / Timbre / FX), so it
   now WRAPS and centers the block; and a blank grid row plus a blank bottom-left half plus a
@@ -1286,7 +1286,7 @@ boundary walk passes §B.31 + §B.32.  Held here per the mammoth/badger preceden
 
 ---
 
-### 2026-08-06 (time at apply) PT — QA-Layout — Whole-app layout under the contained-window shell: 14 planned tasks grew to 21 via Jeff-directed mid-batch additions (T15-T21) — window chrome/menus/titles consolidated, Window-7 satellite windows + pedals-as-LiveInst-player, three-lifetime window persistence, Jeff's measured sizing pass -> real per-player floors + Harmless/VibePlayer/pedal-tile reworks + the four-cause window-placement bug, four secondary group buses + mixer Add/target menus, L18 instance caps + the two-sixteens kit, hosted-plugin stretch, and the effect-visual system (T17 feed foundation -> all ten visuals REWORKED audio-first after Jeff rejected the parametric-only pass -> effect/visual window tether + live Feed warn ring, both recovered from the ledger gap); T8's general page-collapse dropped to Future State CL-306; T13's three-zone panel rewrite scoped out by Jeff; NO batch smoke — all functional verification rides the G4 boundary walk (L32)
+### 2026-08-06 (time at apply) PT — QA-Layout — Whole-app layout under the contained-window shell: 14 planned tasks grew to 21 via Jeff-directed mid-batch additions (T15-T21) — window chrome/menus/titles consolidated, Window-7 satellite windows + pedals-as-LiveInst-player, three-lifetime window persistence, Jeff's measured sizing pass -> real per-player floors + BaySickSolstice/VibePlayer/pedal-tile reworks + the four-cause window-placement bug, four secondary group buses + mixer Add/target menus, L18 instance caps + the two-sixteens kit, hosted-plugin stretch, and the effect-visual system (T17 feed foundation -> all ten visuals REWORKED audio-first after Jeff rejected the parametric-only pass -> effect/visual window tether + live Feed warn ring, both recovered from the ledger gap); T8's general page-collapse dropped to Future State CL-306; T13's three-zone panel rewrite scoped out by Jeff; NO batch smoke — all functional verification rides the G4 boundary walk (L32)
 
 **Bucket:** UI / L&F / Theming, Effects, Players, Mixer / Routing, System Pages, Cross-cutting Infrastructure, Other / Platform / Deferred
 
@@ -1307,9 +1307,9 @@ boundary walk passes §B.31 + §B.32.  Held here per the mammoth/badger preceden
 - **T15 (`7a0758b0`, ruled mid-sizing 2026-08-03).** Every player page's strip nav buttons dissolved into that window's own Menu dropdown (`onBuildWindowNavMenu` across all seven page classes; Jeff's exclusions honored); the missed T3 treatment for the sfizz trio — Rusty/Guitars/Basses internal title bands dissolved, names centered on the strip, the Inst band's widgets re-homed with the CUT SELF attachments decoupled from any title bar (would otherwise have silently killed G-14's feature).
 - **T10 (`3639cb98`).** Mixer rework: FOUR secondary group buses (kLayersBus2 / kBassBus2 / kClipsBus2 / kPluginsBus2, ids 14-17) on the full kVoxBus2 pattern, cross-checked against the mixer-strip pattern audit, automation live + offline covered by the generic paths (verified — no per-bus offline branch exists to add); L13 "Add" titled menu (seven rows) replacing the five strip buttons; L12 per-strip "+" Send/Sidechain/Move-Output target submenus with the drag-placement paths retired (cable painting + right-click menus stay); L14 used-once-then-hide lifecycle + `Buses` persistence + all seven secondary buses reset on project load (Vox2/Inst2/3 previously leaked across projects); L30 MIDI trigger velocity relocated to Audio Settings.
 - **T11 (`4722c27c`).** L18 caps — Layers 20 / Bass 10 / Drums 32 / Clips 100 / Vox 10 / Inst 30 — with `kMax*Strips` mirrors + a repo-wide stale-literal sweep; D3 ruled 1(c)+2(a) at task open: ONE piano-roll "Drum Kit" entry with an in-view 1-16 / 17-32 switch and FIXED page-index mapping; the accepted one-time PR-target invalidation landed.
-- **T7 (`9797f19d`).** Real floors from the approved map, keyed per PLAYER TYPE (Jeff's correction: "there is no split between a layers harmless and a bass harmless") and HARD (Jeff option B, grow-only); the "Mixer doesn't save where I move it" placement bug root-caused to FOUR independent causes (project overwriting the global store; destructor-time teardown save clobber; restore against an unlaid-out workspace — the big one; the startup clamp capturing windows) — all four fixed; Harmless REDONE, not re-hung (layoutRow wraps + centers; every grid cell carries content; design 1039x421); L15 VibePlayer knobs 55 -> 18; all 26 pedal-capable panels gained `PanelMode::Pedal` tile grids via a shared `pedalTileGrid`; Effects + Piano Roll restored to the four-window launch set (implementation error owned — the four-default rule was always Jeff's); a kit load no longer frames sixteen drum windows (option B recorded as Future State CL-305); all T6 diag stripped.
-- **T16 (`3cfdf4c2`, Jeff-directed mid-batch 2026-08-04).** Two QA-ModelShell regressions fixed: right-click Automate restored inside contained windows (per-window listeners — the app-wide GlobalAutoRightClick cannot cross a native child peer) and tooltips promoted to a single parentless desktop window; sizing model reworked to DEFAULTS not floors (`defaultSizeFor` optional, installed at engine-bind + a 5 Hz healing sweep; content minimums suspended pending T8); settings.xml cut to the four default tabs, size AND position, stale records stripped; `applyResizeMagnetism` added (the magnet had never run on a resize); FX Rack + Freeze into the per-window Menu with Freeze greyed + unlock path in its tooltip; Builder's Edit/Tools/Clips/View row dissolved, browser collapse as a magnetic ramp, vertical zoom decoupled from window size; ribbon "+" sized to its glyph; perf readout trimmed with live values in its tooltip; Harmless re-laid out incl. snap + grid on the app's unified divisions WITH triplets (the one place a triplet could not be snapped to).
-- **T8 (`8c610c6c`, D1/D2 ruled 2026-08-05).** The general page-collapse is NOT built for V1 — dropped to Future State CL-306 (bespoke per-engine second design; the T16 Harmless re-layout is the cost evidence); content minimums RESTORED at the measured sizes; the pedalboard one-pedal-at-a-time SHIPS as an explicit Standard/Compact View on the pedals window strip (Compact = slot dropdown + one display box at the Effects-window footprint), with the view-swap machinery built for reuse per Jeff (Future State CL-307). Plus the audio-device slice: JUCE's silent device substitution disabled (a refused device no longer opens a different one or overwrites the user's choice), driver error text captured + surfaced, ASIO control panel reachable from the fallback state, ASIO4ALL removed from the fallback chain, Apply writes a coherent ASIO input name, JUCE ASIO trace to gitignored `asio_trace.txt`, splash painted before init blocks, Piano Roll engine pill rebuilt outside the visible-page gate; §B.32 LAY-A added with K-3 marked superseded.
+- **T7 (`9797f19d`).** Real floors from the approved map, keyed per PLAYER TYPE (Jeff's correction: "there is no split between a layers harmless and a bass harmless") and HARD (Jeff option B, grow-only); the "Mixer doesn't save where I move it" placement bug root-caused to FOUR independent causes (project overwriting the global store; destructor-time teardown save clobber; restore against an unlaid-out workspace — the big one; the startup clamp capturing windows) — all four fixed; BaySickSolstice REDONE, not re-hung (layoutRow wraps + centers; every grid cell carries content; design 1039x421); L15 VibePlayer knobs 55 -> 18; all 26 pedal-capable panels gained `PanelMode::Pedal` tile grids via a shared `pedalTileGrid`; Effects + Piano Roll restored to the four-window launch set (implementation error owned — the four-default rule was always Jeff's); a kit load no longer frames sixteen drum windows (option B recorded as Future State CL-305); all T6 diag stripped.
+- **T16 (`3cfdf4c2`, Jeff-directed mid-batch 2026-08-04).** Two QA-ModelShell regressions fixed: right-click Automate restored inside contained windows (per-window listeners — the app-wide GlobalAutoRightClick cannot cross a native child peer) and tooltips promoted to a single parentless desktop window; sizing model reworked to DEFAULTS not floors (`defaultSizeFor` optional, installed at engine-bind + a 5 Hz healing sweep; content minimums suspended pending T8); settings.xml cut to the four default tabs, size AND position, stale records stripped; `applyResizeMagnetism` added (the magnet had never run on a resize); FX Rack + Freeze into the per-window Menu with Freeze greyed + unlock path in its tooltip; Builder's Edit/Tools/Clips/View row dissolved, browser collapse as a magnetic ramp, vertical zoom decoupled from window size; ribbon "+" sized to its glyph; perf readout trimmed with live values in its tooltip; BaySickSolstice re-laid out incl. snap + grid on the app's unified divisions WITH triplets (the one place a triplet could not be snapped to).
+- **T8 (`8c610c6c`, D1/D2 ruled 2026-08-05).** The general page-collapse is NOT built for V1 — dropped to Future State CL-306 (bespoke per-engine second design; the T16 BaySickSolstice re-layout is the cost evidence); content minimums RESTORED at the measured sizes; the pedalboard one-pedal-at-a-time SHIPS as an explicit Standard/Compact View on the pedals window strip (Compact = slot dropdown + one display box at the Effects-window footprint), with the view-swap machinery built for reuse per Jeff (Future State CL-307). Plus the audio-device slice: JUCE's silent device substitution disabled (a refused device no longer opens a different one or overwrites the user's choice), driver error text captured + surfaced, ASIO control panel reachable from the fallback state, ASIO4ALL removed from the fallback chain, Apply writes a coherent ASIO input name, JUCE ASIO trace to gitignored `asio_trace.txt`, splash painted before init blocks, Piano Roll engine pill rebuilt outside the visible-page gate; §B.32 LAY-A added with K-3 marked superseded.
 - **T12 (`94da6a6f`).** L17 hosted-plugin stretch: resizable plugins pushed through their own resize/constraint path; fixed-size plugins transform-scaled with aspect preserved + centered letterboxing; bridged surfaces centered at natural size and clipped (a native child peer cannot be transform-scaled); natural size tracked separately from frame size so a plugin self-resize is distinguishable from our own layout; window resize floor from a minimum usable scale.
 - **T17 (`d07d710f`, Jeff-directed mid-batch 2026-08-05).** Effect-visual foundation: `EffectVisualFeed` on DSPBase behind a visibility gate (an unwatched effect costs one relaxed atomic load per block) with refcounted watchers; one shared 30 Hz clock that stops entirely when no visual is on screen; `EffectVisualStrip` whose existence IS the watcher registration; per-slot visual windows keyed by slot uuid (follow the effect through a reorder) riding the aux-window registry for open-state + bounds persistence; Menu > Visual entry; plus the freeze-menu entry fixed to read the unlock preference live instead of a page-show snapshot.
 - **T13 + T19 (`9bcb510c`).** Limiter publishes to the feed and its window draws it — Zone A built AS T17's reusable component per Jeff, not standalone; Menu > Visual actually emitted (`appendStandardItems` was never called from the effect window — registered but never rendered); Basic/Advanced swap resizes in BOTH directions; windows land on screen at open; drag bound = the CURSOR, not the window (supersedes locked call 2b's containment); the dangling-model-pointer crash class on project LOAD fixed (a panel timer and its window's rebuild poll are independent, so a load replacing a slot's DSP left the panel calling into freed memory) via `liveDsp()` liveness checks across ten panel timers + the Delay curve child + the dynamic-EQ popout + the visual strip's feed resolver, with slot windows also tracking the DSP instance; restored windows no longer self-close on their first poll; warn-ring glow no longer clipped.
@@ -1358,7 +1358,7 @@ boundary walk passes §B.31 + §B.32.  Held here per the mammoth/badger preceden
 
 #### Files touched
 
-Per-commit scope lists live in the twenty-one commit messages (the ruled record for the five no-notes tasks). By area: **Shell / chrome** — WorkspaceWindow, StandaloneEditor, StandaloneApp, SharedUI (incl. TitleStripMenuItem, PageMenuBar, TimeLAF, VibeLAF), RibbonTabBar, GlobalTransportBar, BaySickTitleBar. **Pages** — LayersPage, BassPage, DrumPage, ClipsPage, VoxPage, InstPage, PluginsPage, BaySickRustyDrumsPage, MixerPage, MixerTrackStrip, BuilderPage, PianoRoll, PianoRollPage, DrumKitGrid, EffectsPage, SlotComponent. **Effects** — EffectWindows, EffectEditorPanels, EffectVisual (new, T17), EffectVisualFeed (new, T17), EffectRack, EffectPresetIO. **DSP** — DSPBase, DelayDSP, ChorusDSP, FlangerDSP, PhaserDSP, ReverbDSP, CompressorDSP, TransientShaperDSP, SaturationDSP, LimiterDSP. **Engine editors / Vox family** — HarmlessEditor, VibePlayerEditor, BaySickPedalsEditor, BaySickVocalEditor, BaySickVocalProcessor, BaySickPitchEditor, BaySickPitchSubEditor, BaySickNAMIREditor. **Model / graph / infra** — VibeGraph, VibesynthConstants, PatternManager, PluginProcessor, PagePresetIO, Hosting/HostedPlugin, CMakeLists.txt, .gitignore. **Docs** — STANDALONE_UI_CHANGES.md, CLAUDE.md, Test Plans/v1-master-test-plan.md (§B.31.0 rewrite; §B.32 LAY-A + LAY-B), Future State.md (CL-305/306/307 + K-3 supersession), swift-stampeding-caribou.md (composition note), the paired batch plan + running notes, this Work Log entry, Main Plan §5 + §9.
+Per-commit scope lists live in the twenty-one commit messages (the ruled record for the five no-notes tasks). By area: **Shell / chrome** — WorkspaceWindow, StandaloneEditor, StandaloneApp, SharedUI (incl. TitleStripMenuItem, PageMenuBar, TimeLAF, VibeLAF), RibbonTabBar, GlobalTransportBar, BaySickTitleBar. **Pages** — LayersPage, BassPage, DrumPage, ClipsPage, VoxPage, InstPage, PluginsPage, BaySickRustyDrumsPage, MixerPage, MixerTrackStrip, BuilderPage, PianoRoll, PianoRollPage, DrumKitGrid, EffectsPage, SlotComponent. **Effects** — EffectWindows, EffectEditorPanels, EffectVisual (new, T17), EffectVisualFeed (new, T17), EffectRack, EffectPresetIO. **DSP** — DSPBase, DelayDSP, ChorusDSP, FlangerDSP, PhaserDSP, ReverbDSP, CompressorDSP, TransientShaperDSP, SaturationDSP, LimiterDSP. **Engine editors / Vox family** — BaySickSolsticeEditor, VibePlayerEditor, BaySickPedalsEditor, BaySickVocalEditor, BaySickVocalProcessor, BaySickPitchEditor, BaySickPitchSubEditor, BaySickNAMIREditor. **Model / graph / infra** — VibeGraph, VibesynthConstants, PatternManager, PluginProcessor, PagePresetIO, Hosting/HostedPlugin, CMakeLists.txt, .gitignore. **Docs** — STANDALONE_UI_CHANGES.md, CLAUDE.md, Test Plans/v1-master-test-plan.md (§B.31.0 rewrite; §B.32 LAY-A + LAY-B), Future State.md (CL-305/306/307 + K-3 supersession), swift-stampeding-caribou.md (composition note), the paired batch plan + running notes, this Work Log entry, Main Plan §5 + §9.
 
 #### Commit(s)
 

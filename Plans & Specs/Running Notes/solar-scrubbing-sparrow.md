@@ -143,3 +143,7 @@
   its first two knobs (Input/Drive, Mid) off the tile's left edge - visible in
   the shipped QA-ManualPress figure and in this re-shoot alike.  A pedal-tile
   layout defect, not a harness one.
+
+## 2026-09-02 - Task 2 - committed `fe4931d3`
+
+## 2026-09-02 - Task 3 - committing the scrub (working-tree work logged above)

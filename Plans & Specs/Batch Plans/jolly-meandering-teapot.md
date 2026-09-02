@@ -119,7 +119,7 @@ auto onPatch = [this](const juce::String& name) {
 - [ ] **Diagnose** (walk Jeff through per the debug rule): add a temporary diagnostic (AlertWindow or `DBG`) at (a) each engine's firing site and (b) inside the `onPatch` lambda + `onSoundNameChanged`→`renameTab`, to reveal for each engine whether the hook fires, whether the lambda runs, and where the chain stops. **Catalog the diagnostic in running notes per §0 Rule 4 in the same edit pass.** Likely hypotheses to test first: a second load path in the Synth/Player editors that skips the hook; the user's actual load gesture not reaching line 1126; or an empty/failed `name`.
 - [ ] Present the finding to Jeff; confirm the fix shape (may be a new sub-spec call per §0 Rule 5) before implementing.
 - [ ] Implement the fix; re-verify; **strip the diagnostic** (surface the strip list first).
-- [ ] **Tell Jeff (Debug):** (1) Layers + BaySickSynth → load a patch → tab + mixer + piano-roll labels all rename. (2) Layers + BaySickPlayer → load a sample/SFZ → same. (3) Bass + BaySickPlayer → same. (4) Bass + BaySickBass still renames (regression). (5) Layers + Harmless → renames.
+- [ ] **Tell Jeff (Debug):** (1) Layers + BaySickSynth → load a patch → tab + mixer + piano-roll labels all rename. (2) Layers + BaySickPlayer → load a sample/SFZ → same. (3) Bass + BaySickPlayer → same. (4) Bass + BaySickBass still renames (regression). (5) Layers + BaySickSolstice → renames.
 - [ ] Brief commit `QA-UICleanup Task 2: fix Layers/Bass patch-load auto-rename (<root cause>)` → surface + commit on approval → `/draft-doc running-notes`.
 
 ### Task 3 — Item 4: snap dropdown (both editors) + kit button to right end

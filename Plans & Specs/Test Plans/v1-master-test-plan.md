@@ -1084,7 +1084,7 @@ CC delivery, player CC ordering).
 - [ ] **H-3 — RT Slide (retrigger).** *(SUPERSEDED by §B.22 SS-1/SS-2 — re-verify there.)* Note A, then an RT Slide note B at another pitch:
       B re-attacks and its pitch GLIDES from A's pitch to B's across B's full length
       (short B = fast glide, long B = slow). Works on BaySickSynth, BaySickBass,
-      Harmless, BaySickPlayer (incl. drum tabs on those engines); also works when A ended
+      BaySickSolstice, BaySickPlayer (incl. drum tabs on those engines); also works when A ended
       earlier (glides in from A's pitch after silence). Inst/Rusty/Vox (sfizz) rolls:
       slide types are silent no-ops by scope. `D:__ R:__` notes:
 - [ ] **H-4 — RP Slide (takeover).** *(SUPERSEDED by §B.22 SS-4 — re-verify there.)* Note A held, RP Slide note B overlapping or
@@ -1094,11 +1094,11 @@ CC delivery, player CC ordering).
       NOTHING sounding at its start (gap) is silent. Works on all 4 engine families.
       `D:__ R:__` notes:
 - [ ] **H-5 — Porta.** *(SUPERSEDED by §B.22 SS-3 — Porta now uses "Porta Length in Beats", re-verify there.)* A porta note re-attacks and glides in QUICKLY from the previous
-      note's pitch: BaySickSynth/Bass follow their glide-time param when set; Harmless
+      note's pitch: BaySickSynth/Bass follow their glide-time param when set; BaySickSolstice
       follows glide_time; BaySickPlayer (no glide param) uses the fixed ~60 ms fallback —
       audibly a snap-glide, campaign-tunable. `D:__ R:__` notes:
 - [ ] **H-6 — Release + Resonance per note.** Two identical notes, one with Release 100%
-      / one at 0%: audibly longer vs clipped tail on Synth/Bass/Harmless/Player. Same
+      / one at 0%: audibly longer vs clipped tail on Synth/Bass/BaySickSolstice/Player. Same
       A/B for Resonance (50% = neutral, 100% = squelch) — on the player it rides the
       hardness filter. Values persist through save/reload ("r"/"q" attrs). `D:__ R:__`
       notes:
@@ -1187,7 +1187,7 @@ thread).
       window period. Relaunch: maximized/sized window state restores exactly as before
       (QA-Eb regression guard). `D:__ R:__` notes:
 - [ ] **I-5 — engine pick busy sign (NAV-02).** Fresh Layers tab -> pick an engine
-      (Harmless / BaySickPlayer / BaySickSynth): "Loading <engine>..." busy overlay +
+      (BaySickSolstice / BaySickPlayer / BaySickSynth): "Loading <engine>..." busy overlay +
       wait cursor during the build (fast engines may only flash it). Same on a Bass tab
       pick and a Drums tab engine swap via the sound picker. `D:__ R:__` notes:
 - [ ] **I-6 — drum sound + kit loads.** Drums tab picker: Browse a big sample folder ->
@@ -1470,7 +1470,7 @@ pedal loaded in BaySickPedals; Polyphonic mode unless noted.
 **Supersedes** the stale §B.14 H-2 / H-3 / H-4 / H-5 (this batch redid the slide DSP + Note
 Properties popup) and the §B.13 G-8 / G-9 / G-10 / G-11 (tiling + slice re-done as content-length
 tiling + finite-segment slice + mid-note clamp-and-play) — re-verify the current behavior HERE.
-Setup for slides: a Layers or Bass tab on an in-house engine (BaySickSynth / BaySickBass / Harmless /
+Setup for slides: a Layers or Bass tab on an in-house engine (BaySickSynth / BaySickBass / BaySickSolstice /
 BaySickPlayer) — the slide fixes are on those four. sfizz Inst engines (Guitars/Basses) are DEFERRED
 (SS-A).
 
@@ -1491,7 +1491,7 @@ BaySickPlayer) — the slide fixes are on those four. sfizz Inst engines (Guitar
       pitch). Set B's Velocity different from A's: the sustained note's loudness RAMPS from A's to B's
       over the glide. `D:__ R:__` notes:
 - [ ] **SS-5 — app-wide panning (S-7).** A plain (non-slide) note with Panning hard-left in the popup
-      plays hard-left on BaySickSynth, BaySickBass, Harmless, AND BaySickPlayer. Pre-batch panning did
+      plays hard-left on BaySickSynth, BaySickBass, BaySickSolstice, AND BaySickPlayer. Pre-batch panning did
       NOTHING (CC10 emitted, no voice consumed it). A centered note is unchanged (bit-identical).
       `D:__ R:__` notes:
 - [ ] **SS-6 — double-click-to-default (S-8).** In the popup, double-click each of the 6 sliders:
@@ -1725,10 +1725,10 @@ rotary scenarios confirm the Automate menu and normal dragging still work rather
 jump that never occurred there. (2) **VS-9 is NEW** — the mid-batch VKnob scope addition (Jeff's
 spec call), which post-dates the plan file's list.
 
-Setup: one Harmless Layers tab, one BaySickSynth tab, one BaySickBass tab, one BaySickPlayer tab,
+Setup: one BaySickSolstice Layers tab, one BaySickSynth tab, one BaySickBass tab, one BaySickPlayer tab,
 one Vox tab with a take, one Rusty tab, one effect loaded in a rack, and one mixer send cable.
 
-- [ ] **VS-1 — Harmless routing matrix (LINEAR — the actual BLU-493 fix).** Harmless > routing
+- [ ] **VS-1 — BaySickSolstice routing matrix (LINEAR — the actual BLU-493 fix).** BaySickSolstice > routing
       matrix: the six vertical sliders are `LinearVertical` with snap-to-mouse, so pre-batch a
       right-click near the top or bottom of the track yanked the value there. Right-click one near
       each extreme: the value does NOT move, and the Automate menu opens. Left-drag still sets the
@@ -1833,13 +1833,13 @@ already offered an Automate menu** (they lacked registration, not componentIDs);
 carried no ids at all** (not wrong rack ids), and reaching them required giving pedal slots the
 permanent identity the FX rack already had; and **BLU-492 needed zero conversions** — every
 tone selector already round-trips through its DSP's own state, so the pre-accepted PRESET-BREAK
-was NOT spent and no preset format changed. Two extra scope items landed on owner calls: Harmless
+was NOT spent and no preset format changed. Two extra scope items landed on owner calls: BaySickSolstice
 Part A/B became independently automatable per part, and pedals got full slot-tagging (docket B).
 
 Setup: a song-mode arrangement with at least two Layers tabs on the SAME engine type, one Inst tab
 with pedals loaded, one Vox tab, and a saved project from BEFORE this batch.
 
-- [ ] **AP-1 — the founding gap, end to end.** Harmless: right-click any knob > Automate, draw a
+- [ ] **AP-1 — the founding gap, end to end.** BaySickSolstice: right-click any knob > Automate, draw a
       ramp in the Event Editor, play in SONG mode. The knob moves AND the timbre audibly follows.
       Stop, then drag the playhead into the middle of the lane — the knob snaps to the lane value.
       Before this batch the lane drew but did nothing.  `D:__ R:__` notes:
@@ -1848,7 +1848,7 @@ with pedals loaded, one Vox tab, and a saved project from BEFORE this batch.
 - [ ] **AP-3 — two tabs, same engine, independent lanes.** Two Layers tabs both running
       BaySickSynth. Automate the same knob on each. Each lane drives ONLY its own tab.
       `D:__ R:__` notes:
-- [ ] **AP-4 — MUST-PASS: Harmless Part A and Part B are separately automatable.** On a shared
+- [ ] **AP-4 — MUST-PASS: BaySickSolstice Part A and Part B are separately automatable.** On a shared
       A/B knob (Brownian / Blur / Prism / Pluck Decay / Phaser Mask Rate): with Part A showing,
       right-click > Automate and draw a lane. Switch to Part B, right-click the SAME knob >
       Automate — you get a SECOND, distinct lane. Play: both parts respond to their own lane at
@@ -1893,7 +1893,7 @@ with pedals loaded, one Vox tab, and a saved project from BEFORE this batch.
       the Pedals EQ-type picker. Every selector comes back as saved. Task 4 concluded these
       already persist and changed NO code — this scenario is what proves that conclusion.
       `D:__ R:__` notes:
-- [ ] **AP-16 — Task 5 stragglers now offer Automate.** BaySickPlayer `cutSelfMode`, and Harmless
+- [ ] **AP-16 — Task 5 stragglers now offer Automate.** BaySickPlayer `cutSelfMode`, and BaySickSolstice
       LFO Rate + LFO Shape, all now show an Automate entry on right-click and their lanes drive
       the sound.  `D:__ R:__` notes:
 - [ ] **AP-17 — tab churn leaves no dead parameters.** Open a Layers tab, pick an engine, automate
@@ -2465,7 +2465,7 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 - [ ] **LAY-B7 — engine pickers are gone; + menu is the locked list.** Layers/Bass
       combos, the Clips decorative combo and Drums "Pick a sound" no longer exist;
       the ribbon "+" offers exactly: BaySickVocal, BaySickLiveInst, BaySickGuitars,
-      BaySickBasses, VSTPlugin, Harmless (Layers/Bass), BaySickSynth, BaySickPlayer,
+      BaySickBasses, VSTPlugin, BaySickSolstice (Layers/Bass), BaySickSynth, BaySickPlayer,
       BaySickBass, BaySickDrums (Player/Synth), BaySickRustyDrums. `D:__ R:__` notes:
 - [ ] **LAY-B8 — FX Rack / Freeze / Visual ride the window Menu.** On a player
       window: Menu carries FX Rack + Freeze (Freeze greyed with the unlock path in
@@ -2576,7 +2576,7 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 
 - [ ] **UND-B1 — multi-surface unwind.** Place notes -> move a mixer fader -> load a
       rack effect -> add a pattern -> add a tempo marker -> rename a pattern -> drag
-      a Harmless macro.  Seven Ctrl+Z restore the exact start state in reverse
+      a BaySickSolstice macro.  Seven Ctrl+Z restore the exact start state in reverse
       order; seven Ctrl+Alt+Z replay them. `D:__ R:__` notes:
 - [ ] **UND-B2 — one gesture = one labeled row.** A knob drag on any engine editor
       is ONE history row labeled with the tab + control name; double-click reset =
@@ -2607,7 +2607,7 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
       returns to Full WITH the prior CC tweaks and the Rusty roll intact.  A player
       preset load = one row, undo restores prior CCs. `D:__ R:__` notes:
 - [ ] **UND-B8 — preset loads undo (ruling 3a).** Engine-internal preset menus
-      (Harmless incl. Init Patch, BaySickSynth, BaySickBass, BaySickPlayer) and the
+      (BaySickSolstice incl. Init Patch, BaySickSynth, BaySickBass, BaySickPlayer) and the
       L/B/D/Plugins Load Page Preset entries: each load = one row; undo restores
       the FULL prior state (engine + strips + racks on page presets).
       `D:__ R:__` notes:
@@ -2942,7 +2942,7 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 
 - [ ] **SND-43 — nothing deleted was reachable.** 77 symbols and 3 files went.  Walk the surfaces
       they lived on and confirm every control still draws and still works: Delay (HP/LP/ping-pong
-      area), Flanger dry/wet, the EQ8 band controls and its display, Harmless (XYZ pad, routing
+      area), Flanger dry/wet, the EQ8 band controls and its display, BaySickSolstice (XYZ pad, routing
       matrix, mod destinations, Part A/B blend), the BaySickPlayer editor's filter section, the
       BaySickSynth editor, the Rusty kit graphic, the Mixer page, the Builder browser and the
       pedalboard.  No blank panels, no control that does nothing.  `D:__ R:__` notes:
@@ -2973,7 +2973,7 @@ Where a step says "check the trace", read `asio_trace.txt` next to `audio_settin
 - [ ] **SND-46 — engine-editor presets actually load.** Save a preset from the BaySickPlayer
       editor's own preset button and load it back: it LOADS (every preset that editor saved was
       previously unloadable while still renaming the tab and strip as though it had worked).
-      Spot-check the same save/load round-trip on the Harmless, BaySickSynth and BaySickBass
+      Spot-check the same save/load round-trip on the BaySickSolstice, BaySickSynth and BaySickBass
       editors.  A Layers or Bass patch saved now loads from the engine editor's own preset button.
       `D:__ R:__` notes:
 - [ ] **SND-47 — small fixes found in passing.** (a) On a Drums tab at the SMALLEST window size,
@@ -3301,9 +3301,9 @@ at all, before this batch or after it:**
       its freeze as stale; NO delete prompt anywhere; one undo row ("Replace Engine" /
       "Replace Plugin" / the drum load's own row) restores the old sound whole.
       (a) **Layers** window Menu, between Rename and Duplicate: "Replace Engine" lists
-      Harmless / BaySickSynth / BaySickPlayer with the current one ticked and disabled — swap
+      BaySickSolstice / BaySickSynth / BaySickPlayer with the current one ticked and disabled — swap
       with notes on the roll and an effect on the rack, confirm both survive and play.
-      (b) **Bass** same walk, list is Harmless / BaySickPlayer / BaySickBass.
+      (b) **Bass** same walk, list is BaySickSolstice / BaySickPlayer / BaySickBass.
       (c) **Drums**: "Replace Sound..." between Rename and Duplicate on BOTH the page window's
       Menu and the kit pad's right-click — opens the same sample/synth picker as adding a drum;
       pick across engine types (sample onto a synth drum and back).  **Cancel the picker: the
@@ -3319,10 +3319,10 @@ at all, before this batch or after it:**
       (f) NOT offered on Clips, Guitars/Basses, or Rusty (Jeff's ruling — single-sample,
       already-swappable, and two-different-kits respectively); confirm absent.  `D:__ R:__` notes:
 - [ ] **MAN-13 — cross-engine page presets actually swap engines.** Save a page preset from a
-      BaySickSynth layer, load it onto a Harmless layer: the tab comes back as BaySickSynth with
+      BaySickSynth layer, load it onto a BaySickSolstice layer: the tab comes back as BaySickSynth with
       the preset's settings (the swap call sat behind the engine-pick lock and silently no-oped
       until 2026-08-16 — the old behavior imported the blob into the WRONG engine).  Same walk
-      on a Bass tab.  Undo returns the Harmless setup whole.  `D:__ R:__` notes:
+      on a Bass tab.  Undo returns the BaySickSolstice setup whole.  `D:__ R:__` notes:
 
 - [ ] **MAN-14 — the Plugins Bus retires cleanly (Jeff's find, 2026-08-17).** Add a Plugins tab
       (bus appears), then delete the tab: the Plugins Bus strip AND its jack/cable disappear —
@@ -3389,7 +3389,7 @@ at all, before this batch or after it:**
 
 > **Authored at code-complete 2026-08-22.**  One batch by Jeff's ruling; nine tasks, each its
 > own checkpoint commit.  The batch changes every project's ABSOLUTE level (the hidden Master
-> Gain is gone: +1.9 dB everywhere) and the balance between engine families (Harmless /
+> Gain is gone: +1.9 dB everywhere) and the balance between engine families (BaySickSolstice /
 > BaySickPlayer / timeline clips come up +3 dB at default pan; BaySickSynth, hosted plugins
 > and the sfizz-based Inst tabs do not move) - both are rulings, not regressions.  Debug exe FIRST (screenshot any
 > jassert), then Release.  The analyzer figure in the manual (SHOT-227/228/229, `Analyzer.png`)
@@ -3403,9 +3403,9 @@ at all, before this batch or after it:**
       6 dB together - clips included (they used to take the fader TWICE in the multi-core path,
       so they would have dropped 12).  Export: the file matches the live meter with no offset.
       `D:__ R:__` notes:
-- [ ] **TL-2 — engine families sit level.** A Layers tab on Harmless, one on BaySickSynth, a
+- [ ] **TL-2 — engine families sit level.** A Layers tab on BaySickSolstice, one on BaySickSynth, a
       BaySickPlayer drum, a timeline clip and a hosted plugin tab, every pan at default: the
-      Harmless / BaySickPlayer / clip sources read +3 dB over the last build; BaySickSynth and
+      BaySickSolstice / BaySickPlayer / clip sources read +3 dB over the last build; BaySickSynth and
       the plugin do not move.  (Before this batch BaySickSynth and plugins were 3 dB hotter
       than everything else at default pan.)  `D:__ R:__` notes:
 - [ ] **TL-3 — re-import round trip.** Normalize an export to -14, drop the file into a fresh
@@ -3423,7 +3423,7 @@ at all, before this batch or after it:**
       (the old law skipped itself at center and dropped 3 dB on the first tick), level rises
       toward the side, about +3 dB at 100%.  Same sweep under Flat: the near side holds, the
       far side fades, no jump.  Repeat on a BUS pan and on the MASTER pan.  `D:__ R:__` notes:
-- [ ] **TL-6 — every pan knob follows the law.** Harmless's pan knob, a BaySickPlayer pan
+- [ ] **TL-6 — every pan knob follows the law.** BaySickSolstice's pan knob, a BaySickPlayer pan
       knob, and the Clips-page pan all sweep exactly as the strip pan did in TL-5 under each
       law.  `D:__ R:__` notes:
 - [ ] **TL-7 — the fold.** A STEREO file as a clip, strip pan 100% right under Ramped: the
@@ -3433,7 +3433,7 @@ at all, before this batch or after it:**
       `D:__ R:__` notes:
 - [ ] **TL-8 — note pan and engine pan add as positions.** Piano roll: a note with note-pan
       hard LEFT on a Layers tab whose engine pan knob is hard RIGHT plays CENTERED (positions
-      add; two laws are never multiplied).  Harmless unison spread sounds unchanged.
+      add; two laws are never multiplied).  BaySickSolstice unison spread sounds unchanged.
       `D:__ R:__` notes:
 
 **Browser + Direct to Master:**

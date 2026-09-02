@@ -536,7 +536,7 @@ Sub-K Serial Fallback is production-shape (no diagnostic instrumentation); no ne
   - Listen for: pure crash decays, no granular digital artifact riding the tail.
 - **BaySickRustyDrums — MT OFF — full pattern playback:** expected unchanged (audio-thread-only pinning is a no-op when only one thread enters the audio path).
 - **BaySickGuitars + BaySickBasses — keyswitched articulation + chord playback:** expected no observable change (defensive pinning; their content doesn't exhibit the Rusty multi-out race trigger, but they're now on the audio thread too).
-- **Non-sfizz engines (Harmless / BaySickSynth / BaySickPlayer / BaySickBass / Drums / Layers / Vox live-input):** expected no regression.  The 4 sfizz task families pinned to audio thread are a small minority of total tasks per block; worker-eligible task pool unchanged for all other engines.
+- **Non-sfizz engines (BaySickSolstice / BaySickSynth / BaySickPlayer / BaySickBass / Drums / Layers / Vox live-input):** expected no regression.  The 4 sfizz task families pinned to audio thread are a small minority of total tasks per block; worker-eligible task pool unchanged for all other engines.
 - **CPU sanity (optional):** polyphonic chord + heavy drum-pattern playback under MT-on, watch DSP meter for any unexpected jump.  Audio-thread pinning means the 14 Rusty tasks + any sfizz Inst tasks now run on the audio thread instead of workers — slight reduction in MT parallelism for that subgraph, but the worker pool is still active for the rest of the graph.
 
 On Jeff verify outcome:

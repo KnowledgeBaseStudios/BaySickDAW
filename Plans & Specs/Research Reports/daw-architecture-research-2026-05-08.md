@@ -30,7 +30,7 @@
 
 # 1. GPU offload for FFT-based effects — STRONG NEGATIVE
 
-**Headline:** drop `CL-049` from the active roadmap or demote to "Tech not yet feasible." Evidence converges: GPU offload only pays off for FFT sizes ≥ ~16K-point complex (64 KiB), batched with amortizable transfer cost, tolerating 2-4× buffer-size additional latency. **BaySickDAW's FFT use is at 2048** (PhaseVocoder, Harmless wavetable, EQ8 linear-phase). All below the GPU break-even threshold by an order of magnitude.
+**Headline:** drop `CL-049` from the active roadmap or demote to "Tech not yet feasible." Evidence converges: GPU offload only pays off for FFT sizes ≥ ~16K-point complex (64 KiB), batched with amortizable transfer cost, tolerating 2-4× buffer-size additional latency. **BaySickDAW's FFT use is at 2048** (PhaseVocoder, BaySickSolstice wavetable, EQ8 linear-phase). All below the GPU break-even threshold by an order of magnitude.
 
 ## Sources fetched
 
@@ -197,7 +197,7 @@ Fabian Renn-Giles (Meeting C++ 2019) authored farbot specifically for this UI-to
 
 1. **Add Tier 1/2 envelope-stage awareness to VibePlayer voiceCap loop** at `Source/VibePlayer/VibePlayerDSP.cpp:944-960`. Today: oldest-active only. Replace with: scan released voices first, tie-break by age. Fallback to oldest when no released voice exists.
 
-2. **Mirror the algorithm to BaySickSynth/Bass/Harmless.** None currently have explicit voice-cap stealing logic; they rely on `juce::Synthesiser` default for Harmless or per-pitch preempt for the others. Either expose a `voiceCap` parameter analogous to VibePlayer, or override `findVoiceToSteal` on the JUCE side.
+2. **Mirror the algorithm to BaySickSynth/Bass/BaySickSolstice.** None currently have explicit voice-cap stealing logic; they rely on `juce::Synthesiser` default for BaySickSolstice or per-pitch preempt for the others. Either expose a `voiceCap` parameter analogous to VibePlayer, or override `findVoiceToSteal` on the JUCE side.
 
 3. **Soft-stop instead of hard-stop on cap eviction.** `Source/VibePlayer/VibePlayerDSP.cpp:960` calls `oldest->stopNote(0.f, false)` — `false` is hard-kill. Change to `true` (allow tail-off) and rely on ADSR release. Force a short release override on stolen voices if natural release is multi-second (Vesa/Oval method).
 
@@ -337,7 +337,7 @@ These are the architecture findings that should graduate to `Future State.md` as
 
 | ID-to-be | Tag | Title | Bucket | Notes |
 |----------|-----|-------|--------|-------|
-| TBD | AQ | Voice-stealing tier hierarchy (Off > Release > Sustain > Decay > Attack with age tie-break) | Players | Replace oldest-active-only at VibePlayerDSP.cpp:944-960; mirror to BaySickSynth/Bass/Harmless |
+| TBD | AQ | Voice-stealing tier hierarchy (Off > Release > Sustain > Decay > Attack with age tie-break) | Players | Replace oldest-active-only at VibePlayerDSP.cpp:944-960; mirror to BaySickSynth/Bass/BaySickSolstice |
 | TBD | AQ | Soft-stop on voiceCap eviction (3-10 ms fade) | Players | Replace hard-kill at VibePlayerDSP.cpp:960; force short release override on stolen voices if natural release is multi-second |
 | TBD | AQ | User-visible voice priority mode APVTS enum (Last / Highest / Lowest) | Players | Surge / Cherry vocabulary; per-engine |
 | TBD | AQ | Per-engine cap audit + revisit (1-16 default 16 vs Surge 64 / Pianoteq 256) | Players | Could fold into existing CL-053 (smarter voice management) |

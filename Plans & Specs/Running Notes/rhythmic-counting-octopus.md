@@ -824,7 +824,7 @@ default 12 -- unchanged.
 `mSnapEnabled` / `setSnapEnabled` (snap on/off is now the global param = 0; never read) on both grids +
 containers; the drum-kit `onVZoom` / `applyVZoom` vertical-zoom path (dead after Stage 2's 16-fixed-rows
 change pulled Alt-scroll + menu items 53/54); and the now-vestigial `mRowHScale` (its only writer was
-`applyVZoom`; `rowH` is int so the x1.0 collapsed to `rowH`).  PianoRoll's `onVZoom`/`applyVZoom` + Harmless'
+`applyVZoom`; `rowH` is int so the x1.0 collapsed to `rowH`).  PianoRoll's `onVZoom`/`applyVZoom` + BaySickSolstice'
 own `mSnapEnabled` are LIVE -- untouched.  Zero behavior change.
 
 **DEFAULT (confirm) -- PianoRoll snap default = Line (idx 1), ACCEPTED.**  Shipped as Line, not the SC-def

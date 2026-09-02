@@ -35,7 +35,7 @@ Nothing in this list is optional and none of it may be silently reinterpreted.
 
 - [x] A1. Copy the 32 `Added Images` into `Manuals/figures/`; verify one image per New row, none orphaned. (Done 2026-08-13; `BaySickSynth Menu.png` = `BaySickPlayer Menu.png` byte-identical is INTENTIONAL - code-verified the Layers menu literal is "Player" for both engines, StandaloneEditor.cpp:6869. Jeff added `Mixer Strip Crop.png` mid-pass - a Mixer shot carrying Vox/LiveInst strips, which have the input-source row engine strips lack.)
 - [x] A2. Crops are DATA, not derived PNGs: each figure = one or more views {master file, percent rect}, rendered through a CSS window; dots live in master coordinates so reshaping a crop never moves them. Rects live beside marker coords in `marker-coords.py`. First-pass rects: BSPDL full+bar, BSST bar, BSBT bar, BSSB = synth bar + bass bar stacked, BSRDTTL bar+section tabs, MIXSTP = Bass 1 + Vox 1 strips from `Mixer Strip Crop.png`, six BSSB panels = panel region of their own masters (OSC keeps the waveform strip). Jeff reshapes in authoring mode.
-- [x] A3. Rename map applied (32 renames) across registry, manual-2, manual-3, coordinates; map at `Manuals/assets/code-rename-map-full-2026-08-13.json`. CAUGHT AND FIXED: the backtick pass corrupted six on-screen literals that collide with old codes (Harmless `PITCH` section/knobs and `HARM` knob, BaySickPitch's `ALIGN`/`PITCH` boxes) - restored in registry + interim m2. Jeff's future exports translate through the map, never raw.
+- [x] A3. Rename map applied (32 renames) across registry, manual-2, manual-3, coordinates; map at `Manuals/assets/code-rename-map-full-2026-08-13.json`. CAUGHT AND FIXED: the backtick pass corrupted six on-screen literals that collide with old codes (BaySickSolstice `PITCH` section/knobs and `HARM` knob, BaySickPitch's `ALIGN`/`PITCH` boxes) - restored in registry + interim m2. Jeff's future exports translate through the map, never raw.
 - [x] A4. Registry screen table rebuilt to the 90-figure tree (Group/Ord/Code/Name/Kind/Parents/Files/View); CHR row gone; restructure note added to the retirement log.
 - [x] A5. Every `see CHR-n` dissolved (BLD blurb, PLUGT-2, allocation prose); CHR-1..7 retired.
 - [x] A6. Generator rebuilt: grouped name-only sidebar with tree indent, name-only headings, Part of / Related links, In Depth + In The Weeds buttons gated on real anchors, crop views with master-space dots, crop-reshape authoring mode, native-scale crop rendering. Single authoritative copy: `Manuals/assets/generate-manual-1.py` (scratchpad copies retired).
@@ -101,7 +101,7 @@ per R7. Tick only when the figure's callouts, dots and caption rows are done.
 | [x] | BaySickBasses | BSBAS | Instrument | 11 | Sub | BaySickPedals | Current | BaySickBasses editor |
 | [x] | BaySickGuitars/Basses Menu | BSGBM | Instrument | 12 | Sub | BSGTR, BSBAS | New | Inst nav menu (installInstNavMenu) |
 | [x] | BaySickNAM/IR | BSNAM | Instrument | 13 | Sub | BSPDL, BSGTR, BSBAS & BSV | Current | BaySickNAMIREditor |
-| [x] | Harmless | BSHARM | Instrument | 14 | Main | (group) | Current | HarmlessEditor |
+| [x] | BaySickSolstice | BSSOL | Instrument | 14 | Main | (group) | Current | BaySickSolsticeEditor |
 | [x] | BaySickSynth/Bass Family | BSSB | Instrument | 15 | Main | (group) | Crop | -- composite, no controls |
 | [x] | BaySickSynth Titlebar | BSST | Instrument | 16 | Sub | BaySickSynth/Bass Family | Crop | BaySickSynth title strip |
 | [x] | BaySickSynth Menu | BSSM | Instrument | 17 | Sub | BaySickSynth/Bass Family | New | Synth page menu |
@@ -282,7 +282,7 @@ no remaining consumers and D5 closes.
       footnote row + the keep-captured-takes chapter prose (rows keep
       bare labels), BSP clip-file row (What-is-loaded close-up
       dissolved); AUD Apply+Close merged to one row; BLD Sort row moved
-      to table end; Harmless LFO-Mod/Strum close-up split; all RustyDrums
+      to table end; BaySickSolstice LFO-Mod/Strum close-up split; all RustyDrums
       close-up boxes removed (text kept); BSST+BSBT -> BSSBT and
       BSSM+BSBM -> BSSBM (one entry each, both screens stacked, dots
       duplicated per view by the existing renderer), family children
@@ -334,7 +334,7 @@ no remaining consumers and D5 closes.
       706 dots, verified green, staged.
 - [x] G19. CORRECTED + DONE (2026-08-15): the swing knob was in the
       screenshots all along - it is the red ring beside Menu, which I had
-      misread as a logo. Swing row + dot added to BSP, BSHARM, BSRDMAIN,
+      misread as a logo. Swing row + dot added to BSP, BSSOL, BSRDMAIN,
       BSGTR, BSBAS, BSPLUG and BSSBT (positions color-detected from the
       images). CORRECTION (Jeff): the Drum Kit view has NO swing knob by
       design - its sixteen pickers link to player pages that each carry
@@ -367,7 +367,7 @@ no remaining consumers and D5 closes.
       already documented the knob (BSGTR-9 / BSBAS-11) - my G19 adds
       duplicated them there. Duplicates struck; every player's swing row
       AND chapter paragraph now carries the BSGTR-9 wording verbatim
-      (BSP-8, BSHARM-27, BSRDMAIN-10, BSPLUG-2, BSSBT-2, BSBAS-11
+      (BSP-8, BSSOL-27, BSRDMAIN-10, BSPLUG-2, BSSBT-2, BSBAS-11
       rewritten to match). Seventh coords export merged (703 validated,
       incl. Jeff's nudged swing dots); 701 after the two duplicate dots
       dropped.
@@ -413,15 +413,15 @@ no remaining consumers and D5 closes.
       drawn fallback even in the dev tree, unchanged by this fix.
 - [x] G26. Replace-feature menu pass (Jeff's spec + 4 new shots,
       2026-08-16): BSSBM re-based on the shared
-      Synth-Player-Harmless picture + updated Bass picture, BSPM on the
-      shared picture, BSPLUGM on the new Plugins picture; NEW BSHARMM
-      (Harmless finally has a menu entry, Sub of BSHARM) and NEW BSDM
+      Synth-Player-BaySickSolstice picture + updated Bass picture, BSPM on the
+      shared picture, BSPLUGM on the new Plugins picture; NEW BSSOLM
+      (BaySickSolstice finally has a menu entry, Sub of BSSOL) and NEW BSDM
       (BaySickDrums Menu, Main, right before the Rusty block; documents
       both access routes) - 88 -> 90 figures. Replace rows added at
-      BSSBM-8/BSPM-8/BSHARMM-8 and BSPLUGM-4..6
+      BSSBM-8/BSPM-8/BSSOLM-8 and BSPLUGM-4..6
       (Rename/Replace/Duplicate), shifts swept across registry +
       chapters; In Depth Replace prose on BSSBM (full contract) with
-      BSPM/BSHARMM deferring to it, full walk on BSDM + BSPLUGM. Fresh
+      BSPM/BSSOLM deferring to it, full walk on BSDM + BSPLUGM. Fresh
       estimated dot sets on all five figures, PRE-NUDGE - Jeff
       rearranges. Regenerated green: 90 figures, 731 markers (delta
       +30 = +1+1+3+15+10, exact), 112 close-ups, 89/89 topics; staged

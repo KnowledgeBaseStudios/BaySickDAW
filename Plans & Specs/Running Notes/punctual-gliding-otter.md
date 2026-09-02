@@ -43,7 +43,7 @@ target `setLiveMidiTarget` (`PluginProcessor.h:331-335`, atomics `.h:1167-1168`)
 `StandaloneEditor.cpp:1574`/`:1588`; drain + route `PluginProcessor.cpp:1813-1867` — kinds
 1/2/3/4/7/8/9 routed, Vox/live-Inst dropped (hardware parity), kind 8 gets −12, on-screen keyboard
 lit `:1856-1858`, `allMidi` feeds the MIDI recorder. Alternative hold-audition atomics
-(mono-per-block, NOT chosen): `auditionNoteOn/Off` on Synth/Harmless/Player/Bass
+(mono-per-block, NOT chosen): `auditionNoteOn/Off` on Synth/BaySickSolstice/Player/Bass
 (off-before-on `BaySickSynthProcessor.cpp:65-72`).
 
 ## 2026-07-08 — Tasks 1+2 CODE-COMPLETE (both configs build clean, Jeff)

@@ -24,7 +24,7 @@ Each preset is an XML file. The owner has a generator script (`Tools/gen_factory
 Build a coverage matrix:
 
 - **Rows:** instrument family / genre dimension (e.g., for synth presets: pad / lead / pluck / bass / arp / texture / effect; for drums: hip-hop kit / techno kit / lo-fi kit / acoustic kit / etc.).
-- **Columns:** the engines that produce them (Harmless, BaySickPlayer, BaySickSynth, BaySickBass, BaySickDrums tabs, etc.).
+- **Columns:** the engines that produce them (BaySickSolstice, BaySickPlayer, BaySickSynth, BaySickBass, BaySickDrums tabs, etc.).
 - **Cells:** count of presets in that combination + a sample list of preset names.
 
 Then identify gaps: combinations with 0 or near-0 presets that the genre / instrument category strongly suggests should exist.
@@ -42,7 +42,7 @@ Then identify gaps: combinations with 0 or near-0 presets that the genre / instr
 
 ## Coverage matrix
 
-| Family / Genre | Harmless | VibePlayer | BaySickSynth | BaySickBass | Drums | Effects |
+| Family / Genre | BaySickSolstice | VibePlayer | BaySickSynth | BaySickBass | Drums | Effects |
 |----------------|----------|------------|--------------|-------------|-------|---------|
 | Pad            | 12       | 4          | 8            | -           | -     | -       |
 | Lead           | 7        | 1          | 5            | -           | -     | -       |

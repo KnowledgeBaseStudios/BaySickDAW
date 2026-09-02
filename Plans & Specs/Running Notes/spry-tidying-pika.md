@@ -144,7 +144,7 @@ All spec calls for this batch are now closed.
 ## 2026-08-10 - Task 0 - Pending QA-Soundness commit landed
 
 Commit `485499ae`, 43 files, tree clean afterwards. Contents: the 17-ruling fix
-pass, engine gain staging (Synth/Bass -12 dB, Harmless -6 dB, sqrt-N unison
+pass, engine gain staging (Synth/Bass -12 dB, BaySickSolstice -6 dB, sqrt-N unison
 normalization), the NAMIR IR path-resolution fixes, the Phase 6 doc collapse,
 and this batch's plan + notes pair. Staged by name, not `git add -A`.
 

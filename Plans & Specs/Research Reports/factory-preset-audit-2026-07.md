@@ -3,14 +3,14 @@
 **Date:** 2026-07-18. **Scope:** every factory preset, every engine — 857 on-disk XMLs
 under `Presets/` + the 36 code-defined `EffectPresetIO::factoryTable()` entries + 2
 BaySickNAMIR library files. **Method:** four parallel read-only agent sweeps split by
-preset format (Harmless / BaySickSynth+Bass+synth-format drums / BaySickPlayer+player
+preset format (BaySickSolstice / BaySickSynth+Bass+synth-format drums / BaySickPlayer+player
 formats / Effects+pages), each reading the owning engine's `createLayout` + voice/DSP
 source FIRST, bulk-extracting values by script, then hand-verifying every candidate flag
 against source with file:line citations. Parent session spot-verified the systemic
 seeding premise (`EffectPresetIO.cpp:728` skip-if-exists) and the Limiter floor
 violation (`:611`) directly.
 
-**Already fixed in QA-K:** `Presets/Harmless/Leads & Solos/Lasersaw.xml` — `amp_s`
+**Already fixed in QA-K:** `Presets/BaySickSolstice/Leads & Solos/Lasersaw.xml` — `amp_s`
 0.0 -> 0.85 (dead-in-0.4s bug, marathon #9's named case).
 
 **Deliverable contract:** report only. No preset data beyond Lasersaw was changed; no
@@ -37,7 +37,7 @@ code was changed. Fix routing = Jeff's call (dockets posed at the Task 4 gate).
 5. `BaySickSynth/Cinematic & Drones/Shimmer Drone.xml` + `Pads & Atmospheres/Shimmer
    Pad.xml` — center osc silenced by the same HP@20k; only the detuned unison saws
    sound (hollow, quieter than authored).
-6. `Harmless/Prog House/Lasersaw Stab.xml` — the EXACT pre-fix Lasersaw envelope
+6. `BaySickSolstice/Prog House/Lasersaw Stab.xml` — the EXACT pre-fix Lasersaw envelope
    signature (amp_s 0, amp_d 0.4, no pluck tilt). "Stab" name argues intent; numbers
    argue sibling-of-bug.
 7. Transpose out-of-range (+/-36 vs +/-24 range; clamps a full octave off authored
@@ -53,7 +53,7 @@ code was changed. Fix routing = Jeff's call (dockets posed at the Task 4 gate).
    on whatever algorithm the slot was last in ("70s Plate" also isn't the Plate
    topology even in the code table).
 
-**LOW — judgment calls / benign-but-noted (ear-test only if time allows):** Harmless
+**LOW — judgment calls / benign-but-noted (ear-test only if time allows):** BaySickSolstice
 `Filtered Saw Bass` / `Boom-Bap 808` / `Bell Lead` / `Harpsichord Stab` (zero-sustain
 patches whose names don't scream percussive); `BaySickDrums/808 Group/808 Claves.xml`
 (~15 ms click-only body vs a real clave's ~40 ms ring).
@@ -62,7 +62,7 @@ patches whose names don't scream percussive); `BaySickDrums/808 Group/808 Claves
 
 ## Per-engine detail
 
-### Harmless — 152 scanned, 9 flags
+### BaySickSolstice — 152 scanned, 9 flags
 
 Source facts the flags rest on: audible gain chain `(rm_env*envGain + (1-rm_env)) *
 volume * trem` (AdditiveVoice.cpp:588-591) — amp_s=0 silences a held note because every
@@ -80,7 +80,7 @@ all 152.
 | `Modern Hip-Hop/Boom-Bap 808.xml` | amp_s=0.0, amp_d=0.45 | 808 that cuts at ~0.45 s | same | Long 808 notes die mid-note | LOW |
 | `Prog House/Bell Lead.xml` | amp_s=0.0, amp_d=0.5 | "Lead" name + zero sustain (matches bell-family convention) | same | Bell if intended, broken if lead | LOW |
 | `Neo-Soul/Harpsichord Stab.xml` | amp_s=0, amp_d=0.18 | Shortest non-chip body, no pluck tilt | same | Click/blip, not a harpsichord | LOW |
-| `Chiptune & 8-Bit/` x4 (8-Bit Lead, Bell Chip, Gameboy Pulse, Square Chip) | amp_r=0.0 (min 0.001) | Below declared range | HarmlessProcessor.cpp:168-180 | None — clamps to 1 ms (chip-authentic); data error only | HIGH/benign |
+| `Chiptune & 8-Bit/` x4 (8-Bit Lead, Bell Chip, Gameboy Pulse, Square Chip) | amp_r=0.0 (min 0.001) | Below declared range | BaySickSolsticeProcessor.cpp:168-180 | None — clamps to 1 ms (chip-authentic); data error only | HIGH/benign |
 
 Verified-and-dropped (premises checked, intentional): `Psybient/Sub Hum` (LP@100 Hz sub
 drone), `Psytrance/Hi-Pass Pad` (HP@1500 by name), `Wind Howl` (mask 1500 = dark wash),
@@ -185,7 +185,7 @@ name reuse like "Vocal Light" on Compressor + DeEsser is benign — separate men
 
 ## Clean bills
 
-Harmless: 14 of 19 subfolders zero-flag. BaySickSynth: 5 subfolders. BaySickBass: 7.
+BaySickSolstice: 14 of 19 subfolders zero-flag. BaySickSynth: 5 subfolders. BaySickBass: 7.
 BaySickDrums: 5. BaySickPlayer + Rusty Player: all references resolve, zero range
 violations. Effects: Chorus/Delay/TransientShaper trees byte-match the code table. All
 857 XMLs well-formed; zero malformed files anywhere.

@@ -137,7 +137,7 @@ QA-D is the Phase 2 batch following QA-C, addressing four project-lifecycle bugs
   - **(1)** Load a saved project. Verify the title-bar `*` (dirty indicator) stays clean immediately after load (does not flicker on, doesn't stick).
   - **(2)** After load, tweak a knob. Verify `*` appears (dirty trigger still works for real edits).
   - **(3)** File → New. Verify `*` is clean.
-  - **(4)** Edit a Harmless / BaySickSynth / Guitars / Basses knob immediately after a load (don't wait). Verify `*` appears (per-engine ApvtsDirtyTrackers gated correctly)."
+  - **(4)** Edit a BaySickSolstice / BaySickSynth / Guitars / Basses knob immediately after a load (don't wait). Verify `*` appears (per-engine ApvtsDirtyTrackers gated correctly)."
 - [ ] Wait for verify result.
 - [ ] On pass: `/draft-commit`, surface, commit on approval.
 - [ ] `/draft-doc running-notes` → apply.

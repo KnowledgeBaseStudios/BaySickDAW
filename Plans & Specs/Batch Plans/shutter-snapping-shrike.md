@@ -54,7 +54,7 @@ removed over there and which this plan must not resurrect:
 
 ### Task 1 - the harness core + first figures
 - [ ] `--shot <outdir> [figure...]` branch in StandaloneApp::initialise: processor + StandalonePlayHead + prepareToPlay, NO device manager init, no window; snapshot/save plumbing at 2x; font self-check; figure names exactly matching `Manuals/figures/*.png`.
-- [ ] Bucket A figures (~18, self-contained): BaySickSynth panels x6, Harmless, transport bar, ribbon, window chrome, dialogs, pedal views.
+- [ ] Bucket A figures (~18, self-contained): BaySickSynth panels x6, BaySickSolstice, transport bar, ribbon, window chrome, dialogs, pedal views.
 - [ ] Build gate. Commit. Running notes.
 
 ### Task 2 - state-rich figures

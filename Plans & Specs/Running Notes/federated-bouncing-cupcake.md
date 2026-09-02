@@ -351,7 +351,7 @@ All Tests A-G pass in Debug:
 - **Test B** — counter reset on File -> New Project.
 - **Test C** — counter advance from saved-project load past max-restored.
 - **Test D** — Sub-D plural `Basses N` disambiguation from `Bass N`.
-- **Test E** — context-label engineType suffix across all 5 engine-bearing types: `Layer 1 - Harmless` / `Bass 1 - BaySickBass` / `Drum 1 - VibePlayer` / `Guitar 1 - BaySickGuitars` / `Basses 1 - BaySickBasses`.
+- **Test E** — context-label engineType suffix across all 5 engine-bearing types: `Layer 1 - BaySickSolstice` / `Bass 1 - BaySickBass` / `Drum 1 - VibePlayer` / `Guitar 1 - BaySickGuitars` / `Basses 1 - BaySickBasses`.
 - **Test F** — saved-project restore preserves correct labels (engineType + tab name both round-trip).
 - **Test G** — ribbon-rename propagates to piano-roll context label with engineType suffix preserved.
 

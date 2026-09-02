@@ -22,12 +22,12 @@ Per-kind capacity comes from `Source/BaySickConstants.h` and is the single state
 
 | Name string | Class |
 |---|---|
-| `"Harmless"` | `HarmlessProcessor` |
+| `"BaySickSolstice"` | `BaySickSolsticeProcessor` |
 | `"BaySickPlayer"` | `BaySickPlayerProcessor` |
 | `"BaySickSynth"` | `BaySickSynthProcessor` |
 | `"BaySickBass"` | `BaySickBassProcessor` |
 
-Every one gets its own `AudioProcessorValueTreeState` whose parameter ids are prefixed per tab: the rig hands out a track id (`lay_<n>` / `bas_<n>` / `drm_<n>` from `EngineRig::trackIdFor`) and each engine builds `tk_<trackId>_<tag>_` from it, where the tag is `harm_`, `bsp_`, `bss_` or `bsb_`. So Layer 3's Harmless cutoff lives at `tk_lay_2_harm_...`. Each engine's APVTS also carries an `undoOwnerTag` of `rig:<kind>:<pageIndex>` so undo entries can find the engine again after it has been destroyed and rebuilt.
+Every one gets its own `AudioProcessorValueTreeState` whose parameter ids are prefixed per tab: the rig hands out a track id (`lay_<n>` / `bas_<n>` / `drm_<n>` from `EngineRig::trackIdFor`) and each engine builds `tk_<trackId>_<tag>_` from it, where the tag is `harm_`, `bsp_`, `bss_` or `bsb_`. So Layer 3's BaySickSolstice cutoff lives at `tk_lay_2_bso_...`. Each engine's APVTS also carries an `undoOwnerTag` of `rig:<kind>:<pageIndex>` so undo entries can find the engine again after it has been destroyed and rebuilt.
 
 **Audio path.** The registered engine is fed by `EngineInsertTask` and lands on its own mixer insert channel: `MixerChannelIds::layerInsert(i)` (200+i), `bassInsert(i)` (300+i), `drumInsert(i)` (500+i). The APVTS prefix for that strip is `mixer_layer_<i>` / `mixer_bass_<i>` / `mixer_drum_<i>`. Layer inserts default to the Layers bus, bass inserts to the Bass bus, and drum inserts to the drums bus their **kit** implies (see below).
 
@@ -45,8 +45,8 @@ Every tab is born from the **"+" slot at the right end of the ribbon** (the tab 
 
 | You pick | You get |
 |---|---|
-| **Harmless > Layers** | a Layers tab running Harmless |
-| **Harmless > Bass** | a Bass tab running Harmless |
+| **BaySickSolstice > Layers** | a Layers tab running BaySickSolstice |
+| **BaySickSolstice > Bass** | a Bass tab running BaySickSolstice |
 | **BaySickSynth** | a Layers tab running BaySickSynth |
 | **BaySickPlayer > Layers** | a Layers tab running BaySickPlayer |
 | **BaySickPlayer > Bass** | a Bass tab running BaySickPlayer |
@@ -57,7 +57,7 @@ Every tab is born from the **"+" slot at the right end of the ribbon** (the tab 
 (The same "+" menu also creates Clips, Vox, Inst and Plugins tabs - those have their own documents.)
 The main menu bar's **Edit > New Tab** submenu is that same menu, not a copy of it: the same rows in the same order, grayed out under the same conditions, doing the same thing when you pick one. Use whichever is closer to hand.
 
-Once a family has at least one tab, its own colored slot appears in the ribbon (Layers orange, Bass green, Drums red) and its dropdown arrow carries the same add rows scoped to that family: "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickSynth" on Layers; "+ Add Harmless", "+ Add BaySickPlayer", "+ Add BaySickBass" on Bass; "+ Add BaySickPlayer", "+ Add BaySickSynth" on Drums. **A family's slot vanishes from the ribbon when its last tab is deleted** and comes back through "+" or Edit > New Tab.
+Once a family has at least one tab, its own colored slot appears in the ribbon (Layers orange, Bass green, Drums red) and its dropdown arrow carries the same add rows scoped to that family: "+ Add BaySickSolstice", "+ Add BaySickPlayer", "+ Add BaySickSynth" on Layers; "+ Add BaySickSolstice", "+ Add BaySickPlayer", "+ Add BaySickBass" on Bass; "+ Add BaySickPlayer", "+ Add BaySickSynth" on Drums. **A family's slot vanishes from the ribbon when its last tab is deleted** and comes back through "+" or Edit > New Tab.
 
 New tabs are named `Layer 1`, `Bass 1`, `Drum 1` and count upward. The counters never reuse a number you deleted, so deleting Layer 3 and adding another gives you Layer 4.
 
@@ -91,7 +91,7 @@ Open it from the window's **Menu** button. The top of the menu is the window/vie
 | Item | What it does |
 |---|---|
 | **Lock Layer / Lock Bass / Lock Drum** | Tick-toggle. A locked tab cannot be deleted (the Delete item grays out and the ribbon refuses with a "Cannot Delete" box), and a locked drum cannot have its sound swapped from the kit. The ribbon shows `[L] ` in front of the tab name. |
-| **Polyphony: Polyphonic / Monophonic** | One click switches the engine between playing chords and playing one note at a time. Reads "(n/a)" and grays out on Harmless, which is always polyphonic. |
+| **Polyphony: Polyphonic / Monophonic** | One click switches the engine between playing chords and playing one note at a time. Reads "(n/a)" and grays out on BaySickSolstice, which is always polyphonic. |
 | **Rename...** | Opens a text box; typing a new name and clicking OK renames the ribbon tab. An empty name is ignored. |
 | **Duplicate Layer / Bass / Drum (new tab)** | Makes a second tab with the same engine and the same settings. Grayed out until the tab has an engine. A duplicated drum lands in the **same kit** as the drum it came from, not the kit you happen to be looking at. |
 | **Choke Group** | None (default) or Group 1-16. Two tabs in the same group cut each other off - the classic open-hat/closed-hat trick, and it works across engine types. |
@@ -153,7 +153,7 @@ The kit grid itself is a drum sequencer with the same tools, snapping, zoom, und
 
 ## Parameters and persistence
 
-**Engine parameters** live in the engine's own APVTS, not the main one: `tk_lay_<n>_harm_*`, `tk_lay_<n>_bsp_*`, `tk_lay_<n>_bss_*`, `tk_bas_<n>_bsb_*`, `tk_drm_<n>_bsp_*`, and so on.
+**Engine parameters** live in the engine's own APVTS, not the main one: `tk_lay_<n>_bso_*`, `tk_lay_<n>_bsp_*`, `tk_lay_<n>_bss_*`, `tk_bas_<n>_bsb_*`, `tk_drm_<n>_bsp_*`, and so on.
 
 **Channel parameters** live in the main APVTS under the strip prefix:
 
@@ -202,7 +202,7 @@ A kit load tears down only the target bank's drum tabs, by tab id rather than by
 - **Inst Page.md** - live-input and sfizz guitar/bass tabs.
 - **Plugins Page.md** - hosted third-party instrument tabs.
 - **BaySickRustyDrums.md** - the separate single-instance drum engine that also appears under the Drums ribbon slot. A kit load never touches it.
-- The engines these tabs can run: **Harmless.md**, **BaySickSynth.md**, **BaySickBass.md**, **BaySickPlayer.md**.
+- The engines these tabs can run: **BaySickSolstice.md**, **BaySickSynth.md**, **BaySickBass.md**, **BaySickPlayer.md**.
 - **Mixer.md**, **Effect Racks.md**, **Piano Roll.md**, **Builder Page.md**, **Freeze and Export.md** - the systems every tab plugs into.
 
 ---

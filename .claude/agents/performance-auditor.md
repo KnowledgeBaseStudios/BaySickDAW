@@ -28,7 +28,7 @@ Every finding MUST be classified by trigger context BEFORE being flagged. This i
 ### Audio-thread call paths (HOT — flag aggressively)
 
 Verified audio-thread entry points:
-- `VibesynthProcessor::processBlock`, `HarmlessProcessor::processBlock`, `BaySickSynthProcessor::processBlock`, `BaySickBassProcessor::processBlock`, `VibePlayerProcessor::processBlock`, `BaySickVocalProcessor::processBlock` — every AudioProcessor's processBlock
+- `VibesynthProcessor::processBlock`, `BaySickSolsticeProcessor::processBlock`, `BaySickSynthProcessor::processBlock`, `BaySickBassProcessor::processBlock`, `VibePlayerProcessor::processBlock`, `BaySickVocalProcessor::processBlock` — every AudioProcessor's processBlock
 - `Voice::renderNextBlock` / any `juce::SynthesiserVoice::renderNextBlock` override — `AdditiveVoice`, `BaySickSynthVoice`, etc.
 - `RenderGraphDispatcher::dispatchBlock` (parallel pump)
 - Any `Task::run` under `Source/Engine/Tasks/`: `EngineInsertTask::run`, `PassiveStripTask::run`, `MasterTask::run`, `CompositeAudioInsertTask::run`, `VoxStripTask::run`, `InstStripTask::run`

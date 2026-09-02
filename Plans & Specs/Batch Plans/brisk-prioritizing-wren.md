@@ -37,7 +37,7 @@ No sub-spec calls open.
 - `Source/Standalone/StandaloneEditor.cpp` — AudioSettingsDialog (:70-405): control-panel
   button (near Apply/Close :108-121/:164-166), `applySettings` (:264-354) buffer-size live
   path
-- `Presets/Harmless/Leads & Solos/Lasersaw.xml` — amp sustain data fix
+- `Presets/BaySickSolstice/Leads & Solos/Lasersaw.xml` — amp sustain data fix
 - New report artifact: `Plans & Specs/Research Reports/factory-preset-audit-2026-07.md`
 
 ## Tasks
@@ -65,7 +65,7 @@ No sub-spec calls open.
 
 ### Task 4 — DSP-01 Lasersaw fix + factory-preset data audit (#9)
 - [ ] Lasersaw.xml amp sustain 0.0 → sibling-class value (0.85; Jeff ear-tunes at campaign).
-- [ ] Data-read audit of ALL factory presets, every engine (Harmless / BaySickSynth / Bass /
+- [ ] Data-read audit of ALL factory presets, every engine (BaySickSolstice / BaySickSynth / Bass /
       Player / Vocal / Pedals / NAMIR / drum patches / effect + EffectPresetIO presets):
       flag silent/broken patterns — zero sustain with short decay, zeroed output/level
       params, filter closed with no env amount, out-of-range values vs each param's range,

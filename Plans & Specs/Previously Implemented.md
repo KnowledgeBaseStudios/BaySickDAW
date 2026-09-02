@@ -1521,168 +1521,168 @@ over time without rewriting history here.
 
 ## Players
 
-### Player Engines - Harmless / VibePlayer / BaySick family
+### Player Engines - BaySickSolstice / VibePlayer / BaySick family
 
 #### **BLU-303: T1a Output EQ Mix wired**
 - **Sources:** BLU-303
 - **Implemented:** oeq_mix param + tilt-EQ DSP
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-304: T1b flt2_kb_track param registered**
 - **Sources:** BLU-304
 - **Implemented:** Was missing
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-305: T1c Filter type wiring (LP/HP/BP/Notch)**
 - **Sources:** BLU-305
 - **Implemented:** setFilterType + setFilter2Type
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **BLU-306: T1d setComponentID on every Harmless slider**
+#### **BLU-306: T1d setComponentID on every BaySickSolstice slider**
 - **Sources:** BLU-306
 - **Implemented:** wireMeta helper bulk wired
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **BLU-307: T1e Tooltips on every Harmless slider**
+#### **BLU-307: T1e Tooltips on every BaySickSolstice slider**
 - **Sources:** BLU-307
 - **Implemented:** ASCII-only descriptions
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-308: T1f CPU guards on previously-unguarded setters**
 - **Sources:** BLU-308
 - **Implemented:** setTremoloParams etc
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-309: T1g Removed Time::getHighResolutionTicks() syscall**
 - **Sources:** BLU-309
 - **Implemented:** Per-voice mRng seeded once
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-310: T1h Mono playback safety**
 - **Sources:** BLU-310
 - **Implemented:** Existing if(outR) confirmed
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-311: T2-D Prism Mode wired**
 - **Sources:** BLU-311
 - **Implemented:** 3 inharmonic-spread shapes
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-312: T2-H Phaser Mask Rate UI knob**
 - **Sources:** BLU-312
 - **Implemented:** Was missing UI affordance
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-313: T2-N misc ghost params wired (6 of 8)**
 - **Sources:** BLU-313
 - **Implemented:** timbre_blend, prism_mode, pluck_blur, strum_tns, vel_link, legato_limit
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-314: T2-O Layout audit**
 - **Sources:** BLU-314
 - **Implemented:** Routing matrix + Phaser slot
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-315: T2-I Reverb removed**
 - **Sources:** BLU-315
 - **Implemented:** reverb_amount param dropped; PRESET-SAFE
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-316: T2-J Multi-band compressor confirmed not present**
 - **Sources:** BLU-316
 - **Implemented:** No removal needed
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-317: T2-G Harmonizer demoted to Tier 3**
 - **Sources:** BLU-317
 - **Implemented:** 6 harm_* params removed
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-318: T2-F Routing Matrix wired (faders only)**
 - **Sources:** BLU-318
 - **Implemented:** 6 new APVTS params; LEDs dropped
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-319: HarmonicEngine extensions**
 - **Sources:** BLU-319
 - **Implemented:** setSpectralFxScale + setNyquistProtect
-- **Source:** Player Engines > §P1 Harmless > S1
+- **Source:** Player Engines > §P1 BaySickSolstice > S1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-320: Pitch group + Phaser WIDTH/OFS + Pluck blur button**
 - **Sources:** BLU-320
 - **Implemented:** 8 new APVTS params + UI
-- **Source:** Player Engines > §P1 Harmless > SLA-Impl
+- **Source:** Player Engines > §P1 BaySickSolstice > SLA-Impl
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-321: T2-A Filter envelopes**
 - **Sources:** BLU-321
 - **Implemented:** Per-voice mFltADSR + mFltADSR2
-- **Source:** Player Engines > §P1 Harmless > S2
+- **Source:** Player Engines > §P1 BaySickSolstice > S2
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-322: T2-B LFO routing**
 - **Sources:** BLU-322
 - **Implemented:** Shared LFO with rate + waveform
-- **Source:** Player Engines > §P1 Harmless > S2
+- **Source:** Player Engines > §P1 BaySickSolstice > S2
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-323: T2-E Mod XYZ destinations**
 - **Sources:** BLU-323
 - **Implemented:** 3 destination dropdowns
-- **Source:** Player Engines > §P1 Harmless > S2
+- **Source:** Player Engines > §P1 BaySickSolstice > S2
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-324: T2-N follow-on (legato_limit, part_sel, etc)**
 - **Sources:** BLU-324
 - **Implemented:** DSP wiring lands here
-- **Source:** Player Engines > §P1 Harmless > S2
+- **Source:** Player Engines > §P1 BaySickSolstice > S2
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-325: T2-C Unison engine**
 - **Sources:** BLU-325
 - **Implemented:** Up to 9 detuned siblings; setUnisonType/Alt/Phase
-- **Source:** Player Engines > §P1 Harmless > S3
+- **Source:** Player Engines > §P1 BaySickSolstice > S3
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-326: Mod matrix S4 (6 batches)**
 - **Sources:** BLU-326
 - **Implemented:** Per-target articulator envelope + LFO + sources
-- **Source:** Player Engines > §P1 Harmless > S4
+- **Source:** Player Engines > §P1 BaySickSolstice > S4
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-327: T2-M Central spectrogram**
 - **Sources:** BLU-327
 - **Implemented:** 516-partial real-time visualiser
-- **Source:** Player Engines > §P1 Harmless > S5
+- **Source:** Player Engines > §P1 BaySickSolstice > S5
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-328: T2-P Background wavetable rebuild**
 - **Sources:** BLU-328
 - **Implemented:** juce::TimeSliceThread off audio thread
-- **Source:** Player Engines > §P1 Harmless > S5
+- **Source:** Player Engines > §P1 BaySickSolstice > S5
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-329: Layout review (top-to-bottom restructure)**
 - **Sources:** BLU-329
 - **Implemented:** Migrated all knobs per Jeff's locked map
-- **Source:** Player Engines > §P1 Harmless > Layout Review
+- **Source:** Player Engines > §P1 BaySickSolstice > Layout Review
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-349: cutSelf bool, detuneMode, attack/sustain ADSR**
@@ -1730,7 +1730,7 @@ over time without rewriting history here.
 
 #### **BLU-357: Range-mapping audit (retro)**
 - **Sources:** BLU-357
-- **Implemented:** VibePlayer + Harmless sweep
+- **Implemented:** VibePlayer + BaySickSolstice sweep
 - **Source:** Player Engines > §P2 VibePlayer > Cross-cutting
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
@@ -1758,7 +1758,7 @@ over time without rewriting history here.
 - **Source:** Player Engines > §P2 VibePlayer > Cross-cutting
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **BLU-371: Cut-self cross-apply retro to Harmless+Synth+Bass**
+#### **BLU-371: Cut-self cross-apply retro to BaySickSolstice+Synth+Bass**
 - **Sources:** BLU-371
 - **Implemented:** Each engine gets own copy
 - **Source:** Player Engines > §P2 VibePlayer > Remaining
@@ -2163,25 +2163,25 @@ over time without rewriting history here.
 #### **BLU-625: flt2_kb_track DSP wiring**
 - **Sources:** BLU-625
 - **Implemented:** S1 ghost lands DSP here
-- **Source:** Player Engines > §P1 Harmless > S2 SLA-bundled
+- **Source:** Player Engines > §P1 BaySickSolstice > S2 SLA-bundled
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-626: Blur time + Blur harm knobs**
 - **Sources:** BLU-626
 - **Implemented:** BlurModule::setTimeScale + setHarmAxis
-- **Source:** Player Engines > §P1 Harmless > S2 SLA-bundled
+- **Source:** Player Engines > §P1 BaySickSolstice > S2 SLA-bundled
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-627: Filter ofs knobs (per filter x2)**
 - **Sources:** BLU-627
 - **Implemented:** flt1/2_cutoff_ofs
-- **Source:** Player Engines > §P1 Harmless > S2 SLA-bundled
+- **Source:** Player Engines > §P1 BaySickSolstice > S2 SLA-bundled
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **BLU-628: Prism bipolar range change**
 - **Sources:** BLU-628
 - **Implemented:** -1..+1 with sign encoding polarity; PRESET-BREAK pre-v1
-- **Source:** Player Engines > §P1 Harmless > S2 SLA-bundled
+- **Source:** Player Engines > §P1 BaySickSolstice > S2 SLA-bundled
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 ### Phase D - Dynamic-Drum Architecture
@@ -2530,7 +2530,7 @@ over time without rewriting history here.
 
 #### **LDT-007: Polyphony toggle is engine-aware**
 - **Sources:** LDT-007
-- **Implemented:** BaySickSynth/Bass voiceMode (Poly<->Mono); BaySickPlayer voiceCap (1<->8); Harmless n/a
+- **Implemented:** BaySickSynth/Bass voiceMode (Poly<->Mono); BaySickPlayer voiceCap (1<->8); BaySickSolstice n/a
 - **Source:** Session Carryover 2026-04-25
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
@@ -3484,7 +3484,7 @@ over time without rewriting history here.
 - **Source:** Phase 5 > 5F-2 drum fixes
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-379: Harmless Layout Overhaul**
+#### **LDT-379: BaySickSolstice Layout Overhaul**
 - **Sources:** LDT-379
 - **Implemented:** 960x620 5-panel proportional layout; ~50 new APVTS params
 - **Source:** Phase 5 > 5F-3
@@ -3634,7 +3634,7 @@ over time without rewriting history here.
 - **Source:** Phase 5 > 5F-9 §12
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-409: Harmless DSP + UI quality pass**
+#### **LDT-409: BaySickSolstice DSP + UI quality pass**
 - **Sources:** LDT-409
 - **Implemented:** HarmonicEngine + AdditiveVoice filter chain + output phaser + strum direction + CPU-guard + SmoothedValue audit + UI review; subsequently shipped
 - **Source:** Phase 5 > 5F-9 §P1
@@ -3804,7 +3804,7 @@ over time without rewriting history here.
 - **Source:** Phase H-0 > Batch B
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-270: B.1 C14 Harmless LFO sliders restored**
+#### **FSW-270: B.1 C14 BaySickSolstice LFO sliders restored**
 - **Sources:** FSW-270
 - **Implemented:** 3 APVTS params + DSP routing + 2-row layout
 - **Source:** Phase H-0 > Batch B
@@ -3906,7 +3906,7 @@ over time without rewriting history here.
 - **Source:** Phase H-0 > Batch D
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-287: D.4-Q1+Q2 Harmless filter layout restructure**
+#### **FSW-287: D.4-Q1+Q2 BaySickSolstice filter layout restructure**
 - **Sources:** FSW-287
 - **Implemented:** Filter 2 row + ADSR boxes + AutoGain to Output cell + timbre 2x2 stack
 - **Source:** Phase H-0 > Batch D > D.4
@@ -4002,7 +4002,7 @@ over time without rewriting history here.
 - **Source:** Phase H-0 > Batch E (deliberate)
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **FSW-304: Harmless OCT/Hz pitch toggles wired**
+#### **FSW-304: BaySickSolstice OCT/Hz pitch toggles wired**
 - **Sources:** FSW-304
 - **Implemented:** OCT snaps drag to +-12 semis; default semitones with sign
 - **Source:** Phase H-0 > Batch E (newly shipped)
@@ -5305,7 +5305,7 @@ work lives in `Main Plan.md` §5.5._
 - **Source:** Master Checklist > Phase 1
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-154: 2A Harmless**
+#### **LDT-154: 2A BaySickSolstice**
 - **Sources:** LDT-154
 - **Implemented:** Additive synth, 516 partials, IFFT, Basic/Advanced, presets
 - **Source:** Master Checklist > Phase 2
@@ -5575,9 +5575,9 @@ work lives in `Main Plan.md` §5.5._
 - **Source:** Phase 1 Verification
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-317: Harmless DSP engine**
+#### **LDT-317: BaySickSolstice DSP engine**
 - **Sources:** LDT-317
-- **Implemented:** HarmlessLAF + APVTS macros + 516 partials + IFFT; UI overhaul deferred to 5F-3
+- **Implemented:** BaySickSolsticeLAF + APVTS macros + 516 partials + IFFT; UI overhaul deferred to 5F-3
 - **Source:** Phase 2 > 2A
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
@@ -6040,7 +6040,7 @@ bucket._
 - **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-181: Harmless scope full Harmor-equivalent**
+#### **LDT-181: BaySickSolstice scope full Harmor-equivalent**
 - **Sources:** LDT-181
 - **Implemented:** Layout overhaul in 5F dense Advanced-mode layout
 - **Source:** Locked Design Decisions
@@ -6144,7 +6144,7 @@ bucket._
 
 #### **LDT-198: Engine naming final**
 - **Sources:** LDT-198
-- **Implemented:** Layers: Harmless/VibePlayer/BaySickSynth; Bass: Harmless/VibePlayer/BaySickBass; Drums: BaySickDrums; references VibePlayer/BaySickDrums (renamed/deleted)
+- **Implemented:** Layers: BaySickSolstice/VibePlayer/BaySickSynth; Bass: BaySickSolstice/VibePlayer/BaySickBass; Drums: BaySickDrums; references VibePlayer/BaySickDrums (renamed/deleted)
 - **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
@@ -6256,7 +6256,7 @@ bucket._
 - **Source:** Locked Design Decisions
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-217: Harmless automation macro only**
+#### **LDT-217: BaySickSolstice automation macro only**
 - **Sources:** LDT-217
 - **Implemented:** ~30-50 APVTS params per instance
 - **Source:** Locked Design Decisions
@@ -6536,7 +6536,7 @@ bucket._
 - **Source:** 2026-04-19 Session > System Pages SLA
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-044: §P1 Harmless player review**
+#### **LDT-044: §P1 BaySickSolstice player review**
 - **Sources:** LDT-044
 - **Implemented:** Player engine review pending; subsequently shipped per session carryover entries
 - **Source:** Master Checklist > 5F-9 §P1
@@ -6632,58 +6632,58 @@ bucket._
 - **Source:** 2026-04-19 Session > Universal hamburger
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
-#### **LDT-103: S1 Harmless Tier 1 bugs + small wires + removals**
+#### **LDT-103: S1 BaySickSolstice Tier 1 bugs + small wires + removals**
 - **Sources:** LDT-103
 - **Implemented:** oeq_mix wired + flt2_kb_track + filter type + setComponentID + tooltips + CPU guards + mono safety
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-104: S1 SLA Audit planning**
 - **Sources:** LDT-104
 - **Implemented:** Per-element table 16 WIRE / 11 DROP / 7 promoted to T3 / 7 already planned across S2-S5 / 25 already shipped
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-105: SLA-Impl Pitch group full UI**
 - **Sources:** LDT-105
 - **Implemented:** FREQ/DETUNE knobs + pitch_freq_frac chicken-head + UI-only oct/Hz toggles + Phaser WIDTH/OFS + Pluck blur button
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-106: S2 filter envelopes + LFO routing + Mod XYZ**
 - **Sources:** LDT-106
 - **Implemented:** 18 new APVTS params total
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-107: S3 Unison engine + vel_link + part_sel**
 - **Sources:** LDT-107
 - **Implemented:** Unison 4 modes + vel_link DSP + Part B waveform interactivity
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-108: S3.5 per-part wavetable-domain split**
 - **Sources:** LDT-108
 - **Implemented:** 10 new partB_* APVTS params + 18 setter A/B variants
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-109: S4 Mod Editor + Right-click-to-modulate**
 - **Sources:** LDT-109
 - **Implemented:** 4 tabs real + right-click-to-modulate + target dropdown + tool buttons + modifier knobs + TEMPO/GLOBAL + viewport tools; subsequently shipped
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-110: S5 Spectrogram + Background wavetable**
 - **Sources:** LDT-110
 - **Implemented:** Central 516-partial real-time spectrogram + background wavetable rebuild; subsequently shipped
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-111: Layout review pass**
 - **Sources:** LDT-111
 - **Implemented:** After S5; subsequently shipped
-- **Source:** 2026-04-19 Session > §P1 Harmless
+- **Source:** 2026-04-19 Session > §P1 BaySickSolstice
 - **Verified:** 2026-05-08 (Phase-4 source verification)
 
 #### **LDT-112: §P2 VibePlayer SLA audit**

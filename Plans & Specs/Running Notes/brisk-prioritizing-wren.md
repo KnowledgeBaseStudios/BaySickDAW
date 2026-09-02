@@ -54,12 +54,12 @@ Build-confirm: Jeff "clean" (Release+Debug), 2026-07-18.
 
 Lasersaw.xml amp_s 0.0 -> 0.85 (the plan's pre-authorized data fix). AUDIT: 857 preset
 XMLs + 36 code-defined EffectPresetIO entries swept by four parallel read-only agents
-split by preset FORMAT (Harmless / BSS+BSB+synth-format drums / BaySickPlayer+player
+split by preset FORMAT (BaySickSolstice / BSS+BSB+synth-format drums / BaySickPlayer+player
 formats / Effects+pages), each reading the owning engine's createLayout + voice source
 first, scripting the bulk sweep, hand-verifying every flag with file:line citations;
 parent spot-verified the two systemic premises (EffectPresetIO.cpp:728 skip-if-exists;
 :611 setReleaseMs(5.0f)). Deliverable: `Plans & Specs/Research Reports/
-factory-preset-audit-2026-07.md`. Agent premise corrections captured: Harmless
+factory-preset-audit-2026-07.md`. Agent premise corrections captured: BaySickSolstice
 pluck_decay is a static spectral tilt, NOT a temporal decay (can't rescue zero-sustain);
 BaySickNAMIR folder is NOT empty (2 library files; my ls counted *.xml only); all 172
 BaySickDrums presets are synth-format (no player-format subset existed).

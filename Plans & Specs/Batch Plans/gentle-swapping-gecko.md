@@ -15,8 +15,8 @@ DynamicParamsPopout, and MixerTrackStrip use it today; every instrument editor s
 sliders.
 
 Scout census (2026-07-25, source-verified): **~112 clean declaration lines / ~200 widgets.**
-Harmless 54 lines (HarmlessEditor.h 44, HarmlessModEditor.h 4, HarmlessFilterRow.h 4,
-HarmlessRoutingMatrix.h 1 array, HarmlessXYZPad.h 1), BaySickSynth 16, BaySickBass 16,
+BaySickSolstice 54 lines (BaySickSolsticeEditor.h 44, BaySickSolsticeModEditor.h 4, BaySickSolsticeFilterRow.h 4,
+BaySickSolsticeRoutingMatrix.h 1 array, BaySickSolsticeXYZPad.h 1), BaySickSynth 16, BaySickBass 16,
 VibePlayer 15, Vocal family 8 (VocalEditor 5, AlignEditor 1/6 widgets, PitchEditor 1/4,
 PitchSubEditor 1/3), plus MixerPage send-amount slider (:1247), MetroPanel volume (:122),
 GlobalTransportBar Swing knob (:189), 2 hidden ARIA drivers (AriaControlPanel.cpp:437/:578),
@@ -51,8 +51,8 @@ No sub-spec calls open — the 2026-07-25 G4 docket locked everything.
 
 ## Files to modify
 
-- Task 1: `Source/Harmless/HarmlessEditor.h`, `HarmlessModEditor.h`, `HarmlessFilterRow.h`,
-  `HarmlessRoutingMatrix.h`, `HarmlessXYZPad.h`
+- Task 1: `Source/BaySickSolstice/BaySickSolsticeEditor.h`, `BaySickSolsticeModEditor.h`, `BaySickSolsticeFilterRow.h`,
+  `BaySickSolsticeRoutingMatrix.h`, `BaySickSolsticeXYZPad.h`
 - Task 1: `Source/BaySickSynth/BaySickSynthEditor.h`, `Source/BaySickBass/BaySickBassEditor.h`,
   `Source/VibePlayer/VibePlayerEditor.h`
 - Task 1: `Source/BaySickVocal/BaySickVocalEditor.cpp` (:420,:432-435),
@@ -67,7 +67,7 @@ No sub-spec calls open — the 2026-07-25 G4 docket locked everything.
 ### Task 1 — Instrument + vocal editor sweep
 
 - [ ] For each header above, change member declarations `juce::Slider name;` -> `VibeSlider name;`
-  (incl. the `mSliders[kNumSliders]` array in HarmlessRoutingMatrix.h). Where the type is
+  (incl. the `mSliders[kNumSliders]` array in BaySickSolsticeRoutingMatrix.h). Where the type is
   constructed with a style argument, use VibeSlider's `(SliderStyle, TextEntryBoxPosition)` ctor
   form unchanged — it forwards.
 - [ ] Confirm each TU sees `Source/Standalone/SharedUI.h` (transitively or add the include).
@@ -106,7 +106,7 @@ No sub-spec calls open — the 2026-07-25 G4 docket locked everything.
 
 ## Verification (end-to-end; authors into Master Test Plan §B at code-complete)
 
-1. Harmless routing-matrix vertical slider: right-click — value does NOT jump; Automate menu opens.
+1. BaySickSolstice routing-matrix vertical slider: right-click — value does NOT jump; Automate menu opens.
 2. BaySickSynth + BaySickBass + BaySickPlayer knob each: right-click — no value jump, Automate menu.
 3. BaySickVocal Retune/Strength slider: right-click — no value jump, no menu (componentID arrives
    in QA-ApvtsAutomation), left-drag still works.

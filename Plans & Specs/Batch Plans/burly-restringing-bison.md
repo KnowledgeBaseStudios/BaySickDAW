@@ -79,7 +79,7 @@ one-liner + FULL git status at close, or earlier if he asks).
 | G-1 | Slide architecture = voiced SlideSampler reproducing the FULL patch voicing + FULL control surface; full fidelity incl. bass cc105 Mono + cc117 Humanize wobble; ENTIRE dossier in scope (dossier §13.1-3). | sfizz can't hop samples or crossfade voices; formant correctness is a hard requirement. |
 | G-2 | Pitch offset #1 = the clean pitch-wheel convention bug, guitar +3 / bass +2, no residual (dossier §13.4). | Jeff re-tested both; verification confirmed the single dominant cause. |
 | G-3 | Humanize: seed dropdown 1-10 default 1 no "None"; distribution Uniform/Triangular/Quasi-Normal default Quasi-Normal; interval 1/32-1/64-1/128 default 1/64 standalone list; defaults Start 10% / Duration 10% / Velocity 20% / offsets 0; KEEP our column headers + percent display (dossier §13.5-9). | FL reference screenshots; beginner-friendly. |
-| G-4 | Pan ramp #11: RP/RT only, pan-only, in-house engines only (BaySickSynth/Bass, Harmless, VibePlayer); withdrawn for Guitars/Basses (dossier §13.10). | No reachable pan control on the sfizz engines. |
+| G-4 | Pan ramp #11: RP/RT only, pan-only, in-house engines only (BaySickSynth/Bass, BaySickSolstice, VibePlayer); withdrawn for Guitars/Basses (dossier §13.10). | No reachable pan control on the sfizz engines. |
 | G-5 | 8A: block start stored as absolute beats, bar index derived for display (dossier §13.11). | Kills the bar-index-vs-map-position latent mismatch. |
 | G-6 | 10B: lock-free roll snapshot — audio thread never waits, never discards (dossier §13.12; NON-NEGOTIABLE). | Jeff's word. |
 | G-7 | Swing #18: global + per-instrument, applied at scheduling (dossier §13.13); concrete spec = Jeff 2026-07-23, see SW-1..SW-6 below. | Net-new feature, fully specified. |
@@ -125,7 +125,7 @@ chat (numbered options, no recommendations) and WAIT — never code past a call 
   transform + `ensureSwingParams`), `Source/PluginProcessor.h`, `Source/PatternManager.h/.cpp`
   (ArrangementBlock beats-authoritative + serialization).
 - **Task 3:** `Source/BaySickSynth/BaySickSynthVoice.h/.cpp` (takeover :256-257; ramp precedent
-  :279-284/:309-313), `Source/Harmless/AdditiveVoice.h/.cpp` (:313-319),
+  :279-284/:309-313), `Source/BaySickSolstice/AdditiveVoice.h/.cpp` (:313-319),
   `Source/VibePlayer/VibePlayerDSP.h/.cpp` (whitelist :1455-1456; ramp .h:354-366; wheel no-op .h:308).
 - **Task 4:** `Source/Standalone/BuilderPage.cpp` (menu :6850-6993; move :6885-6920 swap :6888 group
   ids :6907-6908; color :6956-6969; group items :6932-6955; undo :3118/:3138-3154/:3180 +
@@ -138,7 +138,7 @@ chat (numbered options, no recommendations) and WAIT — never code past a call 
 - **Task 5:** `Source/Standalone/PianoRollPage.cpp` (:81-82), `Source/Standalone/BuilderPage.cpp`
   (:7476/:7480 latency reference, read-only).
 - **Task 6:** `Source/Standalone/GlobalTransportBar.h/.cpp`; the engine editor title bars
-  (`HarmlessEditor`, `BaySickSynthEditor`, `BaySickBassEditor`, `VibePlayerEditor`);
+  (`BaySickSolsticeEditor`, `BaySickSynthEditor`, `BaySickBassEditor`, `VibePlayerEditor`);
   `Source/BaySickNAMIR/BaySickNAMIREditor.cpp` (title bar + slot buttons ~:35-41/:92-117;
   oversampling toggle); `Source/Standalone/BaySickRustyDrumsPage.cpp` (title bar ~:165; preset btn
   :286-292); `Source/Standalone/StandaloneEditor.cpp` (:5437-5443 extras-right removal);
@@ -310,7 +310,7 @@ if ((idx & 1) != 0)
 - [ ] **Rusty title bar (G-16):** move the Player Preset button (:286-292) + program dropdown onto
       the "BaySickRustyDrums" title bar (~:165).
 - [ ] **Swing Mix knobs (SW-3):** on every player title bar LEFT of the preset dropdown —
-      Harmless / BaySickSynth / BaySickBass / VibePlayer editors (covers Layers, Bass, and per-drum
+      BaySickSolstice / BaySickSynth / BaySickBass / VibePlayer editors (covers Layers, Bass, and per-drum
       Player sub-tabs, each bound to its own `swing_*_mix`), the normalized Guitars/Basses bar, the
       normalized Rusty bar. Right-click → PopupMenu with the "Truncate Swing Notes" checkbox
       (SW-5, `_trunc`). Double-click → 100%.

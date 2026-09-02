@@ -104,13 +104,13 @@ block never mentions, verified in source:
   `VIB RATE` / `VIB DEPTH`. `BaySickPlayer.md:185` currently asserts the
   opposite behaviour in bold.
 - [ ] **Engine gain staging**: BaySickSynth and BaySickBass down 12 dB,
-  Harmless down 6 dB. Not visible, but audible, and the single change most
+  BaySickSolstice down 6 dB. Not visible, but audible, and the single change most
   likely to be reported as a regression by a reader.
 - [ ] **Audio clips gained the same pitch vibrato** (clip LFO now modulates
   read position). `Clips Page.md` / `Automation.md` untouched.
 - [ ] **Compressor "CS Style" mode is now "Pedal."** Hits `Effect Modules.md`
   (3 sites), `Pedalboard.md`, `Vocal Chain.md` (4 sites).
-- [ ] **Harmless RM VOL taper changed** (3.5 dB cliff removed at the top).
+- [ ] **BaySickSolstice RM VOL taper changed** (3.5 dB cliff removed at the top).
 - [ ] **Edit menu rebuilt**: "New Layers Tab / New Bass Tab / New Drums Tab"
   replaced with the full ribbon "+" list (Jeff, 2026-08-09 message 1513).
 
@@ -694,7 +694,7 @@ sentence inherits a correct source.
 
 - [ ] Apply the seven unlisted changes from `485499ae` (Lead removal, gain
       staging, BaySickPlayer vibrato relabel, clip vibrato, Compressor
-      `CS Style` to `Pedal`, Harmless RM VOL taper, Edit menu rebuild) to every
+      `CS Style` to `Pedal`, BaySickSolstice RM VOL taper, Edit menu rebuild) to every
       affected doc. Grep each old string tree-wide rather than editing the
       doc you first think of; the Compressor rename alone hits 8 sites across
       three docs.
@@ -740,7 +740,7 @@ sentence inherits a correct source.
 - [ ] Task 3: the shell and system pages (Workspace, Transport, Keyboard
       Shortcuts, Projects and Saving, Undo History, MIDI Learn, Builder,
       Patterns and Arrangement, Piano Roll, Event Editor, Automation).
-- [ ] Task 4: the instruments (Harmless, BaySickSynth, BaySickBass,
+- [ ] Task 4: the instruments (BaySickSolstice, BaySickSynth, BaySickBass,
       BaySickPlayer, BaySickGuitars, BaySickBasses, BaySickRustyDrums, plus the
       Engine Tabs / Clips / Inst / Plugins / Vox tab-family docs).
 - [ ] Task 5: mixing, effects and tone (Mixer, Effect Racks, Effect Modules,

@@ -22,7 +22,7 @@ Ten engine families ship with the app, each with its own editor page:
 
 | Engine | Type | What it does |
 |---|---|---|
-| **Harmless** | Additive synth | Inspired by FL Harmless — 2048-pt IFFT wavetable, dual SVF filter, X/Y/Z modulation pad |
+| **BaySickSolstice** | Additive synth | Inspired by FL BaySickSolstice — 2048-pt IFFT wavetable, dual SVF filter, X/Y/Z modulation pad |
 | **BaySickPlayer** | Sample player | Drag-and-drop folders / SFZ / single files; M/S width, treble shelf, voice modes |
 | **BaySickSynth** | Multi-waveform synth | 10 waveforms incl. Bell FM, mono/poly voice modes |
 | **BaySickBass** | Bass synth | Bass-tuned variant of BaySickSynth |
@@ -94,7 +94,7 @@ BaySickDAW/
 │   ├── EffectRack.h/.cpp             — 6-slot effect rack
 │   ├── DSP/                          — 12 effect modules + phase vocoder + audio streamer
 │   ├── Engine/                       — render-graph dispatcher + thread pool + tasks
-│   ├── Harmless/                     — Harmless additive synth
+│   ├── BaySickSolstice/                     — BaySickSolstice additive synth
 │   ├── VibePlayer/                   — BaySickPlayer (sample player; rename pending QA-PlayerRename)
 │   ├── BaySickSynth/                 — multi-waveform synth
 │   ├── BaySickBass/                  — bass synth

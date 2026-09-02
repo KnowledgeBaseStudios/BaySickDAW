@@ -17,7 +17,7 @@ instrument-engine editor registers an applicator (registration sites today: effe
 PluginProcessor.cpp:5911+) is id-mismatched with the knobs' engine-tagged ids and has zero
 audio-path consumers — a dead, automatable-to-nowhere param family.
 
-componentID census (scout, per editor): Harmless/BaySickSynth/BaySickBass/VibePlayer tag; **NAMIR,
+componentID census (scout, per editor): BaySickSolstice/BaySickSynth/BaySickBass/VibePlayer tag; **NAMIR,
 Vocal (+Align/Pitch sub-editors), Pedals tag nothing** (no Automate menu at all); sfizz engines
 (Guitars/Basses/RustyDrums) have no JUCE editor surface. VibePlayer's `cutSelfMode` has an
 attachment but no componentID. G3's rework gated both writers to song mode and added mode
@@ -61,7 +61,7 @@ No sub-spec calls open — docket 2026-07-25 locked 4/5; mechanism + id scheme a
 ## Files to modify
 
 - Task 1: `Source/Standalone/SharedUI.h/.cpp` (VKnobAutomation registration plumbing reuse),
-  `Source/Harmless/HarmlessEditor.cpp`, `Source/BaySickSynth/BaySickSynthEditor.cpp`,
+  `Source/BaySickSolstice/BaySickSolsticeEditor.cpp`, `Source/BaySickSynth/BaySickSynthEditor.cpp`,
   `Source/BaySickBass/BaySickBassEditor.cpp`, `Source/VibePlayer/VibePlayerEditor.cpp`
 - Task 2: `Source/BaySickNAMIR/BaySickNAMIREditor.cpp`, `Source/BaySickVocal/BaySickVocalEditor.cpp`
   (+ Align/Pitch editors), `Source/BaySickPedals/BaySickPedalsEditor.cpp`,
@@ -154,7 +154,7 @@ No sub-spec calls open — docket 2026-07-25 locked 4/5; mechanism + id scheme a
 
 ## Verification (authors into Master Test Plan §B)
 
-1. Harmless macro knob: right-click -> Automate -> draw a ramp -> song plays: knob moves AND
+1. BaySickSolstice macro knob: right-click -> Automate -> draw a ramp -> song plays: knob moves AND
    timbre audibly follows; stop + seek mid-lane: knob snaps to lane value.
 2. Same end-to-end for one BaySickSynth, one BaySickBass, one BaySickPlayer param.
 3. Two Layers tabs, same engine type: lanes on each drive ONLY their own tab (per-instance ids).
