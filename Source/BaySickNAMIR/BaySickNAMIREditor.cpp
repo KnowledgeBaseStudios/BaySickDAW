@@ -153,7 +153,7 @@ BaySickNAMIREditor::BaySickNAMIREditor (BaySickNAMIRProcessor& p)
     // Original mTitleLabel had a hover tooltip explaining "Neural Amp Modeler
     // + IR cabinet" -- dropped per Jeff (other engines don't have title-hover
     // tooltips either, and adding SettableTooltipClient to BaySickTitleBar
-    // correlated with a slider-paint crash in Harmless that wasn't worth
+    // correlated with a slider-paint crash in BaySickSolstice that wasn't worth
     // chasing).  Engine usage docs cover the acronym explanation.
     mPlacementViewA = std::make_unique<MicPlacementView> (
                           processor.apvts, "nam_placement_distance_cm",

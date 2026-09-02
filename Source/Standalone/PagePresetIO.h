@@ -64,7 +64,7 @@ namespace PagePresetIO
     //                                 the wrapper's race-safe loadSfzFile
     //                                 path runs (sfizz crashes when a kit is
     //                                 reloaded mid-render without this).  For
-    //                                 non-sfizz engines (Harmless, BaySickPlayer,
+    //                                 non-sfizz engines (BaySickSolstice, BaySickPlayer,
     //                                 NAM/IR, Pedals, etc.) leave null - the
     //                                 loader falls back to setStateInformation.
     struct EngineSlot

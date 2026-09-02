@@ -1764,7 +1764,7 @@ void PageMenuBar::setSwingKnobSlot (std::function<float()>     getMix,
     // QA-ManualPress M-4c: ONE knob serves every player window, so it
     // anchors the Swing Mix callout on all seven figures that show it.
     k->getProperties().set (kDotAnchor,
-        "BSSBT-2;BSP-8;BSHARM-27;BSGTR-9;BSBAS-11;BSRDMAIN-10;BSPLUG-2");
+        "BSSBT-2;BSP-8;BSSOL-27;BSGTR-9;BSBAS-11;BSRDMAIN-10;BSPLUG-2");
     addAndMakeVisible (*k);
     mSwingKnob = std::move (k);
     resized();

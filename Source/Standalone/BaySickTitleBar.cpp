@@ -45,7 +45,7 @@ BaySickTitleBar::~BaySickTitleBar() = default;
 
 void BaySickTitleBar::paint (juce::Graphics& g)
 {
-    // Standardized dark background (matches existing Harmless/BaySickPlayer tone).
+    // Standardized dark background (matches existing BaySickSolstice/BaySickPlayer tone).
     g.fillAll (juce::Colour (0xFF141618));
 
     // 1px bottom divider for visual separation against the panel below.
@@ -132,7 +132,7 @@ BaySickPresetButton::BaySickPresetButton (const juce::String& label)
 
     // QA-A Phase 6 (2026-05-09): lock the preset button to BaySickLAF (the app-
     // global LAF used by BaySickPedals + the rest of the chassis).  Engine
-    // editors that set their own LAF (HarmlessLAF, BaySickSynthLAF,
+    // editors that set their own LAF (BaySickSolsticeLAF, BaySickSynthLAF,
     // BaySickBassLAF, BaySickPlayerLAF) propagate that LAF to their child
     // components, which is what made the preset button look black on those
     // engines and grey on Pedals.  Pinning to BaySickLAF here means every

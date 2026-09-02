@@ -615,7 +615,7 @@ public:
     void setLiveHeldNotes(uint64_t lo, uint64_t hi);
     void setPlayheadBeat (double beat);
 
-    // ── Toolbar context label (e.g. "Layer 0 - Harmless") ────────────────
+    // ── Toolbar context label (e.g. "Layer 0 - BaySickSolstice") ────────────────
     // Caller pushes a combined "{tab name} - {engine type}" string.
     // Displayed right-aligned in the toolbar row between the zoom buttons
     // and the right edge of the container.

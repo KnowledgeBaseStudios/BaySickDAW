@@ -6,8 +6,8 @@
 #include "../AppPaths.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"
 #include "../BaySickSynth/BaySickSynthEditor.h"
-#include "../Harmless/HarmlessProcessor.h"
-#include "../Harmless/HarmlessEditor.h"
+#include "../BaySickSolstice/BaySickSolsticeProcessor.h"
+#include "../BaySickSolstice/BaySickSolsticeEditor.h"
 #include "../BaySickPlayer/BaySickPlayerProcessor.h"
 #include "../BaySickPlayer/BaySickPlayerEditor.h"
 #include "../SampleLibrary.h"
@@ -122,7 +122,7 @@ void LayersPage::selectEngineInternal(const juce::String& engineName)
             setTabName(name);
             if (onSoundNameChanged) onSoundNameChanged(name);
         };
-        if      (auto* he = dynamic_cast<HarmlessEditor*>      (mEngineEditor.get())) he->onPatchLoaded = onPatch;
+        if      (auto* he = dynamic_cast<BaySickSolsticeEditor*>      (mEngineEditor.get())) he->onPatchLoaded = onPatch;
         else if (auto* se = dynamic_cast<BaySickSynthEditor*>  (mEngineEditor.get())) se->onPatchLoaded = onPatch;
         else if (auto* pe = dynamic_cast<BaySickPlayerEditor*>    (mEngineEditor.get())) pe->onPatchLoaded = onPatch;
     }
@@ -155,7 +155,7 @@ void LayersPage::selectEngineInternal(const juce::String& engineName)
 
 juce::String LayersPage::stripEngineTitle() const
 {
-    if (dynamic_cast<HarmlessEditor*>     (mEngineEditor.get())) return HarmlessEditor::getEngineTitle();
+    if (dynamic_cast<BaySickSolsticeEditor*>     (mEngineEditor.get())) return BaySickSolsticeEditor::getEngineTitle();
     if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineTitle();
     if (dynamic_cast<BaySickPlayerEditor*>   (mEngineEditor.get())) return BaySickPlayerEditor::getEngineTitle();
     return {};
@@ -163,7 +163,7 @@ juce::String LayersPage::stripEngineTitle() const
 
 juce::Colour LayersPage::stripEngineAccent() const
 {
-    if (dynamic_cast<HarmlessEditor*>     (mEngineEditor.get())) return HarmlessEditor::getEngineAccent();
+    if (dynamic_cast<BaySickSolsticeEditor*>     (mEngineEditor.get())) return BaySickSolsticeEditor::getEngineAccent();
     if (dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return BaySickSynthEditor::getEngineAccent();
     if (dynamic_cast<BaySickPlayerEditor*>   (mEngineEditor.get())) return BaySickPlayerEditor::getEngineAccent();
     return {};
@@ -171,7 +171,7 @@ juce::Colour LayersPage::stripEngineAccent() const
 
 juce::Component* LayersPage::stripPresetButton() const
 {
-    if (auto* e = dynamic_cast<HarmlessEditor*>     (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<BaySickSolsticeEditor*>     (mEngineEditor.get())) return e->getTitleStripPresetButton();
     if (auto* e = dynamic_cast<BaySickSynthEditor*> (mEngineEditor.get())) return e->getTitleStripPresetButton();
     if (auto* e = dynamic_cast<BaySickPlayerEditor*>   (mEngineEditor.get())) return e->getTitleStripPresetButton();
     return nullptr;
@@ -244,7 +244,7 @@ static juce::String layerEngineLocalPrefix (juce::AudioProcessor* proc)
 {
     if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(proc))  return bss->getParamPrefix();
     if (auto* bsp = dynamic_cast<BaySickPlayerProcessor*>(proc))    return bsp->getParamPrefix();
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      return h  ->getParamPrefix();
+    if (auto* h   = dynamic_cast<BaySickSolsticeProcessor*>(proc))      return h  ->getParamPrefix();
     return {};
 }
 
@@ -253,7 +253,7 @@ static void layerApplyApvtsTree (juce::AudioProcessor* proc, const juce::ValueTr
 {
     if (auto* bss = dynamic_cast<BaySickSynthProcessor*>(proc))  { bss->apvts.replaceStateKeepingUndoHistory(vt); return; }
     if (auto* bsp = dynamic_cast<BaySickPlayerProcessor*>(proc))    { bsp->apvts.replaceStateKeepingUndoHistory(vt); return; }
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceStateKeepingUndoHistory(vt); return; }
+    if (auto* h   = dynamic_cast<BaySickSolsticeProcessor*>(proc))      { h  ->apvts.replaceStateKeepingUndoHistory(vt); return; }
 }
 
 // G-6 (2026-04-29): rewrite the binary state's PARAM ids so the source
@@ -388,7 +388,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdDelete    = 99;
     // Replace Engine submenu (Jeff, 2026-08-16) - 60 + i indexes kLayerEngines.
     constexpr int kIdReplaceBase = 60;
-    static const char* const kLayerEngines[] = { "Harmless", "BaySickSynth", "BaySickPlayer" };
+    static const char* const kLayerEngines[] = { "BaySickSolstice", "BaySickSynth", "BaySickPlayer" };
     constexpr int kNumLayerEngines = 3;
 
     juce::PopupMenu menu;
@@ -398,7 +398,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
     // Polyphony - engine-specific param.
     //   BaySickSynth → tk_lay_N_bss_voiceMode  (0=poly, 1=mono)
     //   BaySickPlayer → tk_lay_N_bsp_voiceCap   (1=mono, 8=poly)
-    //   Harmless     → polyphonic-only (n/a)
+    //   BaySickSolstice     → polyphonic-only (n/a)
     {
         bool isMono = false;
         bool canToggle = false;
@@ -474,7 +474,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
         const auto root = layerEngineRootPresetsDir (mEngineType);
         // 2026-04-26: BaySickPlayer presets include drum-sample subfolders
         // (Hip Hop Drums / EDM Drums) - Layer page is melodic context, so
-        // skip them here.  Other engines (BaySickSynth / Harmless) don't
+        // skip them here.  Other engines (BaySickSynth / BaySickSolstice) don't
         // have drum subfolders so the flag is a no-op for them.
         const bool skipDrums = (mEngineType == "BaySickPlayer");
         if (root.isDirectory() && ! mEngineType.isEmpty())
@@ -528,7 +528,7 @@ void LayersPage::showPageActionsMenu (juce::Component* anchor)
             // structural row; undo restores the old engine with its settings.
             if (r >= kIdReplaceBase && r < kIdReplaceBase + kNumLayerEngines)
             {
-                static const char* const kEngines[] = { "Harmless", "BaySickSynth", "BaySickPlayer" };
+                static const char* const kEngines[] = { "BaySickSolstice", "BaySickSynth", "BaySickPlayer" };
                 const juce::String name = kEngines[r - kIdReplaceBase];
                 lp->performChainSwapGesture ("Replace Engine",
                     [lp, name] { lp->selectEngineInternal (name); });
@@ -827,7 +827,7 @@ void LayersPage::savePatchAs()
             // gates on the engine's own root tag - so the file must be
             // written in the engine's native format, not a page-side wrapper.
             // Flat state XML for the synth engines (getStateInformation keeps
-            // Harmless's mod registry aboard); BaySickPlayer gets the nested
+            // BaySickSolstice's mod registry aboard); BaySickPlayer gets the nested
             // <BaySickPlayerState> + <Sample> pair every player reader
             // expects, mirroring BaySickPlayerEditor::savePreset.
             juce::MemoryBlock mb;
@@ -991,14 +991,14 @@ void LayersPage::valueTreeRedirected (juce::ValueTree& tree)
 
 void LayersPage::subscribeToEngineApvtsState()
 {
-    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.addListener (this);
+    if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>     (mEngineProcessor)) h->apvts.state.addListener (this);
     else if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor)) s->apvts.state.addListener (this);
     else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>  (mEngineProcessor)) v->apvts.state.addListener (this);
 }
 
 void LayersPage::unsubscribeFromEngineApvtsState()
 {
-    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.removeListener (this);
+    if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>     (mEngineProcessor)) h->apvts.state.removeListener (this);
     else if (auto* s = dynamic_cast<BaySickSynthProcessor*>(mEngineProcessor)) s->apvts.state.removeListener (this);
     else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>  (mEngineProcessor)) v->apvts.state.removeListener (this);
 }
@@ -1009,7 +1009,7 @@ void LayersPage::unsubscribeFromEngineApvtsState()
 // ─────────────────────────────────────────────────────────────────────────────
 static juce::String layerEnginePrefixOf (juce::AudioProcessor* p)
 {
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>     (p)) return h  ->getParamPrefix();
+    if (auto* h   = dynamic_cast<BaySickSolsticeProcessor*>     (p)) return h  ->getParamPrefix();
     if (auto* s   = dynamic_cast<BaySickSynthProcessor*> (p)) return s  ->getParamPrefix();
     if (auto* v   = dynamic_cast<BaySickPlayerProcessor*>   (p)) return v  ->getParamPrefix();
     return {};

@@ -49,7 +49,7 @@ public:
     std::function<void(TabType)>                      onAddTabRequest;   // Layers/Bass add
     // QA-ModelShell TS4 (Jeff spec 2026-07-28): the "+" menu lists ENGINES, not
     // page types -- the engine you pick decides which tab it lands in.  Engines
-    // that can live in more than one tab (BaySickPlayer, Harmless, BaySickSynth)
+    // that can live in more than one tab (BaySickPlayer, BaySickSolstice, BaySickSynth)
     // get a side submenu to choose.  This fires with the resolved pair.
     std::function<void(TabType, const juce::String& engineName)> onAddEngineRequest;
     std::function<void(TabType, int subPageIndex)>    onSubPageSelected; // Effects/Builder

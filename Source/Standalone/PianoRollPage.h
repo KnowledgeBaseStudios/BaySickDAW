@@ -61,7 +61,7 @@ struct PianoRollConnection
     juce::String                              displayName;
     // QA-D STATE-02 follow-on: per-CLAUDE.md 5F-6 design, the piano-roll
     // context label shows "{tabName} - {engineType}" (e.g. "Layer 1 -
-    // Harmless", "Bass 2 - (no engine)").  engineType empty -> "(no engine)"
+    // BaySickSolstice", "Bass 2 - (no engine)").  engineType empty -> "(no engine)"
     // is substituted.  StandaloneEditor populates engineType at registration
     // (if engine already picked) and refreshes via PianoRollPage::setEngineType
     // when the user picks/swaps an engine on the Layer/Bass/Drum tab.

@@ -1,6 +1,6 @@
 #include "EngineRig.h"
 #include "PluginProcessor.h"
-#include "Harmless/HarmlessProcessor.h"
+#include "BaySickSolstice/BaySickSolsticeProcessor.h"
 #include "BaySickPlayer/BaySickPlayerProcessor.h"
 #include "BaySickSynth/BaySickSynthProcessor.h"
 #include "BaySickBass/BaySickBassProcessor.h"
@@ -48,7 +48,7 @@ int EngineRig::capacityOf (TabKind k) noexcept
 juce::AudioProcessorValueTreeState* EngineRig::apvtsOf (juce::AudioProcessor* eng) noexcept
 {
     if (eng == nullptr) return nullptr;
-    if (auto* p = dynamic_cast<HarmlessProcessor*>      (eng)) return &p->apvts;
+    if (auto* p = dynamic_cast<BaySickSolsticeProcessor*>      (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickPlayerProcessor*>    (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickSynthProcessor*>  (eng)) return &p->apvts;
     if (auto* p = dynamic_cast<BaySickBassProcessor*>   (eng)) return &p->apvts;
@@ -559,7 +559,7 @@ juce::AudioProcessor* EngineRig::createEngineFor (EngineTab& tab, const juce::St
             // device path was the only prepare these ever needed, and that is
             // what hid the missing re-prepare in registerWithProcessor.)
             std::unique_ptr<juce::AudioProcessor> eng;
-            if      (engineType == "Harmless")      { auto e = std::make_unique<HarmlessProcessor>     (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
+            if      (engineType == "BaySickSolstice")      { auto e = std::make_unique<BaySickSolsticeProcessor>     (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             else if (engineType == "BaySickPlayer") { auto e = std::make_unique<BaySickPlayerProcessor>   (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             else if (engineType == "BaySickSynth")  { auto e = std::make_unique<BaySickSynthProcessor> (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }
             else if (engineType == "BaySickBass")   { auto e = std::make_unique<BaySickBassProcessor>  (trackId, &mUndoManager); e->apvts.undoOwnerTag = rigTag; eng = std::move (e); }

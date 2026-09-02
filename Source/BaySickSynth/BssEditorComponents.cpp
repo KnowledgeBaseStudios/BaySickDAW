@@ -63,7 +63,7 @@ void BssLedRadio::paint (juce::Graphics& g)
 
     const int selectedIdx = mSelected.load();
 
-    // Grid mode (2026-04-22): Harmless-VEL-style buttons spread across the top
+    // Grid mode (2026-04-22): BaySickSolstice-VEL-style buttons spread across the top
     // of the component in a single row (or rows for multi-row grids), with
     // space between each button. Height fixed (~20 px), width fills evenly.
     if (mRows > 0)

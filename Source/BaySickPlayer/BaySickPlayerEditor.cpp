@@ -223,7 +223,7 @@ BaySickPlayerEditor::BaySickPlayerEditor (BaySickPlayerProcessor& p)
     // ── componentID pass (2026-04-21) ─────────────────────────────────────────
     //   Each attached slider gets its APVTS paramID as its componentID so that
     //   GlobalAutoRightClick + VKnobAutomation resolve the right-click Automate
-    //   and Type-in-value menus. Pattern mirrors Harmless (see HarmlessEditor:387).
+    //   and Type-in-value menus. Pattern mirrors BaySickSolstice (see BaySickSolsticeEditor:387).
     // QA-ApvtsAutomation: the stamped id is also the automation registry key.
     // QA-ModelShell TS3: the applicator behind that key is registered model-side
     // when the engine is created, so this pass stamps and nothing else.

@@ -240,7 +240,7 @@ public:
     void applyPendingRackStates();
 
     // P1+P2 persistence (2026-04-24): StandaloneEditor owns tab + engine state
-    // (Harmless / BaySickSynth / BaySickPlayer / BaySickBass / BaySickDrums are
+    // (BaySickSolstice / BaySickSynth / BaySickPlayer / BaySickBass / BaySickDrums are
     // all per-page engine processors with their OWN apvts, not the main
     // BaySickDAWProcessor::apvts).  These callbacks let serializeProject /
     // deserializeProject delegate that chunk of persistence up to the editor.
@@ -696,8 +696,8 @@ public:
 
     // ── Lazy APVTS registration (Phase 2+) ───────────────────────────────────
     // Called when a Layers/Bass/Drums page is created or destroyed.
-    // trackId format: "tk_{index}_{engine}" e.g. "tk_0_Harmless", "tk_2_BaySickBass"
-    // Engine types: "Harmless", "BaySickPlayer", "BaySickSynth", "BaySickBass", "BaySickDrums"
+    // trackId format: "tk_{index}_{engine}" e.g. "tk_0_BaySickSolstice", "tk_2_BaySickBass"
+    // Engine types: "BaySickSolstice", "BaySickPlayer", "BaySickSynth", "BaySickBass", "BaySickDrums"
     // QA-ApvtsAutomation (2026-07-25): registerParamsForTrack /
     // unregisterParamsForTrack / isTrackRegistered removed -- they registered
     // only dead param families (see PluginProcessor.cpp).

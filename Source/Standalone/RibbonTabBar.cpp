@@ -617,9 +617,9 @@ juce::PopupMenu RibbonTabBar::buildAddMenu()
 
     {
         juce::PopupMenu sub;
-        sub.addItem (pushChoice (TabType::Layers, "Harmless"), "Layers");
-        sub.addItem (pushChoice (TabType::Bass,   "Harmless"), "Bass");
-        m.addSubMenu ("Harmless", sub);
+        sub.addItem (pushChoice (TabType::Layers, "BaySickSolstice"), "Layers");
+        sub.addItem (pushChoice (TabType::Bass,   "BaySickSolstice"), "Bass");
+        m.addSubMenu ("BaySickSolstice", sub);
     }
 
     // Flat row: with the drum route under BaySickDrums, Layers is the only
@@ -844,13 +844,13 @@ void RibbonTabBar::showInstanceDropdown(TabType type, juce::Rectangle<int> tabBo
 
     if (type == TabType::Layers)
     {
-        addEngineRow ("Harmless",      type, "+ Add Harmless");
+        addEngineRow ("BaySickSolstice",      type, "+ Add BaySickSolstice");
         addEngineRow ("BaySickPlayer", type, "+ Add BaySickPlayer");
         addEngineRow ("BaySickSynth",  type, "+ Add BaySickSynth");
     }
     else if (type == TabType::Bass)
     {
-        addEngineRow ("Harmless",      type, "+ Add Harmless");
+        addEngineRow ("BaySickSolstice",      type, "+ Add BaySickSolstice");
         addEngineRow ("BaySickPlayer", type, "+ Add BaySickPlayer");
         addEngineRow ("BaySickBass",   type, "+ Add BaySickBass");
     }

@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BaySickTemplate name="Vintage Soul" version="1">
   <Kit path="Vintage Soul/Vintage Soul Full.xml"/>
-  <Layer slot="0" engine="Harmless" presetPath="Harmless/Neo-Soul/Vintage Wurli.xml" locked="1"/>
-  <Layer slot="1" engine="Harmless" presetPath="Harmless/Neo-Soul/Hammond B3 Smooth.xml" locked="1"/>
-  <Layer slot="2" engine="Harmless" presetPath="Harmless/Neo-Soul/Soulful Rhodes.xml" locked="1"/>
-  <Layer slot="3" engine="Harmless" presetPath="Harmless/Neo-Soul/Mellotron Pad.xml" locked="1"/>
-  <Layer slot="4" engine="Harmless" presetPath="Harmless/Neo-Soul/Theremin Lead.xml" locked="1"/>
-  <Layer slot="5" engine="Harmless" presetPath="Harmless/Neo-Soul/Harpsichord Stab.xml" locked="1"/>
+  <Layer slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Vintage Wurli.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Hammond B3 Smooth.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Soulful Rhodes.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Mellotron Pad.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Theremin Lead.xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Harpsichord Stab.xml" locked="1"/>
   <Layer slot="6" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trumpet (Sustained).xml" locked="1"/>
   <Layer slot="7" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/Trombone (Sustained).xml" locked="1"/>
-  <Bass slot="0" engine="Harmless" presetPath="Harmless/Neo-Soul/Walking Synth Bass.xml" locked="1"/>
-  <Bass slot="1" engine="Harmless" presetPath="Harmless/Neo-Soul/Vintage Round Bass.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Walking Synth Bass.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Neo-Soul/Vintage Round Bass.xml" locked="1"/>
   <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Picked Bass.xml" locked="1"/>
   <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Slap &amp; Electric/Upright Jazz Sub.xml" locked="1"/>
 </BaySickTemplate>

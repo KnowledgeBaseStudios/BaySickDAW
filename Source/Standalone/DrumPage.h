@@ -38,7 +38,7 @@ struct KitDrumInfo
     juce::Colour color;                  // drum's accent color (for active-row border)
 };
 //
-// Engine choices: BaySickPlayer | BaySickSynth | BaySickBass | Harmless
+// Engine choices: BaySickPlayer | BaySickSynth | BaySickBass | BaySickSolstice
 // Per-page APVTS prefix: drm_{N}.  Engine InsertNode: BaySickGraph::InsertKind::Drum
 // at index pageIndex (mixer_drum_<N>_*).
 // ─────────────────────────────────────────────────────────────────────────────

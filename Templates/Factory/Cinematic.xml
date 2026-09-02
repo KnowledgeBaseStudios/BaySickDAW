@@ -5,12 +5,12 @@
   <Layer slot="1" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Cello Ens (Sustained).xml" locked="1"/>
   <Layer slot="2" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Viola Ens (Sustained).xml" locked="1"/>
   <Layer slot="3" engine="BaySickPlayer" presetPath="BaySickPlayer/Brass/French Horn (Sustained).xml" locked="1"/>
-  <Layer slot="4" engine="Harmless" presetPath="Harmless/Cinematic &amp; Drones/Tension Riser.xml" locked="1"/>
-  <Layer slot="5" engine="Harmless" presetPath="Harmless/Cinematic &amp; Drones/Sci-Fi Wash.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSolstice" presetPath="BaySickSolstice/Cinematic &amp; Drones/Tension Riser.xml" locked="1"/>
+  <Layer slot="5" engine="BaySickSolstice" presetPath="BaySickSolstice/Cinematic &amp; Drones/Sci-Fi Wash.xml" locked="1"/>
   <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Cinematic &amp; Drones/Tension Drone.xml" locked="1"/>
-  <Layer slot="7" engine="Harmless" presetPath="Harmless/Pads &amp; Atmospheres/Glass Shimmer Pad.xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSolstice" presetPath="BaySickSolstice/Pads &amp; Atmospheres/Glass Shimmer Pad.xml" locked="1"/>
   <Bass slot="0" engine="BaySickPlayer" presetPath="BaySickPlayer/Strings/Contrabass (Sustained).xml" locked="1"/>
   <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Cinema Rumble Sub.xml" locked="1"/>
-  <Bass slot="2" engine="Harmless" presetPath="Harmless/Psybient/Deep Drone Bass.xml" locked="1"/>
-  <Bass slot="3" engine="Harmless" presetPath="Harmless/Psybient/Sub Hum.xml" locked="1"/>
+  <Bass slot="2" engine="BaySickSolstice" presetPath="BaySickSolstice/Psybient/Deep Drone Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Psybient/Sub Hum.xml" locked="1"/>
 </BaySickTemplate>

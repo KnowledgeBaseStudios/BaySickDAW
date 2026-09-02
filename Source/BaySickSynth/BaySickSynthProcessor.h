@@ -62,7 +62,7 @@ public:
     void auditionNote    (int midiNote) { mAuditionNote.store    (midiNote); }
     void auditionNoteOn  (int midiNote) { mAuditionHoldOn.store  (midiNote); }
     // Stuck-note fix: offs accumulate (mask) so a fast drag can't drop one --
-    // full rationale at HarmlessProcessor::auditionNoteOff.
+    // full rationale at BaySickSolsticeProcessor::auditionNoteOff.
     void auditionNoteOff (int midiNote)
     {
         if (midiNote >= 0 && midiNote <= 127)

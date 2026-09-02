@@ -37,7 +37,7 @@
 #include "PatternColorPicker.h"
 #include "../BaySickSynth/BaySickSynthProcessor.h"   // D2 Batch 4: kit audition dispatch
 #include "../BaySickPlayer/BaySickPlayerProcessor.h"       // D2 Batch 4: kit audition dispatch
-#include "../Harmless/HarmlessProcessor.h"           // step 2 commit 2: layer/bass register helpers
+#include "../BaySickSolstice/BaySickSolsticeProcessor.h"           // step 2 commit 2: layer/bass register helpers
 #include "../BaySickBass/BaySickBassProcessor.h"     // step 2 commit 2: bass register helper
 #include "../BaySickRustyDrums/BaySickRustyDrumsProcessor.h"  // J-3: kit loader verify
 #include "BaySickRustyDrumsPage.h"                            // J-6: dedicated player page
@@ -1177,7 +1177,7 @@ StandaloneEditor::StandaloneEditor(BaySickDAWProcessor& p, StandalonePlayHead& p
             mTransport->setPlayState(false, true);
         }
         // 2026-04-30: flush all-notes-off on Pause.  Was Stop-only - long-tail
-        // notes (Harmless pads, big reverbs) would keep ringing after Pause
+        // notes (BaySickSolstice pads, big reverbs) would keep ringing after Pause
         // until the user hits Stop.  Same broadcast Stop uses, just promoted
         // up so the user never hears stuck voices regardless of which
         // halting button they pressed.
@@ -4378,7 +4378,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
     //   (must match the 3-char trackId tags in each engine ctor).
     auto engineLabelFromTag = [](const juce::String& tag) -> juce::String
     {
-        if (tag == "harm") return "Harmless";
+        if (tag == "bso") return "BaySickSolstice";
         if (tag == "bsp")  return "BaySickPlayer";
         if (tag == "bss")  return "BaySickSynth";
         if (tag == "bsb")  return "BaySickBass";
@@ -4668,7 +4668,7 @@ juce::String StandaloneEditor::resolveAutomationDisplayName(const juce::String& 
 
     // 2026-04-21: Layer / Bass engine instance params (no effect-slot form).
     //   Format: tk_{pagePrefix}_{N}_{engineTag}_{param}
-    //   e.g.    tk_lay_0_harm_flt_cutoff   -> "Pg Layer 1 - Harmless - Flt Cutoff"
+    //   e.g.    tk_lay_0_bso_flt_cutoff   -> "Pg Layer 1 - BaySickSolstice - Flt Cutoff"
     //           tk_bas_2_bss_osc_wave      -> "Pg Bass 3 - BaySickSynth - Osc Wave"
     auto tryEngineOnPage = [&](const juce::String& pagePrefix,
                                 const juce::String& defaultLabel) -> juce::String
@@ -4904,7 +4904,7 @@ juce::String StandaloneEditor::tabNameOfPage (const PageEntry& e) const
 }
 
 // 2026-04-21: auto-suffix duplicate tab names so automation-menu labels don't
-// become ambiguous ("Drums - Harmless - Cutoff" twice).  Uniqueness is judged
+// become ambiguous ("Drums - BaySickSolstice - Cutoff" twice).  Uniqueness is judged
 // across EVERY renameable family, not just the three the old inline version
 // cast: a duplicated Clips name produces two identical "Mx <name> - Level"
 // lanes exactly the same way a duplicated Layer name does.
@@ -8287,17 +8287,17 @@ void StandaloneEditor::registerLayerPianoRoll (LayersPage* lp)
     auto cast = [lp]() { return lp->getEngineProcessor(); };
     conn.auditionMomentary = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNote(n);
-        else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNote(n);
+        else if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>(cast())) h->auditionNote(n);
         else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNote(n);
     };
     conn.auditionOn = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNoteOn(n);
-        else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOn(n);
+        else if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>(cast())) h->auditionNoteOn(n);
         else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOn(n);
     };
     conn.auditionOff = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickSynthProcessor*>(cast())) s->auditionNoteOff(n);
-        else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOff(n);
+        else if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>(cast())) h->auditionNoteOff(n);
         else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
     // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
@@ -8332,19 +8332,19 @@ void StandaloneEditor::registerBassPianoRoll (BassPage* bp)
     conn.auditionMomentary = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickBassProcessor*>(cast())) s->auditionNote(n);
         else if (auto* y = dynamic_cast<BaySickSynthProcessor*>(cast())) y->auditionNote(n);
-        else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNote(n);
+        else if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>(cast())) h->auditionNote(n);
         else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNote(n);
     };
     conn.auditionOn = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickBassProcessor*>(cast())) s->auditionNoteOn(n);
         else if (auto* y = dynamic_cast<BaySickSynthProcessor*>(cast())) y->auditionNoteOn(n);
-        else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOn(n);
+        else if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>(cast())) h->auditionNoteOn(n);
         else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOn(n);
     };
     conn.auditionOff = [cast](int n) {
         if (auto* s = dynamic_cast<BaySickBassProcessor*>(cast())) s->auditionNoteOff(n);
         else if (auto* y = dynamic_cast<BaySickSynthProcessor*>(cast())) y->auditionNoteOff(n);
-        else if (auto* h = dynamic_cast<HarmlessProcessor*>(cast())) h->auditionNoteOff(n);
+        else if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>(cast())) h->auditionNoteOff(n);
         else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>(cast())) v->auditionNoteOff(n);
     };
     // QA-SfzGroup Sub-Q (2026-05-27): BaySickPlayer engines hosting an SFZ
@@ -9628,7 +9628,7 @@ void StandaloneEditor::stopPlayback()
     mPlayHead.seekTo(seekBeat);
 
     // Flush every engine's active voices (CC 123 All-Notes-Off + pending note-offs).
-    // This is the only flush that reaches Harmless / BaySick / BaySickPlayer, which
+    // This is the only flush that reaches BaySickSolstice / BaySick / BaySickPlayer, which
     // is why song-mode used to leave stuck notes after Stop.
     mProcessor.mFlushAllNotes.store(true, std::memory_order_release);
     mTransport->setPlayState(false, false);
@@ -11057,7 +11057,7 @@ void StandaloneEditor::wireEngineDirtyHook (juce::AudioProcessor* eng)
     auto hook = [safeThis] {
         if (safeThis && safeThis->mProjectManager) safeThis->mProjectManager->markDirty();
     };
-    if (auto* p = dynamic_cast<HarmlessProcessor*>           (eng)) { p->setOnAnyStateChange (hook); return; }
+    if (auto* p = dynamic_cast<BaySickSolsticeProcessor*>           (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickSynthProcessor*>       (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickBassProcessor*>        (eng)) { p->setOnAnyStateChange (hook); return; }
     if (auto* p = dynamic_cast<BaySickPlayerProcessor*>         (eng)) { p->setOnAnyStateChange (hook); return; }
@@ -14768,7 +14768,7 @@ void StandaloneEditor::doFileRestoreBackup()
 // project root.  Each record carries: type, pageIndex, tab name,
 // engine type (empty if the user never picked one), and a base64 blob of the
 // engine processor's own getStateInformation (so ALL engine knobs /
-// modulations / sample paths / Harmless partials come back verbatim).
+// modulations / sample paths / BaySickSolstice partials come back verbatim).
 // ─────────────────────────────────────────────────────────────────────────────
 // QA-ProjectSave Task 2 (2026-07-26): the structural half of the UI state --
 // which tabs exist, with what engines and state, and how the mixer strips are
@@ -15605,9 +15605,9 @@ void StandaloneEditor::registerModelEngineAutomation (EngineTab& tab)
         case TabKind::Drums:
         case TabKind::Clips:
             registerParamsOf (Target::MainEngine, tab.engine.get(), {});
-            // BLU-344: Harmless also carries non-parameter mod-editor targets.
+            // BLU-344: BaySickSolstice also carries non-parameter mod-editor targets.
             // No-op for the other engine types.
-            registerHarmlessModAutomation (kind, idx);
+            registerBaySickSolsticeModAutomation (kind, idx);
             break;
 
         case TabKind::Vox:
@@ -15701,23 +15701,23 @@ void StandaloneEditor::registerSfizzEngineAutomation (BaySickDAWProcessor::Sfizz
     }
 }
 
-void StandaloneEditor::registerHarmlessModAutomation (TabKind kind, int pageIndex)
+void StandaloneEditor::registerBaySickSolsticeModAutomation (TabKind kind, int pageIndex)
 {
     auto* tab = mProcessor.engineRig().findTab (kind, pageIndex);
     if (tab == nullptr) return;
-    auto* harmless = dynamic_cast<HarmlessProcessor*> (tab->engine.get());
-    if (harmless == nullptr) return;   // Harmless-only feature
+    auto* solstice = dynamic_cast<BaySickSolsticeProcessor*> (tab->engine.get());
+    if (solstice == nullptr) return;   // BaySickSolstice-only feature
 
     // Resolve the ModSourceState fresh on every tick.  The registry's target
     // pointers are stable for its lifetime, but the ENGINE is not -- a tab can
-    // swap Harmless out for BaySickSynth and back -- so the walk starts from the
+    // swap BaySickSolstice out for BaySickSynth and back -- so the walk starts from the
     // rig, exactly like the parameter applicators above.
     auto resolveSource = [this, kind, pageIndex] (const juce::String& targetId, int srcIdx)
-                         -> std::pair<ModSourceState*, HarmlessModRegistry*>
+                         -> std::pair<ModSourceState*, BaySickSolsticeModRegistry*>
     {
         auto* t = mProcessor.engineRig().findTab (kind, pageIndex);
         if (t == nullptr) return { nullptr, nullptr };
-        auto* h = dynamic_cast<HarmlessProcessor*> (t->engine.get());
+        auto* h = dynamic_cast<BaySickSolsticeProcessor*> (t->engine.get());
         if (h == nullptr) return { nullptr, nullptr };
         auto& reg = h->getModRegistry();
         auto* tgt = reg.findTarget (targetId);
@@ -15726,7 +15726,7 @@ void StandaloneEditor::registerHarmlessModAutomation (TabKind kind, int pageInde
         return { &tgt->sources[(size_t) srcIdx], &reg };
     };
 
-    for (const auto& tgtPtr : harmless->getModRegistry().getAllTargets())
+    for (const auto& tgtPtr : solstice->getModRegistry().getAllTargets())
     {
         if (tgtPtr == nullptr) continue;
         const juce::String targetId = tgtPtr->paramId;
@@ -15768,10 +15768,10 @@ void StandaloneEditor::registerHarmlessModAutomation (TabKind kind, int pageInde
                         if (src == nullptr) return;
                         // Same 13 discrete steps the knob offers, via the same
                         // table -- a lane cannot land between them.
-                        const int last = HarmlessModLength::kNumSteps - 1;
+                        const int last = BaySickSolsticeModLength::kNumSteps - 1;
                         const int i = juce::jlimit (0, last,
                             (int) std::lround ((double) juce::jlimit (0.0f, 1.0f, v01) * last));
-                        src->length = HarmlessModLength::kBeats[i];
+                        src->length = BaySickSolsticeModLength::kBeats[i];
                         reg->publishSnapshot();
                     });
             if (VKnobAutomation::sOnRegisterReader)
@@ -15781,9 +15781,9 @@ void StandaloneEditor::registerHarmlessModAutomation (TabKind kind, int pageInde
                         auto [src, reg] = resolveSource (targetId, s);
                         juce::ignoreUnused (reg);
                         if (src == nullptr) return 0.5f;
-                        const int last = HarmlessModLength::kNumSteps - 1;
+                        const int last = BaySickSolsticeModLength::kNumSteps - 1;
                         return last > 0
-                             ? (float) HarmlessModLength::nearestIndex (src->length) / (float) last
+                             ? (float) BaySickSolsticeModLength::nearestIndex (src->length) / (float) last
                              : 0.0f;
                     });
         }
@@ -15910,8 +15910,8 @@ void StandaloneEditor::registerPluginTabAutomation (int pageIndex)
 // the whole point of the pass -- so these are HARD minimums (Jeff's ruling:
 // option B, grow-only) in FULL WINDOW dims, chrome included.
 //
-// KEYED BY PLAYER TYPE, NOT TAB TYPE (Jeff, 2026-08-04): a Harmless on Layers
-// and a Harmless on Bass are the same window, so the engine decides -- never
+// KEYED BY PLAYER TYPE, NOT TAB TYPE (Jeff, 2026-08-04): a BaySickSolstice on Layers
+// and a BaySickSolstice on Bass are the same window, so the engine decides -- never
 // the tab it happens to sit in.  Drums swaps its engine live, which is why the
 // floor is re-applied on every page-show rather than only at window creation.
 std::optional<juce::Point<int>> StandaloneEditor::defaultSizeFor (const PageEntry& entry) const
@@ -15926,14 +15926,14 @@ std::optional<juce::Point<int>> StandaloneEditor::defaultSizeFor (const PageEntr
     // BaySickPlayer's REAL floor, so an unresolved window was indistinguishable
     // from a legitimately small one and nothing downstream knew there was
     // anything left to correct.  It was also the SMALLEST of the three, so the
-    // failure always erred toward too-small: a Harmless window framed before
+    // failure always erred toward too-small: a BaySickSolstice window framed before
     // its engine bound kept a 490-wide floor and would not lock at 1047.
     // Saying "I don't know" is the whole fix; refreshWindowDefaultFor answers it
     // later, when the engine actually exists.
     auto engineFloor = [] (const juce::String& title) -> std::optional<P>
     {
         if (title.isEmpty())                  return std::nullopt;   // not bound yet
-        if (title.contains ("Harmless"))      return P { 1038, 554 };
+        if (title.contains ("BaySickSolstice"))      return P { 1038, 554 };
         // Jeff, 2026-08-04: BaySickSynth and BaySickBass share one minimum.
         if (title.contains ("BaySickSynth")
             || title.contains ("BaySickBass"))return P { 519,  351 };

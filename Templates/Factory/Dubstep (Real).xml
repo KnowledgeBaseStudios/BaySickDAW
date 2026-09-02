@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BaySickTemplate name="Dubstep (Real)" version="1">
   <Kit path="Dubstep (Real)/Dubstep (Real) Full.xml"/>
-  <Layer slot="0" engine="Harmless" presetPath="Harmless/Bass Music/Aggressive Saw.xml" locked="1"/>
-  <Layer slot="1" engine="Harmless" presetPath="Harmless/Bass Music/Resonant Lead.xml" locked="1"/>
-  <Layer slot="2" engine="Harmless" presetPath="Harmless/Bass Music/Vocal Chop Pad.xml" locked="1"/>
-  <Layer slot="3" engine="Harmless" presetPath="Harmless/Bass Music/Hyper Lead.xml" locked="1"/>
+  <Layer slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Bass Music/Aggressive Saw.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Bass Music/Resonant Lead.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSolstice" presetPath="BaySickSolstice/Bass Music/Vocal Chop Pad.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Bass Music/Hyper Lead.xml" locked="1"/>
   <Layer slot="4" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/Glitch Lead.xml" locked="1"/>
   <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/Lasersaw.xml" locked="1"/>
   <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Cinematic &amp; Drones/Sub Drop FX.xml" locked="1"/>
-  <Layer slot="7" engine="Harmless" presetPath="Harmless/Cinematic &amp; Drones/Riser FX.xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSolstice" presetPath="BaySickSolstice/Cinematic &amp; Drones/Riser FX.xml" locked="1"/>
   <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Dubstep &amp; Wobble/Classic Wobble.xml" locked="1"/>
   <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Dubstep &amp; Wobble/Heavy Formant Wub.xml" locked="1"/>
-  <Bass slot="2" engine="Harmless" presetPath="Harmless/Bass Music/Skrillex Reese.xml" locked="1"/>
-  <Bass slot="3" engine="Harmless" presetPath="Harmless/Bass Music/FM Growl.xml" locked="1"/>
+  <Bass slot="2" engine="BaySickSolstice" presetPath="BaySickSolstice/Bass Music/Skrillex Reese.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Bass Music/FM Growl.xml" locked="1"/>
 </BaySickTemplate>

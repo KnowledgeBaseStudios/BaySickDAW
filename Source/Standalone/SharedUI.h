@@ -930,7 +930,7 @@ namespace VKnobAutomation
     extern std::function<juce::String(const juce::String& paramId)> sResolveMenuLabel;
 
     // 2026-04-20 (S4 Batch 4): "Modulate envelope..." right-click item for
-    // engines that expose a mod matrix (Harmless). When non-null AND returns
+    // engines that expose a mod matrix (BaySickSolstice). When non-null AND returns
     // true for the given paramId, GlobalAutoRightClick adds a third menu
     // option that calls sOnModulateEnvelope(paramId) on click.
     // Multi-instance caveat: last-registered wins. A per-editor registry is

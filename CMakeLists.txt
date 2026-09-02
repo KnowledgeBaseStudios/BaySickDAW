@@ -176,19 +176,19 @@ set(VIBESYNTH_DSP_SOURCES
     Source/ProjectManager.cpp
     Source/MidiRecorder.cpp
     Source/AudioFileRecorder.cpp
-    # Phase 2A — Harmless (Additive Synth) — Alpha + Beta + Final sessions
-    Source/Harmless/SpectralModules.cpp
-    Source/Harmless/HarmonicEngine.cpp
-    Source/Harmless/AdditiveVoice.cpp
-    Source/Harmless/HarmlessSynth.cpp
-    Source/Harmless/HarmlessProcessor.cpp
-    Source/Harmless/HarmlessEditor.cpp
-    Source/Harmless/HarmlessFilterRow.cpp
-    Source/Harmless/HarmlessRoutingMatrix.cpp
-    Source/Harmless/HarmlessXYZPad.cpp
-    Source/Harmless/HarmlessModEditor.cpp
-    Source/Harmless/HarmlessModRegistry.cpp
-    Source/Harmless/VisualizerScreen.cpp
+    # Phase 2A — BaySickSolstice (Additive Synth) — Alpha + Beta + Final sessions
+    Source/BaySickSolstice/SpectralModules.cpp
+    Source/BaySickSolstice/HarmonicEngine.cpp
+    Source/BaySickSolstice/AdditiveVoice.cpp
+    Source/BaySickSolstice/BaySickSolsticeSynth.cpp
+    Source/BaySickSolstice/BaySickSolsticeProcessor.cpp
+    Source/BaySickSolstice/BaySickSolsticeEditor.cpp
+    Source/BaySickSolstice/BaySickSolsticeFilterRow.cpp
+    Source/BaySickSolstice/BaySickSolsticeRoutingMatrix.cpp
+    Source/BaySickSolstice/BaySickSolsticeXYZPad.cpp
+    Source/BaySickSolstice/BaySickSolsticeModEditor.cpp
+    Source/BaySickSolstice/BaySickSolsticeModRegistry.cpp
+    Source/BaySickSolstice/VisualizerScreen.cpp
     # Phase 2B — BaySickPlayer (Disk Streaming Sampler) — DSP + Processor only
     Source/BaySickPlayer/BaySickPlayerDSP.cpp
     Source/BaySickPlayer/BaySickPlayerProcessor.cpp
@@ -486,7 +486,7 @@ target_compile_definitions(BaySickDAW
     PRIVATE JUCE_MODULE_AVAILABLE_juce_audio_plugin_client=1
 )
 
-target_include_directories(BaySickDAW PRIVATE Source Source/Engine Source/Engine/Tasks Source/Harmless Source/BaySickPlayer Source/BaySickSynth Source/BaySickBass
+target_include_directories(BaySickDAW PRIVATE Source Source/Engine Source/Engine/Tasks Source/BaySickSolstice Source/BaySickPlayer Source/BaySickSynth Source/BaySickBass
     # moodycamel::ConcurrentQueue — vendored single-header MPMC queue for the
     # multi-threaded render engine. Drop concurrentqueue.h into this folder.
     "${CMAKE_CURRENT_SOURCE_DIR}/libs/concurrentqueue"
@@ -700,7 +700,7 @@ target_compile_definitions(BaySickDAWStandalone
 
 target_include_directories(BaySickDAWStandalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/webview2/include")
 
-target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/Harmless Source/BaySickPlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn Source/SlideSampler
+target_include_directories(BaySickDAWStandalone PRIVATE Source Source/Engine Source/Engine/Tasks Source/Standalone Source/BaySickSolstice Source/BaySickPlayer Source/BaySickSynth Source/BaySickBass Source/BaySickNAMIR Source/BaySickPedals Source/BaySickRustyDrums Source/BaySickGuitars Source/BaySickBasses Source/BaySickVocal Source/Clips Source/Vox Source/Inst Source/MidiLearn Source/SlideSampler
     # Rubber Band Library -- public headers (rubberband/*.h) so consumer code can
     # #include <rubberband/RubberBandLiveShifter.h>.  The compiled library links
     # via BaySickRubberBand (QA-Fe); this include is also propagated by that lib.

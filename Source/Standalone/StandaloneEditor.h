@@ -712,7 +712,7 @@ private:
     void registerBaySickRustyDrumsPianoRoll();   // J-7a (2026-05-03)
 
     // 2026-05-05 dirty-flag wiring helper.  Each per-engine processor
-    // (Harmless / BaySickSynth / BaySickBass / BaySickPlayer / BaySickGuitars /
+    // (BaySickSolstice / BaySickSynth / BaySickBass / BaySickPlayer / BaySickGuitars /
     // BaySickRustyDrums / BaySickPedals / BaySickNAMIR / BaySickVocal) owns
     // its own APVTS that's invisible to the main PluginProcessor's project-
     // dirty listener.  This helper dynamic_casts to each known type and
@@ -1402,15 +1402,15 @@ private:
     // PluginsPage::onParamListChanged; idempotent.
     void registerPluginTabAutomation (int pageIndex);
 
-    // BLU-344 (QA-ModelShell TS3): the Harmless mod editor's DEPTH and LENGTH.
+    // BLU-344 (QA-ModelShell TS3): the BaySickSolstice mod editor's DEPTH and LENGTH.
     // These are the batch's only automation targets that are neither an APVTS
-    // parameter nor a rack DSP -- they are fields on HarmlessModRegistry,
+    // parameter nor a rack DSP -- they are fields on BaySickSolsticeModRegistry,
     // addressed by (target paramId, source).  Ids are
     // "<targetParamId>_mod<sourceIdx>_depth" / "_length"; no APVTS param can
     // collide with that shape.  Registered for every (target x source) the
     // editor can reach, so a lane works whichever pair the user was on when
     // they created it.
-    void registerHarmlessModAutomation (TabKind kind, int pageIndex);
+    void registerBaySickSolsticeModAutomation (TabKind kind, int pageIndex);
 
     // QA-ModelShell TS3 fix (2026-07-28): the sfizz trio's lanes.  These
     // engines are processor-owned, not rig-owned, so TS1's model hook never

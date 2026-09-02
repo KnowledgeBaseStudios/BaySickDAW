@@ -5,12 +5,12 @@
   <Layer slot="1" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Juno Warm Pad.xml" locked="1"/>
   <Layer slot="2" engine="BaySickSynth" presetPath="BaySickSynth/Leads &amp; Solos/Acid Lead.xml" locked="1"/>
   <Layer slot="3" engine="BaySickSynth" presetPath="BaySickSynth/Plucks &amp; Mallets/Classic Trance Pluck.xml" locked="1"/>
-  <Layer slot="4" engine="Harmless" presetPath="Harmless/Synth-Pop/Glassy Stab.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/Glassy Stab.xml" locked="1"/>
   <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Arp &amp; Sequencer Tones/Trance Gate Arp.xml" locked="1"/>
-  <Layer slot="6" engine="Harmless" presetPath="Harmless/Brass &amp; Strings/Strings Ensemble.xml" locked="1"/>
-  <Layer slot="7" engine="Harmless" presetPath="Harmless/Pads &amp; Atmospheres/Sweep Pad.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickSolstice" presetPath="BaySickSolstice/Brass &amp; Strings/Strings Ensemble.xml" locked="1"/>
+  <Layer slot="7" engine="BaySickSolstice" presetPath="BaySickSolstice/Pads &amp; Atmospheres/Sweep Pad.xml" locked="1"/>
   <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Acid &amp; 303/Classic 303 Saw.xml" locked="1"/>
   <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Deep House Sub.xml" locked="1"/>
   <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Acid &amp; 303/Acid Glide.xml" locked="1"/>
-  <Bass slot="3" engine="Harmless" presetPath="Harmless/Psytrance/Acid Roll Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Psytrance/Acid Roll Bass.xml" locked="1"/>
 </BaySickTemplate>

@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BaySickTemplate name="Synth-Pop" version="1">
   <Kit path="Synth-Pop/Synth-Pop Full.xml"/>
-  <Layer slot="0" engine="Harmless" presetPath="Harmless/Synth-Pop/Dark Minor Pad.xml" locked="1"/>
-  <Layer slot="1" engine="Harmless" presetPath="Harmless/Synth-Pop/Choir Pad.xml" locked="1"/>
-  <Layer slot="2" engine="Harmless" presetPath="Harmless/Synth-Pop/FM Plucky EP.xml" locked="1"/>
-  <Layer slot="3" engine="Harmless" presetPath="Harmless/Synth-Pop/Industrial Lead.xml" locked="1"/>
-  <Layer slot="4" engine="Harmless" presetPath="Harmless/Synth-Pop/Glassy Stab.xml" locked="1"/>
+  <Layer slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/Dark Minor Pad.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/Choir Pad.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/FM Plucky EP.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/Industrial Lead.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/Glassy Stab.xml" locked="1"/>
   <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Brass &amp; Strings/80s Synth Brass.xml" locked="1"/>
   <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Synthwave &amp; Vintage/VHS Keys.xml" locked="1"/>
   <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Sweep Pad.xml" locked="1"/>
-  <Bass slot="0" engine="Harmless" presetPath="Harmless/Synth-Pop/80s Synth Bass.xml" locked="1"/>
-  <Bass slot="1" engine="Harmless" presetPath="Harmless/Synth-Pop/Filtered Saw Bass.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/80s Synth Bass.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/Filtered Saw Bass.xml" locked="1"/>
   <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Synthwave &amp; Retrowave/Synthwave Bass.xml" locked="1"/>
   <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Filtered Pulse Sub.xml" locked="1"/>
 </BaySickTemplate>

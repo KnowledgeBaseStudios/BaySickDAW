@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BaySickTemplate name="Krautrock" version="1">
   <Kit path="Krautrock/Krautrock Full.xml"/>
-  <Layer slot="0" engine="Harmless" presetPath="Harmless/Krautrock/ARP Lead.xml" locked="1"/>
-  <Layer slot="1" engine="Harmless" presetPath="Harmless/Krautrock/Vocoder Robot.xml" locked="1"/>
-  <Layer slot="2" engine="Harmless" presetPath="Harmless/Krautrock/Ribbon Glide.xml" locked="1"/>
-  <Layer slot="3" engine="Harmless" presetPath="Harmless/Krautrock/Motorik Pad.xml" locked="1"/>
-  <Layer slot="4" engine="Harmless" presetPath="Harmless/Krautrock/Vintage String.xml" locked="1"/>
+  <Layer slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Krautrock/ARP Lead.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Krautrock/Vocoder Robot.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSolstice" presetPath="BaySickSolstice/Krautrock/Ribbon Glide.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Krautrock/Motorik Pad.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSolstice" presetPath="BaySickSolstice/Krautrock/Vintage String.xml" locked="1"/>
   <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Synthwave &amp; Vintage/Outrun Lead.xml" locked="1"/>
   <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Vintage String Pad.xml" locked="1"/>
   <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Arp &amp; Sequencer Tones/Retro Arp.xml" locked="1"/>
-  <Bass slot="0" engine="Harmless" presetPath="Harmless/Krautrock/Pulse Sub Bass.xml" locked="1"/>
-  <Bass slot="1" engine="Harmless" presetPath="Harmless/Krautrock/Sequenced Bass.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Krautrock/Pulse Sub Bass.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Krautrock/Sequenced Bass.xml" locked="1"/>
   <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Vintage Analog/70s Moog Bass.xml" locked="1"/>
   <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Vintage Analog/Analog Pulse.xml" locked="1"/>
 </BaySickTemplate>

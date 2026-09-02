@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BaySickTemplate name="Prog House" version="1">
   <Kit path="Prog House/Prog House Full.xml"/>
-  <Layer slot="0" engine="Harmless" presetPath="Harmless/Prog House/Sidechain Saw Lead.xml" locked="1"/>
-  <Layer slot="1" engine="Harmless" presetPath="Harmless/Prog House/Plucky Stab.xml" locked="1"/>
-  <Layer slot="2" engine="Harmless" presetPath="Harmless/Prog House/Wet Pad.xml" locked="1"/>
-  <Layer slot="3" engine="Harmless" presetPath="Harmless/Prog House/Bell Lead.xml" locked="1"/>
-  <Layer slot="4" engine="Harmless" presetPath="Harmless/Prog House/Lasersaw Stab.xml" locked="1"/>
+  <Layer slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Prog House/Sidechain Saw Lead.xml" locked="1"/>
+  <Layer slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Prog House/Plucky Stab.xml" locked="1"/>
+  <Layer slot="2" engine="BaySickSolstice" presetPath="BaySickSolstice/Prog House/Wet Pad.xml" locked="1"/>
+  <Layer slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Prog House/Bell Lead.xml" locked="1"/>
+  <Layer slot="4" engine="BaySickSolstice" presetPath="BaySickSolstice/Prog House/Lasersaw Stab.xml" locked="1"/>
   <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/Supersaw Chords.xml" locked="1"/>
   <Layer slot="6" engine="BaySickSynth" presetPath="BaySickSynth/Pads &amp; Atmospheres/Shimmer Pad.xml" locked="1"/>
   <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Modern EDM &amp; Hyperpop/EDM Pluck.xml" locked="1"/>
-  <Bass slot="0" engine="Harmless" presetPath="Harmless/Prog House/Big Saw Bass.xml" locked="1"/>
-  <Bass slot="1" engine="Harmless" presetPath="Harmless/Prog House/Plucked Sub.xml" locked="1"/>
+  <Bass slot="0" engine="BaySickSolstice" presetPath="BaySickSolstice/Prog House/Big Saw Bass.xml" locked="1"/>
+  <Bass slot="1" engine="BaySickSolstice" presetPath="BaySickSolstice/Prog House/Plucked Sub.xml" locked="1"/>
   <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Pluck, Donk &amp; FM/Tech House Stub.xml" locked="1"/>
   <Bass slot="3" engine="BaySickBass" presetPath="BaySickBass/Sub Bass &amp; 808s/Deep House Sub.xml" locked="1"/>
 </BaySickTemplate>

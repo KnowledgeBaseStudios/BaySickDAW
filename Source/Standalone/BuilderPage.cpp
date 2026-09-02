@@ -19,7 +19,7 @@
 #include "../DSP/TruePeakMeter.h"   // QA-ModelShell TS7 BLU-108: real true peak, not the Lagrange estimate
 #include "EffectsPage.h"            // QA-ModelShell TS2: channelPrefixForId / rackForChannelId statics
 #include "../BaySickPedals/BaySickPedalsProcessor.h"   // QA-ModelShell TS3: offline pedal-board lanes
-#include "../Harmless/HarmlessProcessor.h"             // BLU-344: offline mod-editor lanes
+#include "../BaySickSolstice/BaySickSolsticeProcessor.h"             // BLU-344: offline mod-editor lanes
 #include "../BaySickVocal/BaySickVocalProcessor.h"  // QA-ModelShell TS2: vox lane -> vocal + embedded NAM/IR
 #include "SafeAudioFormats.h"   // MP3 decode via vendored LAME (QA-Cleanup)
 
@@ -2169,7 +2169,7 @@ void BrowserPanel::renameAutomationAt(int idx, const String& newName)
     //   NAME (userDisplayName if set, else resolver output), not just the raw
     //   userDisplayName field - otherwise typing "Bass" onto template A would
     //   sail through the check because template B's userDisplayName is empty,
-    //   but B's visible browser label is "Bass 1 - Harmless - …" (which the
+    //   but B's visible browser label is "Bass 1 - BaySickSolstice - …" (which the
     //   user might then try to duplicate-rename, producing a real collision).
     if (trimmed.isNotEmpty())
     {
@@ -10481,8 +10481,8 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
         if (applied) return;
     }
 
-    // BLU-344 Harmless mod-editor lanes: "<targetParamId>_mod<N>_depth|length".
-    // Not APVTS params -- fields on HarmlessModRegistry -- so nothing above can
+    // BLU-344 BaySickSolstice mod-editor lanes: "<targetParamId>_mod<N>_depth|length".
+    // Not APVTS params -- fields on BaySickSolsticeModRegistry -- so nothing above can
     // resolve them, and without this branch the DEPTH/LENGTH automation that
     // plays live would be silently missing from every export.  The target id is
     // itself an engine param id, so the search is a rig sweep like the one above.
@@ -10503,7 +10503,7 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
                 rig.forEachEngine ([&] (juce::AudioProcessor& p)
                 {
                     if (applied) return;
-                    auto* h = dynamic_cast<HarmlessProcessor*> (&p);
+                    auto* h = dynamic_cast<BaySickSolsticeProcessor*> (&p);
                     if (h == nullptr) return;
                     auto& reg = h->getModRegistry();
                     auto* tgt = reg.findTarget (targetId);
@@ -10516,10 +10516,10 @@ void BuilderPage::applyOfflineLaneValue (const juce::String& pid, float v01)
                     }
                     else
                     {
-                        const int last = HarmlessModLength::kNumSteps - 1;
+                        const int last = BaySickSolsticeModLength::kNumSteps - 1;
                         const int i = juce::jlimit (0, last,
                             (int) std::lround ((double) juce::jlimit (0.0f, 1.0f, v01) * last));
-                        src.length = HarmlessModLength::kBeats[i];
+                        src.length = BaySickSolsticeModLength::kBeats[i];
                     }
                     reg.publishSnapshot();
                     applied = true;

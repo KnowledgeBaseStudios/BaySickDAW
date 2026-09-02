@@ -79,7 +79,7 @@ void BaySickSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         midi.addEvent (juce::MidiMessage::noteOn  (1, holdOnNote, (juce::uint8) 100), 0);
         // Review fix: press AND release landed inside ONE block -- close the
-        // note at block-end or it rings forever (see HarmlessProcessor).
+        // note at block-end or it rings forever (see BaySickSolsticeProcessor).
         if (offWords[holdOnNote >> 6] & (1ull << (holdOnNote & 63)))
             midi.addEvent (juce::MidiMessage::noteOff (1, holdOnNote),
                            juce::jmax (1, buffer.getNumSamples() - 1));

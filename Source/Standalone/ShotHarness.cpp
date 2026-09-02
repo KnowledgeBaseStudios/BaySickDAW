@@ -50,7 +50,7 @@
 #include "../BaySickVocal/BaySickVocalEditor.h"
 #include "../BaySickNAMIR/BaySickNAMIREditor.h"
 #include "../BaySickSynth/BaySickSynthEditor.h"
-#include "../Harmless/HarmlessEditor.h"
+#include "../BaySickSolstice/BaySickSolsticeEditor.h"
 #include "../BaySickBass/BaySickBassEditor.h"
 #include "../BaySickPedals/BaySickPedalsProcessor.h"
 #include "../BaySickPedals/BaySickPedalsEditor.h"
@@ -598,7 +598,7 @@ bool captureMenu (const std::function<void()>& trigger, const juce::String& name
     return true;
 }
 
-// ── engine windows: BaySickSynth (6 tabs), BaySickBass, Harmless ──────────
+// ── engine windows: BaySickSynth (6 tabs), BaySickBass, BaySickSolstice ──────────
 void shootSynthFamily (World& w)
 {
     struct TabShot { const char* fig; int tab; };
@@ -659,27 +659,27 @@ void shootSynthFamily (World& w)
     }
 }
 
-void shootHarmless (World& w)
+void shootBaySickSolstice (World& w)
 {
-    if (! want ("Harmless")) return;
+    if (! want ("BaySickSolstice")) return;
     auto& rig = w.proc->engineRig();
     rig.addTab (TabKind::Layers, 1);
-    if (auto* eng = rig.setEngineType (TabKind::Layers, 1, "Harmless"))
+    if (auto* eng = rig.setEngineType (TabKind::Layers, 1, "BaySickSolstice"))
     {
         std::unique_ptr<juce::AudioProcessorEditor> ed (eng->createEditor());
-        auto* harmEd = dynamic_cast<HarmlessEditor*> (ed.get());
-        WorkspaceWindow win ("shot:harmless", "");
+        auto* harmEd = dynamic_cast<BaySickSolsticeEditor*> (ed.get());
+        WorkspaceWindow win ("shot:baysicksolstice", "");
         win.setContentNonOwned (ed.get());
         auto* bar = win.getPageMenu();
-        bar->setCenterTitle (HarmlessEditor::getEngineTitle(),
-                             HarmlessEditor::getEngineAccent());
+        bar->setCenterTitle (BaySickSolsticeEditor::getEngineTitle(),
+                             BaySickSolsticeEditor::getEngineAccent());
         if (harmEd)
             bar->addExtraRightComponent (harmEd->getTitleStripPresetButton(), 88);
         dressSwingKnob (*bar);
         win.setSize (1045, 453);
-        save (win, "Harmless", 1.25f);
+        save (win, "BaySickSolstice", 1.25f);
     }
-    else { ++gFailed; std::cout << "  FAILED Harmless engine" << std::endl; }
+    else { ++gFailed; std::cout << "  FAILED BaySickSolstice engine" << std::endl; }
 }
 
 // ── shell: transport bar + ribbon ─────────────────────────────────────────
@@ -1771,7 +1771,7 @@ void shootEngineMenus (World& w)
         bar.setFreezeSlot ([] { return 0; }, [] (bool) {});
     };
 
-    if (want ("BaySickSynth-BaySickPlayer-Harmless Menu"))
+    if (want ("BaySickSynth-BaySickPlayer-BaySickSolstice Menu"))
     {
         LayersPage page (*w.proc, *w.patterns, 3);
         page.selectEngine ("BaySickSynth");
@@ -1784,7 +1784,7 @@ void shootEngineMenus (World& w)
             bar.appendStandardItems (m);
         };
         captureMenu ([&] { page.showPageActionsMenu (nullptr); },
-                     "BaySickSynth-BaySickPlayer-Harmless Menu");
+                     "BaySickSynth-BaySickPlayer-BaySickSolstice Menu");
     }
 
     if (want ("BaySickBass Menu Updated"))
@@ -1976,7 +1976,7 @@ using ShootFn = void (*) (World&);
 struct Figure { const char* group; ShootFn fn; };
 const Figure kFigures[] = {
     { "synth family",  &shootSynthFamily },
-    { "harmless",      &shootHarmless },
+    { "baysicksolstice",      &shootBaySickSolstice },
     { "transport",     &shootTransportBar },
     { "ribbon",        &shootRibbon },
     { "keybinds",      &shootKeybinds },

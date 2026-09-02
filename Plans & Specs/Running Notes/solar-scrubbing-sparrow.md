@@ -46,3 +46,44 @@
 - **Drift noted:** QA-EqPro and QA-ManualPress were never added to Main Plan
   §5 / §9; QA-Solstice's Phase 8 entry is the first Main Plan batch entry since
   QA-Layout.
+
+## 2026-09-02 - Task 1 - engine rename (in progress, build gate running)
+
+- `git mv Source/Harmless Source/BaySickSolstice` + 18 `Harmless*` -> `BaySickSolstice*`
+  files; substitution pass over 62 files (Source, CMakeLists, generator):
+  `Harmless` -> `BaySickSolstice`, `_harm_` -> `_bso_`, `"harm"` -> `"bso"`,
+  `BSHARMM-`/`BSHARM-` -> `BSSOLM-`/`BSSOL-` anchors; by rule the lowercase
+  engine variable (`StandaloneEditor.cpp:15708/15729` -> `solstice`), the
+  harness window name + group key (`baysicksolstice`), generator identifiers
+  (`BAYSICKSOLSTICE_*`, `ENGINE_BSO`, `BSO_DEFAULTS`).  Verify grep empty.  The
+  `HARM` Blur knob label and the `blur_harm` param survived as intended.
+- **Finding: the repo root IS the app root.**  `AppPaths::appRoot()` is
+  `Documents/BaySickDAW`, which is where the repo lives, so the app reads the
+  repo's `Presets/` and `Templates/` directly.  S5 (copy to Documents) is moot;
+  `git rm -r Presets/Harmless` + the regenerated `Presets/BaySickSolstice/`
+  (152 XML) + 24 rewritten `Templates/Factory` files ARE the on-disk state.
+  User content lives in the same tree untracked (`Templates/My Templates`,
+  `Kits/My Kits`, any `My Presets`) - untouched.
+- **Finding (pre-existing, Rule 3 at close): generator drift.**  Run against a
+  scratch home, `Tools/gen_factory_presets.py` output differs from the
+  committed presets for BaySickBass (3), BaySickDrums (6), BaySickSynth (7) -
+  sample: `tk_lay_0_bss_amp_release` 0.0 (generator) vs 0.001 (committed), a
+  hand fix that never reached the recipes.  A real re-run would regress 16
+  files.  BaySickNAMIR presets are hand-authored (generator does not emit
+  them).  Only the renamed folder + `Templates/Factory` were taken.
+
+## 2026-09-02 - Task 2 - manual (text half done while the T1 build runs)
+
+- `git mv` BSHARM.html / BSHARMM.html -> BSSOL.html / BSSOLM.html and the two
+  System Reference pictures; substitution over 25 manual-side files (src-m2
+  prose, 10 In The Weeds files, marker-coords, generate-manual IMP map,
+  control-blurbs, the cumulative code-rename map, the interim m2, bsd-docs.json,
+  Callout Registry, Screenshot List).  Verify grep empty.
+- **Lesson (do not repeat):** `fullcode.py` / `fullcode2.py` from QA-ManualPress
+  are one-shot BUILDERS, not regenerators - re-running them clobbered the
+  hand-assembled straggler dropdowns (the `imp*.txt` set) in 20 files, 900 net
+  lines gone.  Reverted `src-m3` to HEAD and re-applied only the rename rules,
+  which match the source by construction: 10 files, 829 quoted lines, 0 misses
+  against the cited sources (whitespace-normalised).
+- Pending the build: re-shoot (`--shot --docs`), copy staging over figures,
+  `git rm` the two old-named PNGs, regenerate `manual.html`.

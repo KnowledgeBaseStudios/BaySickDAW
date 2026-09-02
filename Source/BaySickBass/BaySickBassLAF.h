@@ -157,7 +157,7 @@ public:
         }
     }
 
-    // ── Button background (Harmless VEL-style for toggles, 2026-04-22) ────────
+    // ── Button background (BaySickSolstice VEL-style for toggles, 2026-04-22) ────────
     void drawButtonBackground (juce::Graphics& g, juce::Button& btn,
                                 const juce::Colour& /*bgColor*/,
                                 bool highlighted, bool down) override

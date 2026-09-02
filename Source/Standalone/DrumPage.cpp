@@ -1162,7 +1162,7 @@ void DrumPage::showContextMenu (juce::Component* anchor, bool fromKit)
     // Polyphony toggle - engine-specific param dispatch.
     //   BaySickSynth → _bss_voiceMode (0 = poly, 1 = mono)
     //   BaySickPlayer → _bsp_voiceCap (1 = mono, 8 = poly default)
-    //   Harmless / others → polyphonic-only, no toggle
+    //   BaySickSolstice / others → polyphonic-only, no toggle
     {
         bool isMono = false;
         bool canToggle = false;
@@ -1688,7 +1688,7 @@ void DrumPage::loadPagePreset (const juce::File& xml)
     }
     else if (mEngineProcessor != nullptr)
     {
-        // BaySickSynth / Harmless / etc. - no sample reference; the patch is
+        // BaySickSynth / BaySickSolstice / etc. - no sample reference; the patch is
         // pure APVTS state.  Use the preset filename as the sound label.
         mLoadedSampleKind = SampleKind::None;
         mLoadedSamplePath = juce::File();

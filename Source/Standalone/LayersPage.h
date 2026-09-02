@@ -20,7 +20,7 @@
 //                        (StandaloneEditor::buildPageWindowRows), which navigates
 //                        to the Piano Roll tab -- there is no sub-tab pill.
 //
-// Engine choices: Harmless | BaySickPlayer | BaySickSynth
+// Engine choices: BaySickSolstice | BaySickPlayer | BaySickSynth
 // QA-ModelShell TS1 (2026-07-27): the engine is MODEL-owned (EngineRig, keyed
 // {Layers, pageIndex}).  This page is a disposable view: it holds a non-owning
 // engine pointer plus the editor it creates, and requests engines from the rig

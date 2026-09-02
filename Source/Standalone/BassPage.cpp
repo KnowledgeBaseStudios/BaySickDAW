@@ -6,8 +6,8 @@
 #include "../AppPaths.h"
 #include "../BaySickBass/BaySickBassProcessor.h"
 #include "../BaySickBass/BaySickBassEditor.h"
-#include "../Harmless/HarmlessProcessor.h"
-#include "../Harmless/HarmlessEditor.h"
+#include "../BaySickSolstice/BaySickSolsticeProcessor.h"
+#include "../BaySickSolstice/BaySickSolsticeEditor.h"
 #include "../BaySickPlayer/BaySickPlayerProcessor.h"
 #include "../BaySickPlayer/BaySickPlayerEditor.h"
 #include "../SampleLibrary.h"
@@ -122,7 +122,7 @@ void BassPage::selectEngineInternal(const juce::String& engineName)
             setTabName(name);
             if (onSoundNameChanged) onSoundNameChanged(name);
         };
-        if      (auto* he = dynamic_cast<HarmlessEditor*>      (mEngineEditor.get())) he->onPatchLoaded = onPatch;
+        if      (auto* he = dynamic_cast<BaySickSolsticeEditor*>      (mEngineEditor.get())) he->onPatchLoaded = onPatch;
         else if (auto* be = dynamic_cast<BaySickBassEditor*>   (mEngineEditor.get())) be->onPatchLoaded = onPatch;
         else if (auto* pe = dynamic_cast<BaySickPlayerEditor*>    (mEngineEditor.get())) pe->onPatchLoaded = onPatch;
     }
@@ -151,7 +151,7 @@ void BassPage::selectEngineInternal(const juce::String& engineName)
 
 juce::String BassPage::stripEngineTitle() const
 {
-    if (dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return HarmlessEditor::getEngineTitle();
+    if (dynamic_cast<BaySickSolsticeEditor*>    (mEngineEditor.get())) return BaySickSolsticeEditor::getEngineTitle();
     if (dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return BaySickBassEditor::getEngineTitle();
     if (dynamic_cast<BaySickPlayerEditor*>  (mEngineEditor.get())) return BaySickPlayerEditor::getEngineTitle();
     return {};
@@ -159,7 +159,7 @@ juce::String BassPage::stripEngineTitle() const
 
 juce::Colour BassPage::stripEngineAccent() const
 {
-    if (dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return HarmlessEditor::getEngineAccent();
+    if (dynamic_cast<BaySickSolsticeEditor*>    (mEngineEditor.get())) return BaySickSolsticeEditor::getEngineAccent();
     if (dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return BaySickBassEditor::getEngineAccent();
     if (dynamic_cast<BaySickPlayerEditor*>  (mEngineEditor.get())) return BaySickPlayerEditor::getEngineAccent();
     return {};
@@ -167,7 +167,7 @@ juce::Colour BassPage::stripEngineAccent() const
 
 juce::Component* BassPage::stripPresetButton() const
 {
-    if (auto* e = dynamic_cast<HarmlessEditor*>    (mEngineEditor.get())) return e->getTitleStripPresetButton();
+    if (auto* e = dynamic_cast<BaySickSolsticeEditor*>    (mEngineEditor.get())) return e->getTitleStripPresetButton();
     if (auto* e = dynamic_cast<BaySickBassEditor*> (mEngineEditor.get())) return e->getTitleStripPresetButton();
     if (auto* e = dynamic_cast<BaySickPlayerEditor*>  (mEngineEditor.get())) return e->getTitleStripPresetButton();
     return nullptr;
@@ -240,7 +240,7 @@ static juce::String bassEngineLocalPrefix (juce::AudioProcessor* proc)
 {
     if (auto* bsb = dynamic_cast<BaySickBassProcessor*>(proc))   return bsb->getParamPrefix();
     if (auto* bsp = dynamic_cast<BaySickPlayerProcessor*>(proc))    return bsp->getParamPrefix();
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      return h  ->getParamPrefix();
+    if (auto* h   = dynamic_cast<BaySickSolsticeProcessor*>(proc))      return h  ->getParamPrefix();
     return {};
 }
 
@@ -250,7 +250,7 @@ static void bassApplyApvtsTree (juce::AudioProcessor* proc, const juce::ValueTre
 {
     if (auto* bsb = dynamic_cast<BaySickBassProcessor*>(proc))   { bsb->apvts.replaceStateKeepingUndoHistory(vt); return; }
     if (auto* bsp = dynamic_cast<BaySickPlayerProcessor*>(proc))    { bsp->apvts.replaceStateKeepingUndoHistory(vt); return; }
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>(proc))      { h  ->apvts.replaceStateKeepingUndoHistory(vt); return; }
+    if (auto* h   = dynamic_cast<BaySickSolsticeProcessor*>(proc))      { h  ->apvts.replaceStateKeepingUndoHistory(vt); return; }
 }
 
 // G-6 (2026-04-29): rewrite the binary state's PARAM ids so the source page's
@@ -373,7 +373,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
     constexpr int kIdDelete    = 99;
     // Replace Engine submenu (Jeff, 2026-08-16) - 60 + i indexes kBassEngines.
     constexpr int kIdReplaceBase = 60;
-    static const char* const kBassEngines[] = { "Harmless", "BaySickPlayer", "BaySickBass" };
+    static const char* const kBassEngines[] = { "BaySickSolstice", "BaySickPlayer", "BaySickBass" };
     constexpr int kNumBassEngines = 3;
 
     juce::PopupMenu menu;
@@ -383,7 +383,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
     // Polyphony - engine-specific param.
     //   BaySickBass   → tk_bas_N_bsb_voiceMode  (0=poly, 1=mono)
     //   BaySickPlayer → tk_bas_N_bsp_voiceCap   (1=mono, 8=poly)
-    //   Harmless      → polyphonic-only (n/a)
+    //   BaySickSolstice      → polyphonic-only (n/a)
     {
         bool isMono = false;
         bool canToggle = false;
@@ -507,7 +507,7 @@ void BassPage::showPageActionsMenu (juce::Component* anchor)
             // Replace Engine submenu (60 + i -> kBassEngines[i]).
             if (r >= kIdReplaceBase && r < kIdReplaceBase + kNumBassEngines)
             {
-                static const char* const kEngines[] = { "Harmless", "BaySickPlayer", "BaySickBass" };
+                static const char* const kEngines[] = { "BaySickSolstice", "BaySickPlayer", "BaySickBass" };
                 const juce::String name = kEngines[r - kIdReplaceBase];
                 bp->performChainSwapGesture ("Replace Engine",
                     [bp, name] { bp->selectEngineInternal (name); });
@@ -915,7 +915,7 @@ void BassPage::requestDelete()
 static juce::String bassEnginePrefixOf (juce::AudioProcessor* p)
 {
     if (auto* bsb = dynamic_cast<BaySickBassProcessor*> (p))   return bsb->getParamPrefix();
-    if (auto* h   = dynamic_cast<HarmlessProcessor*>    (p))   return h  ->getParamPrefix();
+    if (auto* h   = dynamic_cast<BaySickSolsticeProcessor*>    (p))   return h  ->getParamPrefix();
     if (auto* v   = dynamic_cast<BaySickPlayerProcessor*>  (p))   return v  ->getParamPrefix();
     return {};
 }
@@ -1109,14 +1109,14 @@ void BassPage::valueTreeRedirected (juce::ValueTree& tree)
 
 void BassPage::subscribeToEngineApvtsState()
 {
-    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.addListener (this);
+    if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>     (mEngineProcessor)) h->apvts.state.addListener (this);
     else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor)) b->apvts.state.addListener (this);
     else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>  (mEngineProcessor)) v->apvts.state.addListener (this);
 }
 
 void BassPage::unsubscribeFromEngineApvtsState()
 {
-    if (auto* h = dynamic_cast<HarmlessProcessor*>     (mEngineProcessor)) h->apvts.state.removeListener (this);
+    if (auto* h = dynamic_cast<BaySickSolsticeProcessor*>     (mEngineProcessor)) h->apvts.state.removeListener (this);
     else if (auto* b = dynamic_cast<BaySickBassProcessor*> (mEngineProcessor)) b->apvts.state.removeListener (this);
     else if (auto* v = dynamic_cast<BaySickPlayerProcessor*>  (mEngineProcessor)) v->apvts.state.removeListener (this);
 }

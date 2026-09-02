@@ -7,10 +7,10 @@
   <Layer slot="3" engine="BaySickSynth" presetPath="BaySickSynth/Brass &amp; Strings/80s Synth Brass.xml" locked="1"/>
   <Layer slot="4" engine="BaySickSynth" presetPath="BaySickSynth/Brass &amp; Strings/Vangelis Brass.xml" locked="1"/>
   <Layer slot="5" engine="BaySickSynth" presetPath="BaySickSynth/Synthwave &amp; Vintage/80s Pop Pluck.xml" locked="1"/>
-  <Layer slot="6" engine="Harmless" presetPath="Harmless/Synthwave &amp; Vintage/Outrun Lead.xml" locked="1"/>
+  <Layer slot="6" engine="BaySickSolstice" presetPath="BaySickSolstice/Synthwave &amp; Vintage/Outrun Lead.xml" locked="1"/>
   <Layer slot="7" engine="BaySickSynth" presetPath="BaySickSynth/Synthwave &amp; Vintage/Retrowave Bell.xml" locked="1"/>
   <Bass slot="0" engine="BaySickBass" presetPath="BaySickBass/Synthwave &amp; Retrowave/Synthwave Bass.xml" locked="1"/>
   <Bass slot="1" engine="BaySickBass" presetPath="BaySickBass/Synthwave &amp; Retrowave/80s Drive Saw.xml" locked="1"/>
   <Bass slot="2" engine="BaySickBass" presetPath="BaySickBass/Synthwave &amp; Retrowave/Retrowave Sub.xml" locked="1"/>
-  <Bass slot="3" engine="Harmless" presetPath="Harmless/Synth-Pop/80s Synth Bass.xml" locked="1"/>
+  <Bass slot="3" engine="BaySickSolstice" presetPath="BaySickSolstice/Synth-Pop/80s Synth Bass.xml" locked="1"/>
 </BaySickTemplate>

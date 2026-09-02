@@ -2777,7 +2777,7 @@ void BaySickDAWProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // ── Child engines need the playhead too (2026-07-30) ─────────────────────
     // NOTHING ever called setPlayHead on a child engine -- the only call sites
     // in the tree are on THIS processor -- so every engine's getPlayHead()
-    // returned null and Harmless / BaySickSynth / BaySickBass silently fell back
+    // returned null and BaySickSolstice / BaySickSynth / BaySickBass silently fell back
     // to their "no transport" default of 120 BPM.  Net effect: tempo-synced LFO
     // rates and envelope times did not follow project tempo AT ALL.  Set the
     // song to 90 or 140 and those still ran at 120.
@@ -7554,7 +7554,7 @@ namespace
     }
 } // namespace
 
-// QA-ApvtsAutomation (2026-07-25): addParamsForHarmless / addParamsForBaySickPlayer
+// QA-ApvtsAutomation (2026-07-25): addParamsForBaySickSolstice / addParamsForBaySickPlayer
 // / addParamsForBaySickSynth / addParamsForBaySickBass / addParamsForEffectRack
 // removed with registerParamsForTrack.  (The player one was spelled
 // addParamsForVibePlayer when it existed; renamed here to match the tree.)  They registered a "tk_{trackId}_*" mirror

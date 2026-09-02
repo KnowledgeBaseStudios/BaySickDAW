@@ -35,7 +35,7 @@ PRESETS_ROOT = USERPROFILE / "Documents" / "BaySickDAW" / "Presets"
 DRUMS_DIR    = PRESETS_ROOT / "BaySickDrums"
 SYNTH_DIR    = PRESETS_ROOT / "BaySickSynth"
 BASS_DIR     = PRESETS_ROOT / "BaySickBass"
-HARMLESS_DIR = PRESETS_ROOT / "Harmless"
+BAYSICKSOLSTICE_DIR = PRESETS_ROOT / "BaySickSolstice"
 PLAYER_DIR   = PRESETS_ROOT / "BaySickPlayer"
 
 # Core Library — where the SFZ packs live.  Used both at runtime by the C++
@@ -48,14 +48,14 @@ CORE_LIBRARY_DIR = (LOCAL_APPDATA / "BaySickDAW" / "CoreLibrary") if LOCAL_APPDA
 # BaySickSynth and BaySickBass share the same DSP / param layout (per
 # BaySickBassProcessor.cpp:65 "Layout identical to BaySickSynthProcessor").
 # Only the param-id prefix tag and APVTS state root tag differ.
-# Harmless is its own additive engine — different param schema, different tag.
+# BaySickSolstice is its own additive engine — different param schema, different tag.
 # BaySickPlayer is the sample player — different schema again, plus its
 # preset XML has a <Sample kind path/> child element pointing at the loaded
 # audio (see DrumPage::savePatchAs / loadPlayerPreset for the round-trip).
 
 ENGINE_BSS    = ("bss",  "BaySickSynthState")   # BaySickSynth + drum-slot synth patches
 ENGINE_BSB    = ("bsb",  "BaySickBassState")    # BaySickBass page
-ENGINE_HARM   = ("harm", "HarmlessState")       # Harmless additive synth
+ENGINE_BSO   = ("bso", "BaySickSolsticeState")       # BaySickSolstice additive synth
 ENGINE_BSP    = ("bsp",  "BaySickPlayerState")  # BaySickPlayer (sample player)
 
 # ---- Defaults (mirror of createLayout defaults) -----------------------------
@@ -136,13 +136,13 @@ FLT_LP = 0; FLT_HP = 1; FLT_BP = 2; FLT_NOTCH = 3
 LFO_SINE = 0; LFO_SAW = 1; LFO_SQUARE = 2
 LFO_DEST_FILTER = 0; LFO_DEST_PITCH = 1; LFO_DEST_OSCMOD = 2
 
-# ─── Harmless engine defaults (2026-04-26) ───────────────────────────────────
-# Mirror of HarmlessProcessor::createLayout (Source/Harmless/HarmlessProcessor.cpp:119).
-# Param prefix is "tk_<trackId>_harm_".  ~90 params total — every preset writes
+# ─── BaySickSolstice engine defaults (2026-04-26) ───────────────────────────────────
+# Mirror of BaySickSolsticeProcessor::createLayout (Source/BaySickSolstice/BaySickSolsticeProcessor.cpp:119).
+# Param prefix is "tk_<trackId>_bso_".  ~90 params total — every preset writes
 # every param so replaceState produces a fully-known state regardless of slot
 # history.  Choice/Int values written as <int>.0 in the XML (matches existing
 # convention in write_preset_xml).
-HARM_DEFAULTS = {
+BSO_DEFAULTS = {
     # Timbre
     "timbre_shape":         1,     # 0=Sine 1=Saw 2=Square 3=Triangle
     "partB_timbre_shape":   2,
@@ -269,9 +269,9 @@ HARM_DEFAULTS = {
     "partB_pluck_blur":     0,
 }
 
-# Harmless timbre shape aliases (per createLayout choice arrays)
+# BaySickSolstice timbre shape aliases (per createLayout choice arrays)
 HT_SINE = 0; HT_SAW = 1; HT_SQUARE = 2; HT_TRIANGLE = 3
-# Harmless filter type aliases (flt1_type / flt2_type)
+# BaySickSolstice filter type aliases (flt1_type / flt2_type)
 HF_LP = 0; HF_HP = 1; HF_BP = 2; HF_NOTCH = 3
 
 # ─── BaySickPlayer engine defaults (2026-04-26) ──────────────────────────────
@@ -496,11 +496,11 @@ BASS_CATEGORIES = {
     # 8 (Midtempo & Cyberpunk) populated entirely by Batch 5 new recipes below.
 }
 
-# ─── Harmless categories — single map, all 78 patches (2026-04-26) ───────────
-# Each Harmless preset goes into Presets/Harmless/<category>/<name>.xml.
+# ─── BaySickSolstice categories — single map, all 78 patches (2026-04-26) ───────────
+# Each BaySickSolstice preset goes into Presets/BaySickSolstice/<category>/<name>.xml.
 # 9 genre clusters derived from the YouTube reference list (Files For Claude/
-# Preset Links.txt).  No factory Harmless presets pre-existed so no dedupe.
-HARMLESS_CATEGORIES = {
+# Preset Links.txt).  No factory BaySickSolstice presets pre-existed so no dedupe.
+BAYSICKSOLSTICE_CATEGORIES = {
     # Modern Hip-Hop (RTJ, Logic, Aesop Rock) — 8 layer + 3 bass
     "Boom-Bap Rhodes":          "Modern Hip-Hop",
     "Dusty EP":                 "Modern Hip-Hop",
@@ -1848,15 +1848,15 @@ def _params_match(new_overrides: dict, existing_overrides: dict) -> bool:
                 return False
     return True
 
-# ─── Harmless recipes (2026-04-26) ───────────────────────────────────────────
+# ─── BaySickSolstice recipes (2026-04-26) ───────────────────────────────────────────
 # 55 layer + 23 bass = 78 patches.  Genre clusters from Files For Claude/
-# Preset Links.txt — see HARMLESS_CATEGORIES for the cluster->folder map.
-# Patches lean on Harmless's strengths: additive timbres (Sine/Saw/Square/Tri),
+# Preset Links.txt — see BAYSICKSOLSTICE_CATEGORIES for the cluster->folder map.
+# Patches lean on BaySickSolstice's strengths: additive timbres (Sine/Saw/Square/Tri),
 # spectral modules (Prism/Pluck/Blur/Filter Mask/Phaser Mask/Brownian), dual
 # SVF + ADSR + LFO + Trem + Vibrato + output Phaser.
 
-# (name, overrides)  — every recipe writes overrides on top of HARM_DEFAULTS.
-HARMLESS_RECIPES = [
+# (name, overrides)  — every recipe writes overrides on top of BSO_DEFAULTS.
+BAYSICKSOLSTICE_RECIPES = [
     # ── Modern Hip-Hop (RTJ, Logic, Aesop Rock) — 8 layer + 3 bass ──────────
     ("Boom-Bap Rhodes", {
         "timbre_shape": HT_SINE, "partB_timbre_shape": HT_TRIANGLE,
@@ -2277,7 +2277,7 @@ HARMLESS_RECIPES = [
     }),
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 2026-04-26 (round 2): 74 type-based Harmless patches.
+    # 2026-04-26 (round 2): 74 type-based BaySickSolstice patches.
     # Parallels BaySickSynth's 10-folder structure so users searching for
     # "a pad" or "a lead" don't have to know an artist's name.  Existing 78
     # genre-folder patches stay; these add a second discovery axis.
@@ -2973,22 +2973,22 @@ BSP_SAMPLE_RECIPES = [
     ("House Perc 10", "EDM Drums/House Percussion", "EDM Drums Package/House Percussion/WA_HR_House_Perc_10.wav"),
 ]
 
-def write_harmless_preset_xml(target_dir: Path, name: str, overrides: dict) -> Path:
-    """Mirrors write_preset_xml but uses HARM_DEFAULTS + the harm prefix.
-    Param IDs are written as `tk_lay_0_harm_<param>` for trackId-substitution
+def write_baysicksolstice_preset_xml(target_dir: Path, name: str, overrides: dict) -> Path:
+    """Mirrors write_preset_xml but uses BSO_DEFAULTS + the bso prefix.
+    Param IDs are written as `tk_lay_0_bso_<param>` for trackId-substitution
     portability across drum slots / layer pages."""
     target_dir.mkdir(parents=True, exist_ok=True)
-    params = {**HARM_DEFAULTS, **overrides}
-    prefix = "tk_lay_0_harm_"
+    params = {**BSO_DEFAULTS, **overrides}
+    prefix = "tk_lay_0_bso_"
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
-             '<HarmlessState>']
+             '<BaySickSolsticeState>']
     for k, v in params.items():
         if isinstance(v, int):
             vstr = f"{v}.0"
         else:
             vstr = repr(float(v))
         lines.append(f'  <PARAM id="{prefix}{k}" value="{vstr}"/>')
-    lines.append('</HarmlessState>')
+    lines.append('</BaySickSolsticeState>')
     out = target_dir / f"{name}.xml"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
@@ -3746,39 +3746,39 @@ def write_kit_xml(target_dir: Path, name: str, drums_with_engines: list) -> Path
 # loadPreset machinery.
 
 # Each entry: (name, kit_path, [(engine, preset_path), ...] layers, [(engine, preset_path), ...] basses)
-# Engine is the runtime engine type ("BaySickSynth" / "BaySickBass" / "Harmless" / "BaySickPlayer").
+# Engine is the runtime engine type ("BaySickSynth" / "BaySickBass" / "BaySickSolstice" / "BaySickPlayer").
 # preset_path is relative to Documents/BaySickDAW/Presets/ (includes engine root folder).
 TEMPLATES = [
     # ── Original 10 kit styles ──────────────────────────────────────────────
     ("TR-808", "TR-808/TR-808 Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Vintage Rhodes.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/DX EP.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Soulful Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Soulful Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Leads & Solos/R&B Glide Lead.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Sample Chop Pluck.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Trap Bell.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Sample Chop Pluck.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Trap Bell.xml"),
         ("BaySickSynth", "BaySickSynth/Brass & Strings/Solina Strings.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dark Brooding Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dark Brooding Pad.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Punchy 808 Bass.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Sub Bass.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Hip-Hop Sub.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Boom-Bap 808.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Hip-Hop Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Boom-Bap 808.xml"),
     ]),
     ("TR-909", "TR-909/TR-909 Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/House Organ.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Juno Warm Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Leads & Solos/Acid Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Plucks & Mallets/Classic Trance Pluck.xml"),
-        ("Harmless",     "Harmless/Synth-Pop/Glassy Stab.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synth-Pop/Glassy Stab.xml"),
         ("BaySickSynth", "BaySickSynth/Arp & Sequencer Tones/Trance Gate Arp.xml"),
-        ("Harmless",     "Harmless/Brass & Strings/Strings Ensemble.xml"),
-        ("Harmless",     "Harmless/Pads & Atmospheres/Sweep Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Brass & Strings/Strings Ensemble.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Pads & Atmospheres/Sweep Pad.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Acid & 303/Classic 303 Saw.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Deep House Sub.xml"),
         ("BaySickBass", "BaySickBass/Acid & 303/Acid Glide.xml"),
-        ("Harmless",    "Harmless/Psytrance/Acid Roll Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Psytrance/Acid Roll Bass.xml"),
     ]),
     ("TR-606", "TR-606/TR-606 Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Toy Piano.xml"),
@@ -3786,13 +3786,13 @@ TEMPLATES = [
         ("BaySickSynth", "BaySickSynth/Synthwave & Vintage/Outrun Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Plucks & Mallets/Analog Pluck.xml"),
         ("BaySickSynth", "BaySickSynth/Brass & Strings/80s Synth Brass.xml"),
-        ("Harmless",     "Harmless/Synthwave & Vintage/Retrowave Bell.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synthwave & Vintage/Retrowave Bell.xml"),
         ("BaySickSynth", "BaySickSynth/Synthwave & Vintage/Neon Lead.xml"),
-        ("Harmless",     "Harmless/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Vintage Analog/70s Moog Bass.xml"),
         ("BaySickBass", "BaySickBass/Vintage Analog/Analog Pulse.xml"),
-        ("Harmless",    "Harmless/Krautrock/Pulse Sub Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Krautrock/Pulse Sub Bass.xml"),
         ("BaySickBass", "BaySickBass/Vintage Analog/Classic Electro Bass.xml"),
     ]),
     ("80s Electronic", "80s Electronic/80s Electronic Full.xml", [
@@ -3802,23 +3802,23 @@ TEMPLATES = [
         ("BaySickSynth", "BaySickSynth/Brass & Strings/80s Synth Brass.xml"),
         ("BaySickSynth", "BaySickSynth/Brass & Strings/Vangelis Brass.xml"),
         ("BaySickSynth", "BaySickSynth/Synthwave & Vintage/80s Pop Pluck.xml"),
-        ("Harmless",     "Harmless/Synthwave & Vintage/Outrun Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synthwave & Vintage/Outrun Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Synthwave & Vintage/Retrowave Bell.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Synthwave & Retrowave/Synthwave Bass.xml"),
         ("BaySickBass", "BaySickBass/Synthwave & Retrowave/80s Drive Saw.xml"),
         ("BaySickBass", "BaySickBass/Synthwave & Retrowave/Retrowave Sub.xml"),
-        ("Harmless",    "Harmless/Synth-Pop/80s Synth Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Synth-Pop/80s Synth Bass.xml"),
     ]),
     ("FM Digital", "FM Digital/FM Digital Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/DX EP.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/FM Tines.xml"),
-        ("Harmless",     "Harmless/Plucks & Mallets/FM Bell Pluck.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Plucks & Mallets/FM Bell Pluck.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Glass Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Leads & Solos/DX Lead FM.xml"),
         ("BaySickSynth", "BaySickSynth/Plucks & Mallets/FM Bell Pluck.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Crystal Keys.xml"),
-        ("Harmless",     "Harmless/Pads & Atmospheres/Glass Shimmer Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Pads & Atmospheres/Glass Shimmer Pad.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Pluck, Donk & FM/DX Bass FM.xml"),
         ("BaySickBass", "BaySickBass/Pluck, Donk & FM/FM Growl Bass.xml"),
@@ -3842,32 +3842,32 @@ TEMPLATES = [
     ]),
     ("Trap", "Trap/Trap Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Vintage Rhodes.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Trap Bell.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Sample Chop Pluck.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Trap Bell.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Sample Chop Pluck.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Hyperpop Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Festival Lead.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dark Brooding Pad.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Distorted Lo-Fi Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dark Brooding Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Distorted Lo-Fi Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Future Bass Chord.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Punchy 808 Bass.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Sub Thump.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Hip-Hop Sub.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Boom-Bap 808.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Hip-Hop Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Boom-Bap 808.xml"),
     ]),
     ("Lo-Fi Hip-Hop", "Lo-Fi Hip-Hop/Lo-Fi Hip-Hop Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Lo-Fi Keys.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Vintage Rhodes.xml"),
-        ("Harmless",     "Harmless/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Plucks & Mallets/Marimba Pluck.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dusty EP.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dusty EP.xml"),
         ("BaySickSynth", "BaySickSynth/Brass & Strings/Lo-Fi Brass.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Soulful Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Soulful Pad.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Vintage Analog/Dusty Bass.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Sub Bass.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Hip-Hop Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Hip-Hop Sub.xml"),
         ("BaySickBass", "BaySickBass/Slap & Electric/Upright Jazz Sub.xml"),
     ]),
     ("EDM Big Room", "EDM Big Room/EDM Big Room Full.xml", [
@@ -3876,149 +3876,149 @@ TEMPLATES = [
         ("BaySickSynth", "BaySickSynth/Leads & Solos/EDM Saw Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Slap House Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Future Bass Chord.xml"),
-        ("Harmless",     "Harmless/Modern EDM & Hyperpop/Festival Lead.xml"),
-        ("Harmless",     "Harmless/Cinematic & Drones/Riser FX.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern EDM & Hyperpop/Festival Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Cinematic & Drones/Riser FX.xml"),
         ("BaySickSynth", "BaySickSynth/Cinematic & Drones/Sub Drop FX.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Deep House Sub.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Saturation Sub.xml"),
         ("BaySickBass", "BaySickBass/Reese & Neuro/Standard Reese.xml"),
-        ("Harmless",    "Harmless/Bass Music/Skrillex Reese.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/Skrillex Reese.xml"),
     ]),
     ("Cinematic", "Cinematic/Cinematic Full.xml", [
         ("BaySickPlayer", "BaySickPlayer/Strings/Violin Ens (Sustained).xml"),
         ("BaySickPlayer", "BaySickPlayer/Strings/Cello Ens (Sustained).xml"),
         ("BaySickPlayer", "BaySickPlayer/Strings/Viola Ens (Sustained).xml"),
         ("BaySickPlayer", "BaySickPlayer/Brass/French Horn (Sustained).xml"),
-        ("Harmless",      "Harmless/Cinematic & Drones/Tension Riser.xml"),
-        ("Harmless",      "Harmless/Cinematic & Drones/Sci-Fi Wash.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Cinematic & Drones/Tension Riser.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Cinematic & Drones/Sci-Fi Wash.xml"),
         ("BaySickSynth",  "BaySickSynth/Cinematic & Drones/Tension Drone.xml"),
-        ("Harmless",      "Harmless/Pads & Atmospheres/Glass Shimmer Pad.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Pads & Atmospheres/Glass Shimmer Pad.xml"),
     ], [
         ("BaySickPlayer", "BaySickPlayer/Strings/Contrabass (Sustained).xml"),
         ("BaySickBass",   "BaySickBass/Sub Bass & 808s/Cinema Rumble Sub.xml"),
-        ("Harmless",      "Harmless/Psybient/Deep Drone Bass.xml"),
-        ("Harmless",      "Harmless/Psybient/Sub Hum.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Psybient/Deep Drone Bass.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Psybient/Sub Hum.xml"),
     ]),
 
     # ── Round 2: 8 genre kits ───────────────────────────────────────────────
     ("French Disco", "French Disco/French Disco Full.xml", [
-        ("Harmless",     "Harmless/French Disco/Vocoder Pad.xml"),
-        ("Harmless",     "Harmless/French Disco/Disco String Stack.xml"),
-        ("Harmless",     "Harmless/French Disco/Talkbox Lead.xml"),
-        ("Harmless",     "Harmless/French Disco/Phaser Lead.xml"),
-        ("Harmless",     "Harmless/French Disco/Warm Rhodes.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/French Disco/Vocoder Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/French Disco/Disco String Stack.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/French Disco/Talkbox Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/French Disco/Phaser Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/French Disco/Warm Rhodes.xml"),
         ("BaySickSynth", "BaySickSynth/Synthwave & Vintage/Juno Poly.xml"),
-        ("Harmless",     "Harmless/French Disco/Funky Pluck.xml"),
-        ("Harmless",     "Harmless/French Disco/Analog Brass.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/French Disco/Funky Pluck.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/French Disco/Analog Brass.xml"),
     ], [
-        ("Harmless",    "Harmless/French Disco/Funky Synth Bass.xml"),
-        ("Harmless",    "Harmless/French Disco/Disco Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/French Disco/Funky Synth Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/French Disco/Disco Sub.xml"),
         ("BaySickBass", "BaySickBass/Slap & Electric/Funk Pop Bass.xml"),
         ("BaySickBass", "BaySickBass/Slap & Electric/Synth Slap.xml"),
     ]),
     ("Psytrance", "Psytrance/Psytrance Full.xml", [
-        ("Harmless", "Harmless/Psytrance/Supersaw Lead.xml"),
-        ("Harmless", "Harmless/Psytrance/Trance Pluck.xml"),
-        ("Harmless", "Harmless/Psytrance/Acid Hoover.xml"),
-        ("Harmless", "Harmless/Psytrance/Gated Arp Pad.xml"),
-        ("Harmless", "Harmless/Psytrance/FM Bell Stab.xml"),
-        ("Harmless", "Harmless/Psytrance/Glitch Lead.xml"),
-        ("Harmless", "Harmless/Psytrance/Hi-Pass Pad.xml"),
-        ("Harmless", "Harmless/Psytrance/Tribal Pluck.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Supersaw Lead.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Trance Pluck.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Acid Hoover.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Gated Arp Pad.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/FM Bell Stab.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Glitch Lead.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Hi-Pass Pad.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Tribal Pluck.xml"),
     ], [
-        ("Harmless", "Harmless/Psytrance/Acid Roll Bass.xml"),
-        ("Harmless", "Harmless/Psytrance/Reese Bass.xml"),
-        ("Harmless", "Harmless/Psytrance/Gated Bass Roll.xml"),
-        ("Harmless", "Harmless/Psytrance/Psytrance Sub Pulse.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Acid Roll Bass.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Reese Bass.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Gated Bass Roll.xml"),
+        ("BaySickSolstice", "BaySickSolstice/Psytrance/Psytrance Sub Pulse.xml"),
     ]),
     ("Boom-Bap Hip-Hop", "Boom-Bap Hip-Hop/Boom-Bap Hip-Hop Full.xml", [
-        ("Harmless",     "Harmless/Modern Hip-Hop/Boom-Bap Rhodes.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dusty EP.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Soulful Pad.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Sample Chop Pluck.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Vocal-Style Lead.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Trap Bell.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dark Brooding Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Boom-Bap Rhodes.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dusty EP.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Soulful Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Sample Chop Pluck.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Vocal-Style Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Trap Bell.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dark Brooding Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Lo-Fi Keys.xml"),
     ], [
-        ("Harmless",    "Harmless/Modern Hip-Hop/Boom-Bap 808.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Hip-Hop Sub.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Dirty Square Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Boom-Bap 808.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Hip-Hop Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Dirty Square Bass.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Punchy 808 Bass.xml"),
     ]),
     ("Synth-Pop", "Synth-Pop/Synth-Pop Full.xml", [
-        ("Harmless",     "Harmless/Synth-Pop/Dark Minor Pad.xml"),
-        ("Harmless",     "Harmless/Synth-Pop/Choir Pad.xml"),
-        ("Harmless",     "Harmless/Synth-Pop/FM Plucky EP.xml"),
-        ("Harmless",     "Harmless/Synth-Pop/Industrial Lead.xml"),
-        ("Harmless",     "Harmless/Synth-Pop/Glassy Stab.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synth-Pop/Dark Minor Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synth-Pop/Choir Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synth-Pop/FM Plucky EP.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synth-Pop/Industrial Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synth-Pop/Glassy Stab.xml"),
         ("BaySickSynth", "BaySickSynth/Brass & Strings/80s Synth Brass.xml"),
         ("BaySickSynth", "BaySickSynth/Synthwave & Vintage/VHS Keys.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Sweep Pad.xml"),
     ], [
-        ("Harmless",    "Harmless/Synth-Pop/80s Synth Bass.xml"),
-        ("Harmless",    "Harmless/Synth-Pop/Filtered Saw Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Synth-Pop/80s Synth Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Synth-Pop/Filtered Saw Bass.xml"),
         ("BaySickBass", "BaySickBass/Synthwave & Retrowave/Synthwave Bass.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Filtered Pulse Sub.xml"),
     ]),
     ("Bass Music", "Bass Music/Bass Music Full.xml", [
-        ("Harmless",     "Harmless/Bass Music/Future Bass Chord.xml"),
-        ("Harmless",     "Harmless/Bass Music/Hyper Lead.xml"),
-        ("Harmless",     "Harmless/Bass Music/Aggressive Saw.xml"),
-        ("Harmless",     "Harmless/Bass Music/Resonant Lead.xml"),
-        ("Harmless",     "Harmless/Bass Music/Vocal Chop Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Future Bass Chord.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Hyper Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Aggressive Saw.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Resonant Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Vocal Chop Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Hyperpop Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Glitch Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Lasersaw.xml"),
     ], [
-        ("Harmless",    "Harmless/Bass Music/Skrillex Reese.xml"),
-        ("Harmless",    "Harmless/Bass Music/Wobble Bass.xml"),
-        ("Harmless",    "Harmless/Bass Music/FM Growl.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/Skrillex Reese.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/Wobble Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/FM Growl.xml"),
         ("BaySickBass", "BaySickBass/Reese & Neuro/Dark Neuro.xml"),
     ]),
     ("Krautrock", "Krautrock/Krautrock Full.xml", [
-        ("Harmless",     "Harmless/Krautrock/ARP Lead.xml"),
-        ("Harmless",     "Harmless/Krautrock/Vocoder Robot.xml"),
-        ("Harmless",     "Harmless/Krautrock/Ribbon Glide.xml"),
-        ("Harmless",     "Harmless/Krautrock/Motorik Pad.xml"),
-        ("Harmless",     "Harmless/Krautrock/Vintage String.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Krautrock/ARP Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Krautrock/Vocoder Robot.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Krautrock/Ribbon Glide.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Krautrock/Motorik Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Krautrock/Vintage String.xml"),
         ("BaySickSynth", "BaySickSynth/Synthwave & Vintage/Outrun Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Vintage String Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Arp & Sequencer Tones/Retro Arp.xml"),
     ], [
-        ("Harmless",    "Harmless/Krautrock/Pulse Sub Bass.xml"),
-        ("Harmless",    "Harmless/Krautrock/Sequenced Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Krautrock/Pulse Sub Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Krautrock/Sequenced Bass.xml"),
         ("BaySickBass", "BaySickBass/Vintage Analog/70s Moog Bass.xml"),
         ("BaySickBass", "BaySickBass/Vintage Analog/Analog Pulse.xml"),
     ]),
     ("Prog House", "Prog House/Prog House Full.xml", [
-        ("Harmless",     "Harmless/Prog House/Sidechain Saw Lead.xml"),
-        ("Harmless",     "Harmless/Prog House/Plucky Stab.xml"),
-        ("Harmless",     "Harmless/Prog House/Wet Pad.xml"),
-        ("Harmless",     "Harmless/Prog House/Bell Lead.xml"),
-        ("Harmless",     "Harmless/Prog House/Lasersaw Stab.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Prog House/Sidechain Saw Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Prog House/Plucky Stab.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Prog House/Wet Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Prog House/Bell Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Prog House/Lasersaw Stab.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Supersaw Chords.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Shimmer Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/EDM Pluck.xml"),
     ], [
-        ("Harmless",    "Harmless/Prog House/Big Saw Bass.xml"),
-        ("Harmless",    "Harmless/Prog House/Plucked Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Prog House/Big Saw Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Prog House/Plucked Sub.xml"),
         ("BaySickBass", "BaySickBass/Pluck, Donk & FM/Tech House Stub.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Deep House Sub.xml"),
     ]),
     ("Vintage Soul", "Vintage Soul/Vintage Soul Full.xml", [
-        ("Harmless",      "Harmless/Neo-Soul/Vintage Wurli.xml"),
-        ("Harmless",      "Harmless/Neo-Soul/Hammond B3 Smooth.xml"),
-        ("Harmless",      "Harmless/Neo-Soul/Soulful Rhodes.xml"),
-        ("Harmless",      "Harmless/Neo-Soul/Mellotron Pad.xml"),
-        ("Harmless",      "Harmless/Neo-Soul/Theremin Lead.xml"),
-        ("Harmless",      "Harmless/Neo-Soul/Harpsichord Stab.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Neo-Soul/Vintage Wurli.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Neo-Soul/Hammond B3 Smooth.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Neo-Soul/Soulful Rhodes.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Neo-Soul/Mellotron Pad.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Neo-Soul/Theremin Lead.xml"),
+        ("BaySickSolstice",      "BaySickSolstice/Neo-Soul/Harpsichord Stab.xml"),
         ("BaySickPlayer", "BaySickPlayer/Brass/Trumpet (Sustained).xml"),
         ("BaySickPlayer", "BaySickPlayer/Brass/Trombone (Sustained).xml"),
     ], [
-        ("Harmless",    "Harmless/Neo-Soul/Walking Synth Bass.xml"),
-        ("Harmless",    "Harmless/Neo-Soul/Vintage Round Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Neo-Soul/Walking Synth Bass.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Neo-Soul/Vintage Round Bass.xml"),
         ("BaySickBass", "BaySickBass/Slap & Electric/Picked Bass.xml"),
         ("BaySickBass", "BaySickBass/Slap & Electric/Upright Jazz Sub.xml"),
     ]),
@@ -4070,19 +4070,19 @@ TEMPLATES = [
         ("BaySickBass", "BaySickBass/Slap & Electric/Chorus Slap.xml"),
     ]),
     ("Industrial", "Industrial/Industrial Full.xml", [
-        ("Harmless",     "Harmless/Synth-Pop/Industrial Lead.xml"),
-        ("Harmless",     "Harmless/Cinematic & Drones/Sci-Fi Wash.xml"),
-        ("Harmless",     "Harmless/Cinematic & Drones/Wind Howl.xml"),
-        ("Harmless",     "Harmless/Cinematic & Drones/Granular Texture.xml"),
-        ("Harmless",     "Harmless/Bass Music/Aggressive Saw.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Synth-Pop/Industrial Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Cinematic & Drones/Sci-Fi Wash.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Cinematic & Drones/Wind Howl.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Cinematic & Drones/Granular Texture.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Aggressive Saw.xml"),
         ("BaySickSynth", "BaySickSynth/Cinematic & Drones/Dystopian Siren.xml"),
         ("BaySickSynth", "BaySickSynth/Cinematic & Drones/Tension Drone.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Distorted Lo-Fi Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Distorted Lo-Fi Lead.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Midtempo & Cyberpunk/Industrial Grind.xml"),
         ("BaySickBass", "BaySickBass/Midtempo & Cyberpunk/Doom Saw.xml"),
         ("BaySickBass", "BaySickBass/Midtempo & Cyberpunk/Dystopian Sub.xml"),
-        ("Harmless",    "Harmless/Bass Music/FM Growl.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/FM Growl.xml"),
     ]),
     ("Jazz Fusion", "Jazz Fusion/Jazz Fusion Full.xml", [
         ("BaySickPlayer", "BaySickPlayer/Keys/Upright Piano.xml"),
@@ -4104,62 +4104,62 @@ TEMPLATES = [
     ("Hip Hop (Real)", "Hip Hop (Real)/Hip Hop (Real) Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Vintage Rhodes.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/DX EP.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Soulful Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Soulful Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Leads & Solos/R&B Glide Lead.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Sample Chop Pluck.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Trap Bell.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dark Brooding Pad.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Vocal-Style Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Sample Chop Pluck.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Trap Bell.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dark Brooding Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Vocal-Style Lead.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Punchy 808 Bass.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Hip-Hop Sub.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Boom-Bap 808.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Hip-Hop Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Boom-Bap 808.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Sub Bass.xml"),
     ]),
     ("Lo-Fi (Real)", "Lo-Fi (Real)/Lo-Fi (Real) Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Lo-Fi Keys.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dusty EP.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Soulful Pad.xml"),
-        ("Harmless",     "Harmless/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dusty EP.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Soulful Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Plucks & Mallets/Marimba Pluck.xml"),
         ("BaySickSynth", "BaySickSynth/Brass & Strings/Lo-Fi Brass.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Lo-Fi Tape Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Phase EP.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Vintage Analog/Dusty Bass.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Hip-Hop Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Hip-Hop Sub.xml"),
         ("BaySickBass", "BaySickBass/Slap & Electric/Upright Jazz Sub.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Sub Bass.xml"),
     ]),
     ("Dubstep (Real)", "Dubstep (Real)/Dubstep (Real) Full.xml", [
-        ("Harmless",     "Harmless/Bass Music/Aggressive Saw.xml"),
-        ("Harmless",     "Harmless/Bass Music/Resonant Lead.xml"),
-        ("Harmless",     "Harmless/Bass Music/Vocal Chop Pad.xml"),
-        ("Harmless",     "Harmless/Bass Music/Hyper Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Aggressive Saw.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Resonant Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Vocal Chop Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Hyper Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Glitch Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Lasersaw.xml"),
         ("BaySickSynth", "BaySickSynth/Cinematic & Drones/Sub Drop FX.xml"),
-        ("Harmless",     "Harmless/Cinematic & Drones/Riser FX.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Cinematic & Drones/Riser FX.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Dubstep & Wobble/Classic Wobble.xml"),
         ("BaySickBass", "BaySickBass/Dubstep & Wobble/Heavy Formant Wub.xml"),
-        ("Harmless",    "Harmless/Bass Music/Skrillex Reese.xml"),
-        ("Harmless",    "Harmless/Bass Music/FM Growl.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/Skrillex Reese.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/FM Growl.xml"),
     ]),
     ("Hardstyle (Real)", "Hardstyle (Real)/Hardstyle (Real) Full.xml", [
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Festival Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Leads & Solos/EDM Saw Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Lasersaw.xml"),
-        ("Harmless",     "Harmless/Bass Music/Hyper Lead.xml"),
-        ("Harmless",     "Harmless/Bass Music/Aggressive Saw.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Hyper Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Bass Music/Aggressive Saw.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Crystal Chords.xml"),
-        ("Harmless",     "Harmless/Cinematic & Drones/Riser FX.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Cinematic & Drones/Riser FX.xml"),
         ("BaySickSynth", "BaySickSynth/Cinematic & Drones/Sub Drop FX.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Reese & Neuro/Standard Reese.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Saturation Sub.xml"),
         ("BaySickBass", "BaySickBass/Reese & Neuro/Growl Bass.xml"),
-        ("Harmless",    "Harmless/Bass Music/Skrillex Reese.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Bass Music/Skrillex Reese.xml"),
     ]),
     ("House (Real)", "House (Real)/House (Real) Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/House Organ.xml"),
@@ -4167,8 +4167,8 @@ TEMPLATES = [
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/Supersaw Chords.xml"),
         ("BaySickSynth", "BaySickSynth/Pads & Atmospheres/Shimmer Pad.xml"),
         ("BaySickSynth", "BaySickSynth/Plucks & Mallets/Classic Trance Pluck.xml"),
-        ("Harmless",     "Harmless/Prog House/Plucky Stab.xml"),
-        ("Harmless",     "Harmless/Prog House/Sidechain Saw Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Prog House/Plucky Stab.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Prog House/Sidechain Saw Lead.xml"),
         ("BaySickSynth", "BaySickSynth/Modern EDM & Hyperpop/EDM Pluck.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Deep House Sub.xml"),
@@ -4179,16 +4179,16 @@ TEMPLATES = [
     ("Vox-Driven Hip Hop (Real)", "Vox-Driven Hip Hop (Real)/Vox-Driven Hip Hop (Real) Full.xml", [
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/Vintage Rhodes.xml"),
         ("BaySickSynth", "BaySickSynth/Keys & Electric Pianos/DX EP.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Soulful Pad.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Vocal-Style Lead.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Sample Chop Pluck.xml"),
-        ("Harmless",     "Harmless/Pads & Atmospheres/Vocal Choir Pad.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Trap Bell.xml"),
-        ("Harmless",     "Harmless/Modern Hip-Hop/Dark Brooding Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Soulful Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Vocal-Style Lead.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Sample Chop Pluck.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Pads & Atmospheres/Vocal Choir Pad.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Trap Bell.xml"),
+        ("BaySickSolstice",     "BaySickSolstice/Modern Hip-Hop/Dark Brooding Pad.xml"),
     ], [
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Punchy 808 Bass.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Hip-Hop Sub.xml"),
-        ("Harmless",    "Harmless/Modern Hip-Hop/Boom-Bap 808.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Hip-Hop Sub.xml"),
+        ("BaySickSolstice",    "BaySickSolstice/Modern Hip-Hop/Boom-Bap 808.xml"),
         ("BaySickBass", "BaySickBass/Sub Bass & 808s/Sub Bass.xml"),
     ]),
 ]
@@ -4258,7 +4258,7 @@ def generate_factory_kits():
     # paths without a prefix get the historic "BaySickDrums/" prepended so all
     # the existing kits keep working without edits.
     KNOWN_ENGINE_PREFIXES = ("BaySickDrums/", "BaySickSynth/", "BaySickBass/",
-                              "Harmless/", "BaySickPlayer/")
+                              "BaySickSolstice/", "BaySickPlayer/")
     def _full_path(p: str) -> str:
         if p.startswith(KNOWN_ENGINE_PREFIXES):
             return p
@@ -4315,7 +4315,7 @@ def main():
     starter_set = {"808 Kick", "909 Kick", "808 Snare", "808 Closed Hat",
                    "808 Open Hat", "808 Cowbell", "808 Handclap", "Stick-Hit Drum"}
 
-    drum_count = synth_count = bass_count = harm_count = bsp_count = 0
+    drum_count = synth_count = bass_count = bso_count = bsp_count = 0
 
     # D-CC1: every drum-bank factory preset enables cut-self so retriggering a
     # drum slot kills the prior voice (no DBFS wobble on repeated hits).
@@ -4370,15 +4370,15 @@ def main():
             print(f"  {target.name}/{out.name}")
             bass_count += 1
 
-        # ── 2026-04-26: Harmless preset generation (78 patches, 9 clusters).
+        # ── 2026-04-26: BaySickSolstice preset generation (78 patches, 9 clusters).
         # Genre clusters from Files For Claude/Preset Links.txt. Layered into
-        # Presets/Harmless/<cluster>/ via HARMLESS_CATEGORIES routing.
-        print(f"\nHarmless presets -> {HARMLESS_DIR}")
-        for name, overrides in HARMLESS_RECIPES:
-            target = categorized_dir(HARMLESS_DIR, name, HARMLESS_CATEGORIES)
-            out = write_harmless_preset_xml(target, name, overrides)
+        # Presets/BaySickSolstice/<cluster>/ via BAYSICKSOLSTICE_CATEGORIES routing.
+        print(f"\nBaySickSolstice presets -> {BAYSICKSOLSTICE_DIR}")
+        for name, overrides in BAYSICKSOLSTICE_RECIPES:
+            target = categorized_dir(BAYSICKSOLSTICE_DIR, name, BAYSICKSOLSTICE_CATEGORIES)
+            out = write_baysicksolstice_preset_xml(target, name, overrides)
             print(f"  {target.name}/{out.name}")
-            harm_count += 1
+            bso_count += 1
 
         # ── 2026-04-26 (round 3): BaySickPlayer SFZ-wrapping factory presets.
         # 75 entries — one per Core Library SFZ.  Folders mirror the pack
@@ -4476,9 +4476,9 @@ def main():
     _print_report("Synth",  synth_report)
     _print_report("Bass",   bass_report)
 
-    total = drum_count + synth_count + bass_count + harm_count + bsp_count
+    total = drum_count + synth_count + bass_count + bso_count + bsp_count
     print(f"\nDone. {drum_count} drum + {synth_count} synth + {bass_count} bass + "
-          f"{harm_count} Harmless + {bsp_count} BaySickPlayer = "
+          f"{bso_count} BaySickSolstice + {bsp_count} BaySickPlayer = "
           f"{total} total presets.")
 
     # ── Batch 5: factory kit generation ─────────────────────────────────

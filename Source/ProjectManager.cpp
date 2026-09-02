@@ -431,7 +431,7 @@ void ProjectManager::runFirstLaunchHousekeeping()
 
         // Migrate Presets/ folder (Roaming -> Documents).  Each engine
         // subfolder (BaySickSynth, BaySickBass, BaySickDrums, BaySickPlayer,
-        // Harmless) gets moved together.
+        // BaySickSolstice) gets moved together.
         auto oldPresets = roamingRoot.getChildFile ("Presets");
         auto newPresets = docsRoot.getChildFile ("Presets");
         if (oldPresets.isDirectory() && ! newPresets.isDirectory())

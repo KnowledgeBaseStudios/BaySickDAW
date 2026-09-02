@@ -180,7 +180,7 @@ private:
 
     // The draggable mic pictures (Jeff, 2026-08-11).  One per virtual mic, each
     // bound to that mic's own distance / angle / polar params -- so the knobs
-    // above them and the picture are the SAME placement, like the Harmless XYZ
+    // above them and the picture are the SAME placement, like the BaySickSolstice XYZ
     // pad.  Top / Side is a rendering choice, not a different model: see the
     // header note on MicPlacementView.
     std::unique_ptr<MicPlacementView> mPlacementViewA, mPlacementViewB;
