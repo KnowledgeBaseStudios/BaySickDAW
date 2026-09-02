@@ -131,6 +131,7 @@ manual.
 | File | What it is |
 |---|---|
 | `Verbatim Strings.md` | Every menu item, dialog title and dialog body the manuals must quote character-for-character, transcribed from the source literals. **Quote from there, never from a screenshot** - three separate Task 1 errors came from retyping a string from a picture. |
+| `Manual Pipeline.md` | The generated-manual operating manual: the bsd_shot figure harness (--shot / --docs), the headless menu composer + capture hook, the control tables + blurbs, dot generation with its exception list, and the full regeneration workflow. |
 | `MANUAL-1 Screenshot List.md` | **Not a capture plan.** The 723-shot plan and its `SHOT-###` ids are retired; the file survives as the code-read ELEMENT INVENTORY that callout lists are built from. Read its `Visible:` lines and its APPENDIX; ignore the sittings, counts and time budgets. |
 
 **Still to be written:** `Master Analyzer.md`. The window is in scope (SC-13) and

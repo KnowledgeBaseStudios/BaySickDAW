@@ -26,6 +26,12 @@
 > The single most useful page here for Manual 1's prose is the **APPENDIX** at
 > the bottom: invisible hit targets, live-looking controls that do nothing, the
 > native-vs-styled dialog split, and the one-per-app elements.
+>
+> **2026-08-28 (QA-ManualPress): figure capture is AUTOMATED.**
+> `BaySickDAW.exe --shot` renders the manual's figures headless from the real
+> components - 88 of 90; only `Main frame.png` and `Hosted Plugin.png` remain
+> hand captures. Nobody screenshots the app for the manual anymore. See
+> `Manual Pipeline.md`.
 
 Compiled 2026-08-08 from a seven-agent parallel enumeration of the whole UI, then
 deduped and re-ordered for capture. Source areas: shell-and-menus, system-pages,

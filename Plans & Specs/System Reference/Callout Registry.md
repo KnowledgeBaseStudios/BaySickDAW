@@ -1681,7 +1681,8 @@ The app `Help` menu.
 |---|---|---|---|---|
 | HMENU-1 | `Help Index  (F1)` - opens these manuals | Shell | - | `Workspace and Windows.md` |
 | HMENU-2 | `Key Binds...` - *see KEYS* | Shell | IMP-79 | `Keyboard Shortcuts.md` |
-| HMENU-3 | `About BaySickDAW v1.0` | Shell | - | `Workspace and Windows.md` |
+| HMENU-3 | `View Projects MidiMap` - the project's MIDI mappings | Shell | IMP-64 | `MIDI Learn.md` |
+| HMENU-4 | `About BaySickDAW v1.0` | Shell | - | `Workspace and Windows.md` |
 
 
 ### `TRANRM` - `Recording Menu.png`
