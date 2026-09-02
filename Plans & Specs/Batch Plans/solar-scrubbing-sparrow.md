@@ -146,16 +146,16 @@ No files modified.  Output lands in this plan under Task 4 as the review list.
 
 ### Task 1 - Engine rename in source + factory content
 
-- [ ] `git mv Source/Harmless Source/BaySickSolstice`; `git mv` the 18 `Harmless*` files to `BaySickSolstice*`.
-- [ ] Substitution pass over `Source/` + `CMakeLists.txt` + `Tools/gen_factory_presets.py`: `Harmless` -> `BaySickSolstice` (case-sensitive; lowercase adjective untouched), `_harm_` -> `_bso_`, `"harm"` -> `"bso"`, `tk_{trackId}_harm_` comments.  Then by hand: `harmless` variable (`StandaloneEditor.cpp:15708/15729`) -> `solstice`; `"shot:harmless"` -> `"shot:baysicksolstice"`; group key `"harmless"` -> `"baysicksolstice"`.
-- [ ] Figure-anchor strings: `BSHARMM-` -> `BSSOLM-` first, then `BSHARM-` -> `BSSOL-` (order matters) in `BaySickSolsticeEditor.cpp`, `BaySickSolsticeModEditor.cpp`, `SharedUI.cpp:1767`.  Confirm `"HARM"` at the Blur knob survived.
-- [ ] Verify: `git grep -n "Harmless\|harm_\|\"harm\"\|BSHARM" -- Source CMakeLists.txt Tools` returns nothing; `git grep -n "harmless" -- Source` returns only the adjective.
-- [ ] Generator: run `Tools/gen_factory_presets.py` with `USERPROFILE` pointed at a scratch dir; diff scratch `Presets/*` (minus the engine folder) and `Templates/Factory/*` against the repo - expect zero drift outside the rename.  Copy scratch `Presets/BaySickSolstice/` and `Templates/Factory/*` into the repo; `git rm -r Presets/Harmless`.
+- [x] `git mv Source/Harmless Source/BaySickSolstice`; `git mv` the 18 `Harmless*` files to `BaySickSolstice*`.
+- [x] Substitution pass over `Source/` + `CMakeLists.txt` + `Tools/gen_factory_presets.py`: `Harmless` -> `BaySickSolstice` (case-sensitive; lowercase adjective untouched), `_harm_` -> `_bso_`, `"harm"` -> `"bso"`, `tk_{trackId}_harm_` comments.  Then by hand: `harmless` variable (`StandaloneEditor.cpp:15708/15729`) -> `solstice`; `"shot:harmless"` -> `"shot:baysicksolstice"`; group key `"harmless"` -> `"baysicksolstice"`.
+- [x] Figure-anchor strings: `BSHARMM-` -> `BSSOLM-` first, then `BSHARM-` -> `BSSOL-` (order matters) in `BaySickSolsticeEditor.cpp`, `BaySickSolsticeModEditor.cpp`, `SharedUI.cpp:1767`.  Confirm `"HARM"` at the Blur knob survived.
+- [x] Verify: `git grep -n "Harmless\|harm_\|\"harm\"\|BSHARM" -- Source CMakeLists.txt Tools` returns nothing; `git grep -n "harmless" -- Source` returns only the adjective.
+- [x] Generator: run `Tools/gen_factory_presets.py` with `USERPROFILE` pointed at a scratch dir; diff scratch `Presets/*` (minus the engine folder) and `Templates/Factory/*` against the repo - expect zero drift outside the rename.  Copy scratch `Presets/BaySickSolstice/` and `Templates/Factory/*` into the repo; `git rm -r Presets/Harmless`.
 - [x] Disk (S5): moot - the repo root is the app root (see S5 note); the `git rm` + regenerated folder above is the on-disk state.  `Templates/My Templates/Test Kit.xml` and `Kits/My Kits` are untracked user content in the same tree, untouched.
 - [x] Generator drift FOUND (pre-existing, route at close): run against a scratch home, the generator's output differs from the committed presets for BaySickBass (3 files), BaySickDrums (6), BaySickSynth (7) - e.g. `amp_release` 0.0 vs the committed 0.001 (a later hand fix applied to the XML, never to the recipes).  Re-running the generator for real would regress those 16 files.  Only the renamed folder + `Templates/Factory` were taken from the run.
-- [ ] **Build gate:** pinned `do_build.bat` invocation; six exit codes 0, four link lines, zero errors.
-- [ ] Commit (S9): `QA-Solstice Task 1: Harmless -> BaySickSolstice engine rename (dir, 18 files, classes, engine id, state tag, prefix harm->bso, figure anchors); factory presets + templates regenerated; Documents copy synced (Source, CMakeLists, Tools, Presets, Templates)`.
-- [ ] `/draft-doc running-notes` -> apply.
+- [x] **Build gate:** pinned `do_build.bat` invocation; six exit codes 0, four link lines, zero errors.
+- [x] Commit (S9) = `005fb2ee`: `QA-Solstice Task 1: Harmless -> BaySickSolstice engine rename (dir, 18 files, classes, engine id, state tag, prefix harm->bso, figure anchors); factory presets + templates regenerated; Documents copy synced (Source, CMakeLists, Tools, Presets, Templates)`.
+- [x] `/draft-doc running-notes` -> apply.
 
 **Tell Jeff (smoke, Debug first then Release):**
 (1) Layers ribbon `+ Add` shows `BaySickSolstice`; adding one opens a panel titled BaySickSolstice, accent unchanged.
@@ -168,34 +168,108 @@ No files modified.  Output lands in this plan under Task 4 as the review list.
 
 ### Task 2 - Manual: figure codes, prose, figures, regeneration
 
-- [ ] `git mv` the two src-m2 chapter files; substitution pass over `Manuals/` (excluding `figures/`): `BSHARMM` -> `BSSOLM`, then `BSHARM` -> `BSSOL`, `Harmless` -> `BaySickSolstice`, `_harm_` -> `_bso_`, `"harm"` -> `"bso"`, `harmless->` -> `solstice->`; the two figure file names inside `marker-coords.py`.  Rename the two `System Reference/Pictures` masters.
-- [ ] Callout Registry + Screenshot List: same substitutions (they are the manual's data, so they move with T2 even though they live under Plans & Specs).
-- [ ] Re-shoot: `BaySickDAW.exe --shot --docs` (Release exe from T1's build) into `Manuals/shots-staging/`; diff-sheet against `Manuals/figures/`; copy staging over figures; `git rm` the two old-named PNGs.
-- [ ] `python Manuals/assets/generate-manual.py` - expect `topics placed: 89 of 89`, no `DOT MISMATCH` regressions vs the QA-ManualPress baseline, `BSSOL` dots generated.
-- [ ] Verify: `git grep -n "Harmless\|BSHARM" -- Manuals "Plans & Specs/System Reference/Callout Registry.md" "Plans & Specs/System Reference/MANUAL-1 Screenshot List.md"` returns nothing.
-- [ ] Commit (S9): `QA-Solstice Task 2: manual follows the rename - figure codes BSHARM/BSHARMM -> BSSOL/BSSOLM, prose + In The Weeds quotes, figures re-shot, registry + screenshot list, manual regenerated (Manuals + System Reference)`.
-- [ ] `/draft-doc running-notes` -> apply.
+- [x] `git mv` the two src-m2 chapter files; substitution pass over `Manuals/` (excluding `figures/`): `BSHARMM` -> `BSSOLM`, then `BSHARM` -> `BSSOL`, `Harmless` -> `BaySickSolstice`, `_harm_` -> `_bso_`, `"harm"` -> `"bso"`, `harmless->` -> `solstice->`; the two figure file names inside `marker-coords.py`.  Rename the two `System Reference/Pictures` masters.
+- [x] Callout Registry + Screenshot List: same substitutions (they are the manual's data, so they move with T2 even though they live under Plans & Specs).
+- [x] Re-shoot: `BaySickDAW.exe --shot --docs` (Release exe from T1's build) into `Manuals/shots-staging/`; diff-sheet against `Manuals/figures/`; copy staging over figures; `git rm` the two old-named PNGs.
+- [x] `python Manuals/assets/generate-manual.py` - expect `topics placed: 89 of 89`, no `DOT MISMATCH` regressions vs the QA-ManualPress baseline, `BSSOL` dots generated.
+- [x] Verify: `git grep -n "Harmless\|BSHARM" -- Manuals "Plans & Specs/System Reference/Callout Registry.md" "Plans & Specs/System Reference/MANUAL-1 Screenshot List.md"` returns nothing.
+- [x] Commit (S9) = `fe4931d3`: `QA-Solstice Task 2: manual follows the rename - figure codes BSHARM/BSHARMM -> BSSOL/BSSOLM, prose + In The Weeds quotes, figures re-shot, registry + screenshot list, manual regenerated (Manuals + System Reference)`.
+- [x] `/draft-doc running-notes` -> apply.
 
 **Tell Jeff:** (1) F1 manual: sidebar shows BaySickSolstice under the instruments, the chapter's figure is the new panel with dots on it, In Depth control table present; (2) search "Harmless" returns nothing, search "Solstice" finds the chapter; (3) eyeball `Main frame.png` and `Hosted Plugin.png` (the two hand captures) for any visible "Harmless" - if either shows it, that is a re-capture for you.
 
 ### Task 3 - Docs + memory scrub (everything, history included)
 
-- [ ] `git mv "Plans & Specs/System Reference/Harmless.md" "Plans & Specs/System Reference/BaySickSolstice.md"`.
-- [ ] Substitution pass over every remaining tracked file from `git grep -l Harmless -- . ":!libs" ":!juce"`: `Harmless` -> `BaySickSolstice`, `_harm_`/`tk_..._harm_` -> `_bso_`, `HarmlessState` etc. follow.  Do NOT touch the lowercase adjective or `HARM` knob mentions.  Includes: Plans & Specs (all subfolders), CLAUDE.md (engine names line, the `### Harmless-specific` heading, `HarmlessLAF` / `HarmlessEditor` / `HarmlessCurvePoint`), README.md, `.claude/agents/*.md`, `Files For Claude/` if any.
-- [ ] Memory, both dirs: same substitution; **rewrite `feedback_no_brand_names_in_user_facing_strings.md`** - remove `Harmless` from "brand-safe substitutes", add the 2026-09-02 miss as the second recorded incident and the lesson (our own engine names must be checked against competitor product catalogs, not assumed safe because we coined them); update `MEMORY.md` hooks; `feedback_match_jeff_text_casing.md` example.
-- [ ] Verify: `git grep -n "Harmless" -- . ":!libs" ":!juce"` returns nothing; `grep -rn Harmless ~/.claude/projects/*BaySickDAW*/memory ~/.claude/projects/*Vibesynth*/memory` returns nothing except deliberate historical mentions inside the brand rule's incident record.
-- [ ] Build gate: no source touched in this task; T1's gate stands (recorded in running notes).
-- [ ] Commit (S9): `QA-Solstice Task 3: docs + memory scrub, history included - Plans & Specs (System Reference/Harmless.md renamed), CLAUDE.md, STANDALONE_UI_CHANGES, README, .claude/agents (Plans & Specs + CLAUDE.md + Source/Standalone/STANDALONE_UI_CHANGES.md + README + .claude)`.
-- [ ] `/draft-doc running-notes` -> apply.
+- [x] `git mv "Plans & Specs/System Reference/Harmless.md" "Plans & Specs/System Reference/BaySickSolstice.md"`.
+- [x] Substitution pass over every remaining tracked file from `git grep -l Harmless -- . ":!libs" ":!juce"`: `Harmless` -> `BaySickSolstice`, `_harm_`/`tk_..._harm_` -> `_bso_`, `HarmlessState` etc. follow.  Do NOT touch the lowercase adjective or `HARM` knob mentions.  Includes: Plans & Specs (all subfolders), CLAUDE.md (engine names line, the `### Harmless-specific` heading, `HarmlessLAF` / `HarmlessEditor` / `HarmlessCurvePoint`), README.md, `.claude/agents/*.md`, `Files For Claude/` if any.
+- [x] Memory, both dirs: same substitution; **rewrite `feedback_no_brand_names_in_user_facing_strings.md`** - remove `Harmless` from "brand-safe substitutes", add the 2026-09-02 miss as the second recorded incident and the lesson (our own engine names must be checked against competitor product catalogs, not assumed safe because we coined them); update `MEMORY.md` hooks; `feedback_match_jeff_text_casing.md` example.
+- [x] Verify: `git grep -n "Harmless" -- . ":!libs" ":!juce"` returns nothing; `grep -rn Harmless ~/.claude/projects/*BaySickDAW*/memory ~/.claude/projects/*Vibesynth*/memory` returns nothing except deliberate historical mentions inside the brand rule's incident record.
+- [x] Build gate: no source touched in this task; T1's gate stands (recorded in running notes).
+- [x] Commit (S9) = `363b5ee4`: `QA-Solstice Task 3: docs + memory scrub, history included - Plans & Specs (System Reference/Harmless.md renamed), CLAUDE.md, STANDALONE_UI_CHANGES, README, .claude/agents (Plans & Specs + CLAUDE.md + Source/Standalone/STANDALONE_UI_CHANGES.md + README + .claude)`.
+- [x] `/draft-doc running-notes` -> apply.
 
 ### Task 4 - Brand-safety review list
 
-- [ ] Dispatch ONE agent (general-purpose, read-only) with this brief: read every USER-FACING string in `Source/` (tooltips, `setBodyTooltip`, visible labels, `ChickenHeadSelector` option labels + marks + hover text, `PopupMenu` items, button text, `AlertWindow` / message-box text, drawn `Label` / `drawText` literals, knob names, `buildKnobs` tooltip slots, `setupNamed` args, window titles); every shipped content NAME (file and folder names under `Presets/`, `Kits/`, `Templates/`); the manual prose (`Manuals/src-m2/**`); the installer's visible strings (`Installer/*.nsi`).  Flag every real company / product / model / artist name.  For each: file:line (or path), the exact string, the mark and who owns it, and a class - (A) a real mark used AS our name for a feature / preset / kit; (B) a nominative reference ("if you come from X", "in the style of X") in shipped text; (C) a generic-use term that is also someone's mark (808, hoover, supersaw, reese).  Do not fix anything.  Seed the agent with the 2026-09-02 grep findings so it extends them rather than re-finding them.
-- [ ] Merge the agent's list with the grep findings; land the full list in this section as a table; present to Jeff for per-item calls (rename / keep / defer).  **STOP** - the per-item calls are spec calls.
+- [x] Dispatch ONE agent (general-purpose, read-only) with this brief: read every USER-FACING string in `Source/` (tooltips, `setBodyTooltip`, visible labels, `ChickenHeadSelector` option labels + marks + hover text, `PopupMenu` items, button text, `AlertWindow` / message-box text, drawn `Label` / `drawText` literals, knob names, `buildKnobs` tooltip slots, `setupNamed` args, window titles); every shipped content NAME (file and folder names under `Presets/`, `Kits/`, `Templates/`); the manual prose (`Manuals/src-m2/**`); the installer's visible strings (`Installer/*.nsi`).  Flag every real company / product / model / artist name.  For each: file:line (or path), the exact string, the mark and who owns it, and a class - (A) a real mark used AS our name for a feature / preset / kit; (B) a nominative reference ("if you come from X", "in the style of X") in shipped text; (C) a generic-use term that is also someone's mark (808, hoover, supersaw, reese).  Do not fix anything.  Seed the agent with the 2026-09-02 grep findings so it extends them rather than re-finding them.
+- [x] Merge the agent's list with the grep findings; land the full list in this section as a table; present to Jeff for per-item calls (rename / keep / defer).  **STOP** - the per-item calls are spec calls.  (Landed above 2026-09-02; presented in chat.)
 - [ ] Renames Jeff rules in: applied in a follow-up task added here (presets regenerate through the generator; UI strings by hand), one build gate, one commit.
 - [ ] `/draft-doc running-notes` -> apply.
 
-**Grep findings to seed the agent (2026-09-02):** kit folders `TR-808` / `TR-909` (Roland, 6 kit files); `Presets/BaySickDrums/Yamaha Group/` (16 files); Roland `Fat Juno Sub`, `Juno Poly`, `Juno Warm Pad`, `Jupiter Brass`, `Jupiter Brass Pad`, `JP-8000 Supersaw Pad`; Yamaha `DX7 Glass/Metal/Woodblock`, `DX Style Tubulum`, `CS-80 Bell`, `CS-80 Brass Lead`, `RX-11 Kick/Snare`; Moog x8 (`Moog Sub`, `70s Moog Bass`, `Moog Minimoog Bass`, `Analog Moog Style`, `Moog Lead`, `Moog Lead Woop`, `Moog Style Lead`, `Moog Hz Interval`); Rhodes x6, Wurlitzer/Wurli x4, Hammond x3 + `B3` x2, `Mellotron Pad`, `Clavinet` / `Synth Clav`, `Farfisa Organ`, `Solina Strings`, `OB-8 Brass` / `OB-8 String Pad` (Oberheim), `Prophet Sync` (Sequential), `ARP Lead` (Korg); Nintendo `Gameboy Pulse` x2; `Skrillex Reese` (a living person); tooltips `"Raise for Juno/Prophet/CS-80 analog warmth"` (`BaySickBassEditor.cpp:311`, `BaySickSynthEditor.cpp:313`) and `"(Van Halen 'Jump', Final Countdown brass, Moog/ARP)"` (`BaySickSynthEditor.cpp:104`).  Class C candidates: bare `808`/`909`/`303`, `Reese`, `Supersaw`, `Acid Hoover`, `VHS Keys`, `SID Chip`, every arpeggio "Arp".
+**Review list (agent pass landed 2026-09-02; spot-checked: Riff Machine, Furman EQ topic title, VSTPlugin entry, Big Rusty Drums provenance, IMP-35 stale row, About-box comment, every NEW preset name, `Hosted Plugin.png` viewed).  Jeff rules per group or per item: rename / keep / defer.**
+
+*G1 - our feature / engine / menu names built on someone else's product name (the Harmless class)*
+
+| # | Class | Item | Where | Mark + owner | Call |
+|---|---|---|---|---|---|
+| 1 | A | "Riff Machine" + its 8-step list (Progression, Chords, Arpeggiation, Mirror, Levels, Articulation, Groove, Fit) | `KeyBindings.cpp:496-497`, `PianoRoll.cpp:5343+` (dialog tabs), manual `PRT.html` | Image-Line - FL Studio's piano-roll generator; the step list is FL's verbatim | |
+| 2 | A | "BaySickRustyDrums", "+ Add BaySickRustyDrums", "Rusty Drums Map", "Rusty Player", pack "Big Rusty Drums" | `RibbonTabBar.cpp:587-930`, `RustyDrumsMapWindow.cpp:113`, `BaySickRustyDrumsPage.cpp:328`, `CoreLibraryInstaller.h:106`; manual `BSRD*`, `TABUTN` | Karoryfer Samples "Big Rusty Drums" (their library name; CC-BY content, uncredited in About) | |
+| 3 | A | "BaySickNAMIR", "NAM/IR", "NAM Pedal", "Load NAM Pedal", "User NAM Pedal", "NAM Bypass", "Load .nam" | `BaySickNAMIREditor.cpp:74`, `SharedUI.h:352`, `SlotComponent.cpp:1307`, `BaySickPedalsEditor.cpp:493,521`, `BaySickNAMIRProcessor.cpp:113`, `EffectEditorPanels.cpp:6598`; manual `BSNAM`, `BSPDLP`, `BSGBM` | Neural Amp Modeler (Steven Atkinson, MIT; no registration known; uncredited in About) | |
+| 4 | A | "+ Add VSTPlugin" (product-style, no space) | `RibbonTabBar.cpp:893`; manual `TABUTN`, `PLUG` | VST - Steinberg (registered) | |
+| 5 | A | "Furman EQ" as the In The Weeds topic title (x6 in `manual.html`) | `Callout Registry.md:555` (IMP-26) | Furman (Nortek); the panel itself is "EQFH Style" | |
+
+*G2 - preset / kit / template names carrying a registered mark (A)*
+
+| # | Item | Where | Mark + owner | Call |
+|---|---|---|---|---|
+| 6 | TR-606 / TR-808 / TR-909 kit folders (9 kit files) + 3 templates; default kit hardcoded `"TR-808/TR-808 Full.xml"` | `Kits/Factory/TR-*`, `Templates/Factory/TR-*.xml`, `StandaloneEditor.cpp:8581` | Roland | |
+| 7 | Fat Juno Sub, Juno Poly, Juno Warm Pad, Jupiter Brass, Jupiter Brass Pad, JP-8000 Supersaw Pad; Prophet Sync | `Presets/BaySickBass`, `Presets/BaySickSynth` | Roland; Sequential | |
+| 8 | `Presets/BaySickDrums/Yamaha Group/` (folder, 16 files; 33 refs inside kit files) + DX7 Glass / Metal / Woodblock, DX Style Tubulum, RX-11 Kick / Snare; DX EP, DX Bass FM, DX Lead FM; CS-80 Bell, CS-80 Brass Lead | `Presets/BaySickDrums`, `BaySickSynth`, `BaySickBass`; templates `FM Digital`, `Hip Hop (Real)`, `TR-808` | Yamaha | |
+| 9 | Moog Sub, 70s Moog Bass, Moog Minimoog Bass, Analog Moog Style, Moog Lead, Moog Lead Woop, Moog Style Lead, Moog Hz Interval | `Presets/BaySickBass`, `BaySickSynth` | Moog Music (inMusic); Minimoog also a mark | |
+| 10 | `Presets/BaySickDrums/Simmons Group/` (folder, 16 files; 50 refs inside kit files) + Simmons 80s Tom, Simmons Kick, Simmons Low Tom, Simmons SDS-7 Kick, Simmons Snare, Simmons Sweep FX, Simmons Tom Hi / Lo, Vintage Simmons Snare; Disco Syndrum; Linn Disco Kick | `Presets/BaySickDrums` | Simmons (Guitar Center); Syndrum (Pollard); Linn (Roger Linn - living person) | |
+| 11 | Rhodes x6 (Warm / Boom-Bap / Soulful Rhodes, Rhodes EP, Rhodes Wurli Strike, Vintage Rhodes); Wurlitzer / Wurli x4; Hammond x3 + B3 x2; Clavinet + Synth Clav x2; Farfisa Organ; Vox Continental; Mellotron Pad; Solina Strings | `Presets/BaySickSolstice`, `BaySickSynth` | Rhodes Music Group; Wurlitzer; Hammond (Suzuki); Hohner; Farfisa; Vox (Korg); Mellotron; Solina (Eminent / ARP) | |
+| 12 | OB-8 Brass x2, OB-8 String Pad; ARP Lead | `Presets/BaySickSolstice`, `BaySickSynth` | Oberheim; ARP (Korg) | |
+| 13 | Gameboy Pulse x3 | `Presets/BaySickBass`, `BaySickSolstice`, `BaySickSynth` | Nintendo | |
+| 14 | `1960-V30.wav` - the only shipped IR; name shows in the CAB field | `Presets/BaySickNAMIR/IR/` | Marshall 1960 cab; Celestion Vintage 30 | |
+| 15 | Skrillex Reese (+ 4 template tab names); Rezz Style Bass; Vangelis Brass (+ template); Sci-fi Zap R2-D2; Doctor Who Theremin | `Presets/BaySickSolstice`, `BaySickBass`, `BaySickSynth`; templates | Living people (Skrillex, Rezz); Vangelis estate; Lucasfilm / Disney; BBC | |
+
+*G3 - tooltips (B)*
+
+| # | String | Where | Mark | Call |
+|---|---|---|---|---|
+| 16 | "Metallic / bell / sci-fi character. CS-80 and ARP 2600 signature." | `BaySickBassEditor.cpp:111`, `BaySickSynthEditor.cpp:112` (+ `bsd-docs.json`, manual control tables) | Yamaha; ARP (Korg) | |
+| 17 | "Raise for Juno/Prophet/CS-80 analog warmth." | `BaySickBassEditor.cpp:311`, `BaySickSynthEditor.cpp:313` | Roland; Sequential; Yamaha | |
+| 18 | "Classic 80s sync-lead sound (Van Halen 'Jump', Final Countdown brass, Moog/ARP)." | `BaySickSynthEditor.cpp:104` | Van Halen; a song title; Europe's song; Moog; ARP | |
+| 19 | "(try 800 Hz with SQUARE+SQUARE for 808 cowbell)", "Classic 808 cowbell ..." | `BaySickSynthEditor.cpp:98, 568` | Roland (class C) | |
+
+*G4 - the In The Weeds manual publishes source comments (B) - a POLICY conflict, not per-line*
+
+The comment policy allows modeled-gear names in comments (nominative fair use).  The 2026-08-28 ruling that every In The Weeds topic shows the COMPLETE code made those comments user-facing.  Shipping in `manual.html` today: IMP-1 (LA-2A, 1176, FL Studio, Ableton), IMP-7 (SSL, Neve), IMP-11 (Eventide H910), IMP-18 (DS-1 x3), IMP-35 (SM58, SM7B, U87, C414, ELA M 251 / C12 in the excerpt's comments), IMP-50 (FL / Logic / ProTools), IMP-67 (Vital / Surge XT), IMP-68 (FL Studio), IMP-84 / 86 (808 / 909, Hammond, DX7), IMP-48 (Apple).  Widening any excerpt pulls in more (`MicSimDSP.cpp:43-99`: Beta 58, e835, TLM103, KM184, R-121, D112, Beta 52).  Shapes: (a) accept as nominative in a technical appendix; (b) strip gear names from comments in EXCERPTED ranges only; (c) drop In The Weeds from the shipped build and keep it as a repo doc.
+
+*G5 - manual figures showing third-party products / artwork (B)*
+
+| # | Figure | Content | Owner | Call |
+|---|---|---|---|---|
+| 20 | `Hosted Plugin.png` (hand capture, the Plugins-tab illustration) | ENVOSOUND full GUI + "Tsuga audio" logo | Tsuga Labs | |
+| 21 | `Plugin Search.png` | Envosound / Tsuga Labs, Filterjam / AudioThing, scan path `Steinberg\VSTPlugins` | Tsuga; AudioThing; Steinberg | |
+| 22 | `Audio & Midi Settings.png` | "SAMSUNG (NVIDIA High Definition Audio)", "FLkey MIDI" | Samsung; NVIDIA; Novation (FL licensed from Image-Line) | |
+| 23 | `BaySickRustyDrums Main / Drum Kit / Kick / Snare / Toms / Hi-Hat / Cymbals / Noises`, `BaySickGuitars`, `BaySickBasses` | Karoryfer's kit photograph + ARIA panel artwork, program names | Karoryfer (CC-BY) | |
+
+*G6 - attribution and notices (not marks; ties to `DSP Portability Matrix.md` section 10)*
+
+| # | Item | Where | Call |
+|---|---|---|---|
+| 24 | Help > About credits INCOMPLETE by its own comment: "Built with JUCE 7" (we ship 8), sfizz, LAME - missing NAM core, Rubber Band, Signalsmith, WORLD, Karoryfer, VSCO, Steinberg VST3 / ASIO | `StandaloneEditor.cpp:12040-12047` | |
+| 25 | No VST / ASIO trademark acknowledgement anywhere; "ASIO" also used as OUR record-mode name even under Windows Audio | `TRANRM.html`, record chevron `GlobalTransportBar.cpp:469`, `StandaloneApp.cpp:951` | |
+| 26 | Library names as picker labels: "Rubber Band - Balanced", "Signalsmith - Lightest (Low CPU)", "WORLD - Highest Quality (High CPU)" | `BaySickAlignEditor.cpp:822-824`, `BaySickPitchEditor.cpp:1605, 2838`, `LibraryPitchShifters.cpp:219, 348`; manual `BSPIT` | |
+| 27 | Microsoft nominative strings (installer pages, "Windows Audio", "Show in Explorer", "Recycle Bin") | `Installer/*.nsi`, `StandaloneApp.cpp`, `BuilderPage.cpp:1196`, `ProjectBrowserWindow.cpp:309` | |
+
+*G7 - generic-use terms that are also someone's mark (C)*
+
+| # | Item | Where | Call |
+|---|---|---|---|
+| 28 | Bare 303 / 808 / 909 / 606 folders + ~60 files; default drum `"808 Group/808 Kick.xml"` | `Presets/*`, `StandaloneEditor.cpp:9384` | |
+| 29 | SUPERSAW waveform label + "classic supersaw stack" tooltip + 4 Supersaw presets | `BaySickBassEditor.cpp:90,299`, `BaySickSynthEditor.cpp:90,301`, both processors, `BaySickVisualizerScreen.cpp:248` | |
+| 30 | Reese folder + 9 files; Acid Hoover; VHS Keys x2; SID Chip x2; Outrun x3; Trumpet (Harmon Mute); Upright Piano (VS) (Versilian, uncredited) | `Presets/*` | |
+| 31 | Pedal names = the modeled products' own names: Blues Drive (BD-2 Blues Driver), Bass Driver (SansAmp Bass Driver), Bass Overdrive (ODB-3), Acoustic Simulator (AC-3), Acoustic Preamp (AD-2) | `BaySickPedalsEditor.cpp:530-549`, figures, manual `BSPDLP`, registry IMP-17 / 29 / 30 / 32 / 33 | |
+| 32 | Polyphonic Synth voice picker = SY-1's 11 categories | `EffectEditorPanels.cpp:5294-5306` | |
+| 33 | Compressor vocabulary = 1176 / LA-2A controls: "All-buttons in", "Peak Reduction", "Compress / Limit", "+4 / +8 / +10" | `EffectEditorPanels.cpp:441-648` | |
+| 34 | Vocal vocabulary = Auto-Tune's: "Retune ms", "Humanize", "Throat", "Formant Preserve"; `BSV.html` 'the difference between "tuned" and "auto-tuned"' (the mark as a verb) | `BaySickVocalEditor.cpp:188-205`, `BaySickPitchEditor.cpp:1645, 1728`, manual `BSV`, `BSPIT` | |
+
+**Not flagged on purpose (agent's judgment, overrule if you disagree):** "Arp" meaning arpeggio; "RAT-B" (Ratio B); "Pendulum I-V"; "Boss Battle Bass"; ordinary-English FL vocabulary (Playlist, Ghost Notes, Stamp, Chop, Glue, Strum, Riff Machine's progression names); Maximizer / Glue / Auto MU; the Mic Sim display names (verified generic in the binary); Dreadnought / Parlor / Jumbo; Fuzz modes Gated / Germanium / Octave; standards bodies; Talkbox / Vocoder; slang and genre names; Karoryfer program names shown as loaded content; device-name matchers and comments; CSS font names; MMCSS "Pro Audio"; our own names and the "<letters> Style" aliases.
+
+**Not covered:** the 4 GB Core Library (fetched at first run - Karoryfer / VSCO sample, SFZ and program names inside the ten packs); `NPN-1.nam` provenance; ~134 figure PNGs not opened; the three PDFs (treated as renders of `manual.html`); brand terms outside the ~600-term list inside code excerpts; strings assembled at runtime from OS data.
+
+**Fixed in this commit, not a call:** the IMP-35 code excerpt still quoted `"Vintage LDC '87"`, the pre-rename display name from `030da1ae` (the excerpt was never re-quoted after that commit) - now `"Condenser Large"`, matching `MicSimDSP.cpp:52`; `manual.html` regenerated.
 
 ---
 
@@ -224,3 +298,18 @@ architecture this batch depends on.
 ## Carry-Over
 
 (Rule 2 block, written at every stopping point.)
+
+**Completed:** T1 `005fb2ee`, T2 `fe4931d3`, T3 `363b5ee4`, T4 list landed (this commit).  Rename is
+shipped end to end: source, factory content, manual, every doc, memory.
+**In-flight:** nothing uncommitted.  Jeff's Debug-then-Release smoke (seven T1 scenarios + three
+T2 checks, listed under the tasks) is outstanding - his part.
+**Assumptions changed:** S5 moot (repo root IS the app root); the QA-ManualPress In The Weeds
+extractors are one-shot builders, never re-run them; the preset generator has drifted from the
+committed presets (16 files) - never run it for real without reconciling.
+**Resume action:** wait for Jeff's per-item rulings on the T4 review list (G1-G7).  Renames he
+rules in become Task 5 (presets through the generator ONLY for the renamed folder pattern, UI
+strings by hand, one build, one commit).  Then close: `/draft-doc batch-close` -> `/review-batch
+QA-Solstice` -> apply -> close commit.  Rule 3 routing at close: generator drift, five orphan
+figure PNGs, NAM Pedal tile clipping, QA-EqPro / QA-ManualPress missing Main Plan rows.
+**Implemented-work entry needed:** "QA-Solstice - Harmless -> BaySickSolstice in full (410
+files), plus the shipped-name brand review (34 items, G1-G7) and its rulings."

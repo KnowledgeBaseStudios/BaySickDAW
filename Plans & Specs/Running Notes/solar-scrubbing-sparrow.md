@@ -147,3 +147,34 @@
 ## 2026-09-02 - Task 2 - committed `fe4931d3`
 
 ## 2026-09-02 - Task 3 - committing the scrub (working-tree work logged above)
+
+## 2026-09-02 - Task 3 - committed `363b5ee4` (86 files)
+
+## 2026-09-02 - Task 4 - brand review list landed
+
+- One read-only agent (520k tokens, 69 tool uses): every preset / kit /
+  template name (946 files), all 80 In Depth pages in full, the 90 In The Weeds
+  pages (prose in full, ~950 KB of code excerpts regex-scanned), control blurbs,
+  the installer, and every capitalised string literal in Source (4,565 unique)
+  plus an ALL-CAPS pass that caught `SUPERSAW`.  14 figure PNGs viewed.
+- Spot-checked before relaying: Riff Machine (`KeyBindings.cpp:496`, an
+  FL-replica generator carrying FL's tool name), "Furman EQ" as a live manual
+  topic title (`Callout Registry.md:555`, x6 in manual.html), `+ Add VSTPlugin`
+  (`RibbonTabBar.cpp:893`), Big Rusty Drums = Karoryfer's library name
+  (`CoreLibraryInstaller.h:106,954`), the About-box INCOMPLETE comment
+  (`StandaloneEditor.cpp:12042`), every NEW preset / kit name via `git ls-files`,
+  and `Hosted Plugin.png` viewed (ENVOSOUND GUI + Tsuga audio logo).  All held.
+- Landed in the plan as 34 items in seven groups: G1 our names built on
+  someone else's product name (Riff Machine, BaySickRustyDrums / Big Rusty
+  Drums, NAM in engine / pedal names, VSTPlugin, Furman EQ title); G2 preset /
+  kit / template names carrying marks (Roland, Yamaha folder, Moog, Simmons
+  folder, Rhodes / Wurli / Hammond / Clav / Farfisa / Vox / Mellotron / Solina,
+  Oberheim, ARP, Nintendo, the 1960-V30 IR, five people / characters); G3
+  tooltips; G4 the In The Weeds policy conflict (complete-code excerpts publish
+  gear-name comments); G5 figures with third-party products / artwork; G6
+  attribution gaps (About box, VST / ASIO notices, library names as labels);
+  G7 generic-use terms.
+- **Fixed, not a call:** `IMP-35.html` still quoted `"Vintage LDC '87"` from
+  before `030da1ae` - the excerpt was never re-quoted after the mic rename.
+  Now `"Condenser Large"`; manual regenerated.
+- **STOP:** per-item rulings are Jeff's.  Carry-Over written in the plan.
