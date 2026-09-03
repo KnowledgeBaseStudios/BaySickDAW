@@ -166,7 +166,7 @@ engine content, About and `NOTICES.txt` list every third-party component.
 
 ## Cross-batch rules
 
-- The brand docket's rulings apply to the fork at M5 and to BaySySickDAW at
+- The brand docket's rulings apply to the fork at M5 and to BaySickDAW at
   QA-Solstice Task 5, separately (10b).
 - Nothing from the fork is ported back to BaySickDAW inside these batches;
   findings that also apply here are routed through BaySickDAW's own Rule 3 at
