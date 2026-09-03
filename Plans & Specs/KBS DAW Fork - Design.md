@@ -164,8 +164,8 @@ orphans reported through the missing-file report the way missing samples are).
   plugin's own bus names, each with an insert picker (any insert, a new
   insert, or unrouted); Out 1 defaults to the instrument's insert; "Assign
   remaining outputs to new inserts" fills the rest in slot order.  A plugin
-  with one output shows one row.  Placement: pending Jeff (row button in the
-  Instruments window, the instrument's own window, or both).
+  with one output shows one row.  Placement (Jeff, 2026-09-02): (a) an
+  **Outputs** button on the instrument's row in the Instruments window.
 - **Mixer:** the insert bank in slot order, Master pinned; `+ Add insert`; each
   strip: input source + gain (utility row on every strip), fader, pan, mute,
   solo, polarity, width, arm, routes (the "+" menu offers every other insert,
@@ -318,3 +318,7 @@ Every path- and name-bound identifier is listed in the map's section 9.
 - What, if anything, goes in the freed ribbon width.
 - The brand-docket renames (both trees, 10b).
 - The Tune Generator's eight step names (brand docket item 1, "still open").
+- The Big Rusty Drums line on the KBS-Mixer walk sheet: through a generic SFZ
+  player it shows one output (the kit has no `output=` opcodes); it can only pass
+  once a KBS Rusty plugin exists.  Whether it stays on that sheet or moves to the
+  plugin's first test is Jeff's call (posed 2026-09-02, unanswered).
