@@ -54,7 +54,7 @@ window (decision 5, which retired the earlier tabs-from-buses idea).
 | 8.3 | Notices | (a) Built in from day one: About box listing every third-party component with its licence, a NOTICES file beside the exe, VST and ASIO trademark lines, fontaudio OFL + CC BY texts, the LAME credit. |
 | 8.4 | Installer | (a) The NSIS installer renamed - product, paths, registry keys; packages the LAME DLL and both helpers; no Presets / Kits / Templates inputs. |
 | 9.1 | Where it lives | (a) Its own git repository nested at `Documents\BaySickDAW\KBS DAW\`, ignored by this repo; the folder moves with its history. |
-| 9.2 | Build | (a) Its own `CMakeLists.txt` + `do_build.bat` inside the folder, building into `KBS DAWuild\`, helpers included. |
+| 9.2 | Build | (a) Its own `CMakeLists.txt` + `do_build.bat` inside the folder, building into `KBS DAW\build\`, helpers included. |
 | 9.3 | Dependencies | (a) JUCE and the kept libraries (concurrentqueue, WebView2, fontaudio, LAME, the ASIO headers) copied into the fork - self-contained and movable. |
 | 10 | Sequencing | (b) Copy now; brand renames from the docket are applied in both trees later (twice).  QA-Solstice T5 and the QA-ManualPress close wait. |
 | - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1, ruled 2026-09-02; applies to BaySickDAW too). |
