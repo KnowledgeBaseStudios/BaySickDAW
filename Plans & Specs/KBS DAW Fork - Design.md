@@ -1,8 +1,12 @@
 # KBS DAW Fork - Design (living doc, workshop started 2026-09-02)
 
-**Status: in workshop.**  Decisions land here as Jeff makes them; the code map
-(the `lite-shell-map` workflow) lands as a Research Report and is cross-linked
-when it finishes.  When the design is approved this becomes the spec the
+**Status: in workshop.**  Decisions land here as Jeff makes them.  The code map is
+[`Research Reports/lite-shell-map-2026-09-02.md`](Research Reports/lite-shell-map-2026-09-02.md)
+(gap map) + `lite-shell-map-2026-09-02-reports.md` (eleven reader reports verbatim).
+The critic's 11 areas that did not get a second read (render-engine internals, audio
+device init, templates, strip-EQ removal depth, export + loudness + VersionCapture,
+theming, manuals window, project lifecycle shell, Core Library call sites, auto-freeze,
+installer) are implementation-plan detail, mapped at the writing-plans phase.  When the design is approved this becomes the spec the
 implementation plan is written from.
 
 ## What it is
