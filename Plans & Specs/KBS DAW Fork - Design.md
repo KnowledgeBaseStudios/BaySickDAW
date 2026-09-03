@@ -42,13 +42,16 @@ window (decision 5, which retired the earlier tabs-from-buses idea).
 | 5 | Tabs-from-buses | **Retired** (workshopped 2026-09-02).  It tied navigation to routing: tabs would churn as you mix, an instrument routed straight to Master has no home except a "Master tab" that is just an instrument list, multi-out instruments (4.8) feed several inserts at once, and grouping-by-bus already exists in the Mixer (groups strips by destination) and the Effects page (bus + members). |
 | 5A | Ribbon | (a) Five icon buttons: Builder, Mixer, Effects, Piano Roll, Instruments.  No per-engine instance tabs.  The freed width is free space - what goes there is open (candidates only: window toggles, master meter, browser, snap / grid, project name); nothing for now. |
 | 5B | Instruments window | (a) A list window like the effects rack: one row per loaded instrument - name, color, the insert selector (4.6), mute, solo, open editor, open piano roll - with "+ Add instrument" at the bottom.  The channel-rack idea minus the step sequencer (the Builder covers that). |
+| 6 | Hosting gaps - in this build | (a) for: sidechain INTO a hosted instrument; bridged plugins reporting latency changes after load; MIDI out of a plugin, plugin-to-plugin MIDI, MIDI-effect plugins; per-instrument MIDI input device + channel and more than one live target; preset browsing for hosted plugins (`.vstpreset` / program list); MIDI Learn onto hosted-plugin parameters; bridging an instrument on demand (the sandbox toggle, rack-slot-only today).  Plus 4.8: multi-out instruments and hosted-instrument latency in PDC. |
+| 6.7 | Resizable plugin windows | Leaning (b) after: host-forced sizing broke plugins before and was removed; the only legitimate form is a drag handle for plugins that declare host-resize support and can veto sizes.  Plugin-initiated resize already works.  Jeff's final call pending. |
+| 6.9 | 32-bit bridge test | (a) - built and installed, never exercised with a real 32-bit VST3.  Open: WHEN.  Jeff has none; Steinberg's SDK example plugins build as Win32 and can serve as the test plugin at the bridge task. |
 | - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1, ruled 2026-09-02; applies to BaySickDAW too). |
 
 ## Open (in the order the answers depend on each other)
 
 4. ~~The mixer model~~ - decided (rows 4.1-4.8).
 5. ~~Tabs from buses~~ - retired; ribbon + Instruments window decided (5A, 5B).
-6. Hosting as the only path - what VST3 hosting still lacks (from the code map).
+6. ~~Hosting as the only path~~ - decided (row 6; 6.7 pending Jeff's final word).
 7. Project files, product name, paths, settings.
 8. Manual, installer, credits / notices; whether In The Weeds exists in a
    closed-source product.
