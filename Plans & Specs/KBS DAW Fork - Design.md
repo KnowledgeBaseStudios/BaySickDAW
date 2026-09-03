@@ -35,7 +35,7 @@ point at.  Instruments live in a list window; the ribbon is five icon buttons.
 | 4.5 | Effect slots | 10 per insert plus the two EQ slots (12); the rack window is resized to fit. |
 | 4.6 | Instrument to insert | Set ON THE INSTRUMENT (FL's channel-settings insert field): the instrument's row and window carry an insert selector. |
 | 4.7 | Master | An insert like the others (rack, EQ slots), the only one that cannot route anywhere. |
-| 4.8 | Multi-out | Each output of a multi-output instrument assignable to its own insert from day one; hosted-instrument latency in delay compensation.  In this build. |
+| 4.8 | Multi-out | Each output of a multi-output instrument assignable to its own insert from day one; hosted-instrument latency in delay compensation.  In this build.  Mechanism (Jeff, 2026-09-02): the plugin owns its INSIDE mapping (which internal channel hits which output bus, set in the plugin's own UI); the host owns the OUTSIDE - enumerate the plugin's output buses and names, activate them, render every active bus into its own buffer, and give each a destination insert through a per-instrument output map, with a one-click "assign remaining outputs to new inserts" helper. |
 | 5 | Tabs-from-buses | Retired: it tied navigation to routing (tab churn as you mix; no home for Master-routed instruments; multi-out feeds several inserts; grouping-by-bus already exists in the Mixer and Effects views). |
 | 5A | Ribbon | Five icon buttons: Builder, Mixer, Effects, Piano Roll, Instruments.  No per-engine instance tabs.  Freed width is free space; nothing in it for now. |
 | 5B | Instruments window | A list window like the effects rack: one row per loaded instrument - name, color, insert selector (4.6), mute, solo, open editor, open piano roll - with `+ Add instrument` at the bottom. |
@@ -48,13 +48,14 @@ point at.  Instruments live in a list window; the ribbon is five icon buttons.
 | 7.4 | Instrument presets | The page-preset container (plugin state + its rack) stays as the instrument preset, alongside plugin-native presets (6.5). |
 | 8.1 | In The Weeds | Not in the fork's manual (it publishes the source).  In View + In Depth only. |
 | 8.2 | Manual | The pipeline (harness, generator, control tables) reused with shell chapters only; figures re-shot from the fork. |
-| 8.3 | Notices | Built in from day one: About box listing every third-party component with its licence, a `NOTICES.txt` beside the exe, VST and ASIO trademark lines, fontaudio OFL + CC BY texts, the LAME credit. |
+| 8.3 | Notices | Built in from day one: About box listing every third-party component with its licence, a `NOTICES.txt` beside the exe, VST and ASIO trademark lines, the LAME credit. |
 | 8.4 | Installer | The NSIS installer renamed (product, paths, registry keys); packages the LAME DLL and both helpers; no Presets / Kits / Templates inputs. |
 | 9.1 | Where it lives | Its own git repository at `Documents\BaySickDAW\KBS DAW\`, ignored by this repo; the folder moves with its history. |
 | 9.2 | Build | Its own `CMakeLists.txt` + `do_build.bat`, building into `KBS DAW\build\`, helpers included. |
 | 9.3 | Dependencies | JUCE and the kept libraries copied into the fork: self-contained and movable. |
 | 10 | Sequencing | Copy now; brand-docket renames are applied in both trees later.  QA-Solstice T5 and the QA-ManualPress close wait. |
 | 11 | Carve strategy | Copy then cut, ledger-driven, the app runnable at every task boundary; clean-start repository (see section 10). |
+| - | fontaudio | Not in the fork (Jeff, 2026-09-02): KBS ships its own glyphs.  Prune-listed; its module and link go with the strip EQ (the EQ rail was the only consumer); its OFL / CC BY obligations drop off the Ship list. |
 | - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1; both products). |
 
 ## 3. Target architecture
@@ -106,7 +107,13 @@ context dropdown lists instruments.
 ## 5. Data flow
 
 **Audio.** Each instrument renders into the insert(s) its outputs are assigned
-to (one per output bus for multi-out).  Every insert: sum predecessors (routed
+to (one per output bus for multi-out).  Multi-out: the host queries the plugin's
+output bus count and names, activates the buses named in the instrument's
+output map, renders once per block into one buffer per active bus, and sums
+each buffer into its mapped insert; an active bus with no destination is
+rendered and discarded; the plugin's internal channel-to-bus assignment is the
+plugin's own business.  The bridged helper negotiates the same layout and
+carries N buses of audio per block.  Every insert: sum predecessors (routed
 inserts + its own instruments + live input) -> input gain -> pre-EQ slot ->
 10 slots -> post-EQ slot -> polarity / width -> fader / pan -> meters -> out
 along its routes (each scaled by the route level; sidechain routes go to the
@@ -132,8 +139,10 @@ orphans reported through the missing-file report the way missing samples are).
   Instruments) + transport as today.  The freed width is empty for now.
 - **Instruments window:** the list (5B).  `+ Add instrument` opens the plugin
   picker (today's allowlist picker).  Row controls: name (rename), color, insert
-  selector (per output for multi-out - a submenu), mute, solo, editor, piano
-  roll, and a right-click menu: replace plugin, duplicate, save / load
+  selector (per output for multi-out - a submenu listing the plugin's own bus
+  names, Out 1 defaulting to the instrument's insert, the rest unrouted until
+  assigned, plus "Assign remaining outputs to new inserts"), mute, solo,
+  editor, piano roll, and a right-click menu: replace plugin, duplicate, save / load
   instrument preset, freeze, bridge on demand, MIDI input device + channel,
   delete.
 - **Mixer:** the insert bank in slot order, Master pinned; `+ Add insert`; each
@@ -200,13 +209,13 @@ by saying so before batch 1 starts.)
 `Templates/`, `Resources/Acoustic IRs/`, `Resources/Tape/`,
 `Assets/big_rusty_drums.png`, `libs/rubberband`, `libs/world`,
 `libs/signalsmith-stretch`, `libs/signalsmith-linear`, `libs/sfizz`,
-`libs/NeuralAmpModelerCore`, `Plans & Specs/` (the fork gets its own, seeded
+`libs/NeuralAmpModelerCore`, `libs/fontaudio` (KBS glyphs replace it), `Plans & Specs/` (the fork gets its own, seeded
 with this spec + plan), `Files For Claude/`, `.claude/` (the fork gets its own
 CLAUDE.md), `Tools/gen_factory_presets.py`, `Tools/EqTests/`,
 `Tools/rusty_kit_hitboxes.txt`, `run_eq_tests.bat`, `Manuals/src-m3/`,
 `Manuals/src-m2/instrument/`, `Manuals/src-m2/mixing-effects/` (rewritten at
 M5), engine figure groups, the built installer exes.  Copied: `Source/`,
-`juce/`, `libs/{asiosdk,concurrentqueue,fontaudio,lame,webview2}`,
+`juce/`, `libs/{asiosdk,concurrentqueue,lame,webview2}`,
 `Resources/Filmstrips/`, the remaining `Assets/`, `Manuals/` pipeline +
 shell chapters, `Installer/*.nsi`, `CMakeLists.txt`, `do_build.bat`,
 `do_configure.bat`, `make_installer.bat`, `BUILDING.md`, `.gitignore`,
@@ -218,7 +227,7 @@ shell chapters, `Installer/*.nsi`, `CMakeLists.txt`, `do_build.bat`,
 |---|---|---|
 | KBS-Seed (M0 + M1) | Clone-and-prune builds untouched; the carve lands - engines, DSP, effect UI, engine pages, strip EQ, Core Library gone; enums collapsed; dead code hunted | The fork builds green, launches, and a hosted instrument on the legacy Plugins tab plays through Master |
 | KBS-Core (M2) | Instrument model + Instruments window + five-icon ribbon; patterns target instrument ids; project root tag | Golden test: empty project, `+ Add instrument`, hear it through Master, save, reload |
-| KBS-Mixer (M3) | Insert bank, every insert sums, route levels, bus-as-role, sidechain flags, live input + gain per insert, instrument insert selector, multi-out, latency compensation, the 12-slot rack | FL-style walk: route an instrument to an insert, bus two inserts into a third, sidechain a compressor, record live input |
+| KBS-Mixer (M3) | Insert bank, every insert sums, route levels, bus-as-role, sidechain flags, live input + gain per insert, instrument insert selector, multi-out output map, latency compensation, the 12-slot rack | FL-style walk: route an instrument to an insert, bus two inserts into a third, sidechain a compressor, record live input, map a multi-out drum VST's outputs to inserts and hear kit pieces on separate strips |
 | KBS-Host (M4) | The remaining hosting gaps (6.1-6.8), 32-bit bridge test (6.9) | Each gap has a scenario on the walk sheet and passes |
 | KBS-Ship (M5) | Identity (name, data root, strings, helper names, bridge id), LAME DLL, notices + About, installer, shell-only manual | Installer output installs and runs on a clean user account; manual opens on F1 with zero engine content |
 
@@ -231,7 +240,9 @@ shell chapters, `Installer/*.nsi`, `CMakeLists.txt`, `do_build.bat`,
 - LAME: DLL only (3c), with the LGPL notice and the LAME credit.
 - JUCE: the free tier covers closed-source at current revenue (Jeff,
   2026-09-01).  The licence text governs at publish time.
-- Ship the notices (8.3).  The fork's `LICENSE` is KBS's EULA, not GPLv3.
+- Ship the notices (8.3): VST + ASIO trademark lines, WebView2, concurrentqueue,
+  LAME, JUCE's bundled dependencies.  fontaudio is gone with the EQ.  The fork's
+  `LICENSE` is KBS's EULA, not GPLv3.
 
 ## 12. Code facts that shape the design (from the code map, 2026-09-02)
 

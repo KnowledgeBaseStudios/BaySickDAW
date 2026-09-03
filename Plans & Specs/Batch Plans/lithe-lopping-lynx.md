@@ -50,6 +50,8 @@ None open.
 
 **BaySickDAW (one line):** `.gitignore` gains `KBS DAW/`.
 
+**Junctions for M0:** the untouched copy still includes the engine sources, which include the pruned libraries' headers unconditionally, and the CMake `fontaudio` module.  Task 2 builds against temporary `mklink /J` junctions to BaySickDAW's `libs/{rubberband,world,signalsmith-stretch,signalsmith-linear,sfizz,NeuralAmpModelerCore,fontaudio}`; each junction is removed in the task that deletes its last consumer (fontaudio at Task 4, NAM/pitch libs at Task 5, sfizz at Task 6).
+
 **Fork (created by Task 1):** everything below is a path inside `KBS DAW/`.
 
 - Task 3 (effects): delete `Source/DSP/*` except the survivors (`AudioClipStreamer.*`, `PhaseVocoder.*`, `Mp3Writer.*`, `DSPBase.h`, `EffectVisualFeed.h`, `SpectrumFeed.h`, `EngineSidechainHelper.h`, `PanLaw.h`, `LufsMeterDSP.*`, `TruePeakMeter.*`, `LoudnessSpec.h`, `BpmDetect.h`, `DenoiseDSP.*` if `cleanFile` is still reached - check), `Source/DSP/EffectParamMap.*`; edit `Source/EffectRack.h:19-80` (enum), `EffectRack.cpp`, `Source/Standalone/SlotComponent.cpp` (89 sites), `EffectPresetIO.cpp` (90), `EffectEditorPanels.cpp/.h` (43; keep `HostedPluginEditor`), `EffectWindows.cpp` (10), `EffectsPage.cpp`, `FxRackPresetIO.cpp`, `EffectVisual.h`; `CMakeLists.txt` source list.
@@ -78,7 +80,7 @@ DST  = os.path.join(ROOT, "KBS DAW")
 DROP = ("Presets/", "Kits/", "Templates/", "Resources/Acoustic IRs/", "Resources/Tape/",
         "Assets/big_rusty_drums.png",
         "libs/rubberband/", "libs/world/", "libs/signalsmith-stretch/", "libs/signalsmith-linear/",
-        "libs/sfizz/", "libs/NeuralAmpModelerCore/",
+        "libs/sfizz/", "libs/NeuralAmpModelerCore/", "libs/fontaudio/",
         "Plans & Specs/", "Files For Claude/", ".claude/",
         "Tools/gen_factory_presets.py", "Tools/EqTests/", "Tools/rusty_kit_hitboxes.txt", "run_eq_tests.bat",
         "Manuals/src-m3/", "Manuals/src-m2/instrument/", "Manuals/src-m2/mixing-effects/",
@@ -99,7 +101,7 @@ print("copied", copied, "| pruned", skipped)
 
 Run: `python Tools/seed_fork.py` -> expect roughly `copied 13200 | pruned 1500` (juce 4377 + kept libs + Source 413 + the rest; the exact numbers are recorded in the running notes).
 
-- [ ] Verify the prune: `dir "KBS DAW\Presets"` etc. must not exist; `dir "KBS DAW\libs"` shows exactly `asiosdk concurrentqueue fontaudio lame webview2`; `dir "KBS DAW\Source"` shows every folder (engines are removed by the carve, not the prune, so M0 builds untouched).
+- [ ] Verify the prune: `dir "KBS DAW\Presets"` etc. must not exist; `dir "KBS DAW\libs"` shows exactly `asiosdk concurrentqueue lame webview2`; `dir "KBS DAW\Source"` shows every folder (engines are removed by the carve, not the prune, so M0 builds untouched).
 - [ ] Write `KBS DAW\LICENSE`:
 
 ```
@@ -117,7 +119,7 @@ Third-party components and their licences: see THIRD_PARTY_LICENSES.md.
 ### Task 2 - M0: the untouched copy builds
 
 - [ ] Check `do_build.bat` for absolute paths: `findstr /i "Documents\\BaySickDAW" "KBS DAW\do_build.bat"`.  If it hardcodes the source path, change those lines to `%~dp0` (the bat's own folder) so the copy builds in place and after the move.  Same check on `do_configure.bat` and `make_installer.bat`.
-- [ ] Build: `cmd.exe /c "C:\Users\jeffm\Documents\BaySickDAW\KBS DAW\do_build.bat"` (background).  Expect: six exit codes 0, four link lines, output under `KBS DAW\build\` and `build32\`.  If sfizz / NAM / rubberband / world / signalsmith are missing: their CMake blocks are `if(EXISTS ...)` presence-gated (`CMakeLists.txt:242-455`) - the gates fall through, BUT the engine headers include those libraries unconditionally, so **M0 needs the pruned libraries present or the carve first.**  Resolution locked here: Task 2 builds against a temporary junction to BaySickDAW's `libs/` for the five pruned libraries (`mklink /J`), removed at Task 5 / 6 when their consumers are deleted.
+- [ ] Build: `cmd.exe /c "C:\Users\jeffm\Documents\BaySickDAW\KBS DAW\do_build.bat"` (background).  Expect: six exit codes 0, four link lines, output under `KBS DAW\build\` and `build32\`.  If sfizz / NAM / rubberband / world / signalsmith are missing: their CMake blocks are `if(EXISTS ...)` presence-gated (`CMakeLists.txt:242-455`) - the gates fall through, BUT the engine headers include those libraries unconditionally, so **M0 needs the pruned libraries present or the carve first.**  Resolution locked here: Task 2 builds against temporary junctions to BaySickDAW's `libs/` for the six pruned libraries incl. fontaudio (`mklink /J`), each removed in the task that deletes its last consumer (see Files to modify).
 - [ ] Verify: `KBS DAW\build\BaySickDAWStandalone_artefacts\Release\BaySickDAW.exe` launches (it is still BaySickDAW by name - expected) and closes clean.
 - [ ] Commit: `KBS-Seed Task 2: build scripts location-independent; M0 builds`.
 
@@ -136,7 +138,7 @@ enum class EffectType : int { None = 0, VST3Plugin = 121 };   // ordinal pinned:
 
 ### Task 4 - Carve: the strip EQ
 
-- [ ] Delete `Source/DSP/StripEq.*`, `Source/DSP/Kbs/`, `Source/Standalone/EqWindowUI/`, `Tools/EqTests/`, `run_eq_tests.bat`; remove `BaySickEqTests` (`CMakeLists.txt:913-923`) and the `fontaudio` link if nothing else draws its glyphs (grep `fontaudio::` - the EQ rail was the only consumer per the brand review).
+- [ ] Delete `Source/DSP/StripEq.*`, `Source/DSP/Kbs/`, `Source/Standalone/EqWindowUI/`, `Tools/EqTests/`, `run_eq_tests.bat`; remove `BaySickEqTests` (`CMakeLists.txt:913-923`); remove the `fontaudio` module + link (`CMakeLists.txt:62, :718`) and any `fontaudio::` reference left (`grep -rn fontaudio Source/` - the EQ rail was the only consumer per the brand review; `ShotHarness.cpp` hard-fails without the module today, so its EQ figure group goes here rather than in Task 9).
 - [ ] `BaySickGraph.h/.cpp`, `PluginProcessor.cpp`: remove the per-strip EQ node, `eqChannelId`, the EQ latency term, the spectrum feeds; `StandaloneEditor.cpp:6567-6679`: the `Pre EQ` / `Post EQ` page rows go (they return as rack slots in M3).
 - [ ] Build gate; headless smoke `--shot "Mixer"`.
 - [ ] Commit: `KBS-Seed Task 4: strip EQ removed (StripEq, Kbs core, EqWindowUI, EqTests) (Source, Tools, CMakeLists)`.

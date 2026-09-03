@@ -111,9 +111,14 @@ close, reopen: identical.  A BaySickDAW project file is refused with a message.
    (`MixerTrackStrip.cpp:361-450`); capture moves from `VoxStripTask` /
    `InstStripTask` into the generic insert task; **input gain** added
    (`PluginProcessor.cpp:8916-9038`, `MixerTrackStrip`).
-6. **Multi-out** - bus layouts on `HostedPlugin` (`HostedPlugin.cpp:41-46,
-   615-621`), one render target per active output bus, the bridged helper
-   prepared with the plugin's real layout (`PluginHostMain.cpp:324-347`).
+6. **Multi-out** - the OUTSIDE half only (the plugin owns which internal
+   channel hits which bus): enumerate output buses + names (`HostedPlugin.cpp:41-46,
+   615-621` forces bus 0 today), activate the mapped ones, one render buffer per
+   active bus summed into its mapped insert, a per-instrument output map on the
+   Instruments row (Out 1 defaults to the instrument's insert; the rest unrouted)
+   with "Assign remaining outputs to new inserts"; the bridged helper negotiates
+   the same layout and carries N buses per block (`PluginHostMain.cpp:324-347`,
+   `PluginBridgeProtocol.h` audio payload).
 7. **Latency compensation** - hosted-instrument latency in
    `updateBusLatencies` (`BaySickGraph.cpp:1589, 1681-1686`); bridged latency
    change message added to the protocol (`PluginBridgeProtocol.h:69-95`).
@@ -123,8 +128,10 @@ close, reopen: identical.  A BaySickDAW project file is refused with a message.
 **Exit:** route an instrument to insert 3; route inserts 3 and 4 into insert 5
 at -6 dB each; hear the sum; flag a route sidechain and key a hosted
 compressor from it; arm insert 6 with a live input and record a take onto the
-grid; a 16-out drum VST lands on 16 inserts; a plugin with 2048 samples of
-latency stays in time with one that has none.
+grid; load a multi-out drum VST, assign kit pieces to its outputs inside the
+plugin, use "Assign remaining outputs to new inserts", and hear the pieces on
+separate inserts; a plugin with 2048 samples of latency stays in time with one
+that has none.
 
 ## Batch 4 - KBS-Host (M4): the remaining hosting gaps
 
@@ -154,8 +161,8 @@ splash / About strings, CMake `project()` + `PRODUCT_NAME`, helper exe names +
 (`PluginBridgeProtocol.h:62`), installer names / paths / registry keys, undo
 tags and lane prefixes already changed in M2 / M3; LAME switched from static
 lib to a DLL loaded at runtime (+ its notice); `NOTICES.txt` staged beside the
-exe; About lists every component; VST / ASIO trademark lines; fontaudio OFL +
-CC BY texts; `LICENSE` = the KBS EULA; `THIRD_PARTY_LICENSES.md` rewritten;
+exe; About lists every component; VST / ASIO trademark lines; `LICENSE` = the
+KBS EULA; `THIRD_PARTY_LICENSES.md` rewritten;
 NSIS installer renamed and repackaged; the manual: shell chapters + control
 tables, figures re-shot with the fork's harness, In View + In Depth only,
 `Riff Machine` -> `Tune Generator` throughout.
