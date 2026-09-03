@@ -159,3 +159,8 @@ Plans & Specs/Issue Tracker.txt
 # crash .dmp files here.  Both are per-machine runtime data, never source.
 /SymbolStore/
 /CrashDumps/
+
+# KBS DAW fork (2026-09-02) - the shell fork's own git repository, seeded into
+# this tree per "Plans & Specs/KBS DAW Fork - Design.md" section 9.1.  It moves
+# to the KBS side with its history; never tracked here.
+KBS DAW/
