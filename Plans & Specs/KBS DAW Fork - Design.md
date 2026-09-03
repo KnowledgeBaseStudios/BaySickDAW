@@ -113,7 +113,19 @@ output map, renders once per block into one buffer per active bus, and sums
 each buffer into its mapped insert; an active bus with no destination is
 rendered and discarded; the plugin's internal channel-to-bus assignment is the
 plugin's own business.  The bridged helper negotiates the same layout and
-carries N buses of audio per block.  Every insert: sum predecessors (routed
+carries N buses of audio per block.
+
+SFZ instruments (Jeff's question, 2026-09-02): they arrive as a hosted SFZ-player
+VST3 (sfizz's own plugin, sforzando, or any ARIA-based player) and go through
+the same output map.  Their inside mapping is the SFZ text: sfizz routes each
+region to output bus `output=N` (default 0) and sizes its output count to the
+highest N in the file (`libs/sfizz/src/sfizz/Synth.cpp:886`,
+`Region.cpp:219`), so a kit authored without `output=` opcodes arrives as one
+stereo bus until someone edits the SFZ.  Whether a given player exposes those
+outputs as VST3 buses is the player's business (sfizz's released plugin does;
+the vendored tree here is the engine only).  BaySickDAW's RustyDrums engine got
+per-piece strips by parsing the kit's `*_map.sfz` masters itself; that
+convenience does not carry over - the fork has no SFZ engine of its own.  Every insert: sum predecessors (routed
 inserts + its own instruments + live input) -> input gain -> pre-EQ slot ->
 10 slots -> post-EQ slot -> polarity / width -> fader / pan -> meters -> out
 along its routes (each scaled by the route level; sidechain routes go to the
