@@ -157,6 +157,15 @@ orphans reported through the missing-file report the way missing samples are).
   editor, piano roll, and a right-click menu: replace plugin, duplicate, save / load
   instrument preset, freeze, bridge on demand, MIDI input device + channel,
   delete.
+- **Outputs panel (the DAW-side routing spot, per instrument):** Jeff's
+  Drummer 3 / FL description, 2026-09-02 - the plugin's own mixer decides what
+  goes on each of ITS outputs; THIS panel decides where each of those outputs
+  goes in OUR mixer.  It lists every output bus the plugin exposes, by the
+  plugin's own bus names, each with an insert picker (any insert, a new
+  insert, or unrouted); Out 1 defaults to the instrument's insert; "Assign
+  remaining outputs to new inserts" fills the rest in slot order.  A plugin
+  with one output shows one row.  Placement: pending Jeff (row button in the
+  Instruments window, the instrument's own window, or both).
 - **Mixer:** the insert bank in slot order, Master pinned; `+ Add insert`; each
   strip: input source + gain (utility row on every strip), fader, pan, mute,
   solo, polarity, width, arm, routes (the "+" menu offers every other insert,
