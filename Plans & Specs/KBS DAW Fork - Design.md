@@ -16,8 +16,9 @@ Jeff moves to the KBS side himself.  BaySickDAW continues as the full free
 product; the fork becomes a free, closed-source (no GPL) DAW shell under KBS
 in which every instrument and effect is a hosted VST3 and the built-in
 players / effects of BaySickDAW do not exist.  The fork's mixer is FL-style
-(inserts that already exist, free routing, buses) and its tabs derive from
-buses rather than from engine instances.
+(inserts that already exist, free routing, buses).  The per-instance tab model is
+replaced: the ribbon becomes five icon buttons and instruments live in a list
+window (decision 5, which retired the earlier tabs-from-buses idea).
 
 ## Decisions so far (Jeff, 2026-09-02)
 
@@ -38,13 +39,15 @@ buses rather than from engine instances.
 | 4.6 | Instrument to insert | The routing is set ON THE PLAYER, the way FL's channel settings carry the insert field - the instrument window gets an insert selector. |
 | 4.7 | Master | (a) An insert like the others - rack, EQ slots - and the only one that cannot route anywhere. |
 | 4.8 | Multi-out instruments | (a) Each output assignable to its own insert from day one.  Jeff: "definitely needs to be fixed for this port build" - multi-out AND hosted-instrument latency compensation are in scope. |
+| 5 | Tabs-from-buses | **Retired** (workshopped 2026-09-02).  It tied navigation to routing: tabs would churn as you mix, an instrument routed straight to Master has no home except a "Master tab" that is just an instrument list, multi-out instruments (4.8) feed several inserts at once, and grouping-by-bus already exists in the Mixer (groups strips by destination) and the Effects page (bus + members). |
+| 5A | Ribbon | (a) Five icon buttons: Builder, Mixer, Effects, Piano Roll, Instruments.  No per-engine instance tabs.  The freed width is free space - what goes there is open (candidates only: window toggles, master meter, browser, snap / grid, project name); nothing for now. |
+| 5B | Instruments window | (a) A list window like the effects rack: one row per loaded instrument - name, color, the insert selector (4.6), mute, solo, open editor, open piano roll - with "+ Add instrument" at the bottom.  The channel-rack idea minus the step sequencer (the Builder covers that). |
 | - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1, ruled 2026-09-02; applies to BaySickDAW too). |
 
 ## Open (in the order the answers depend on each other)
 
 4. ~~The mixer model~~ - decided (rows 4.1-4.8).
-5. Tabs from buses - what makes a strip a bus, what a bus tab shows, where an
-   instrument lives before it is routed, where Master fits, the instrument list.
+5. ~~Tabs from buses~~ - retired; ribbon + Instruments window decided (5A, 5B).
 6. Hosting as the only path - what VST3 hosting still lacks (from the code map).
 7. Project files, product name, paths, settings.
 8. Manual, installer, credits / notices; whether In The Weeds exists in a
