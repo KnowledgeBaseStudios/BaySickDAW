@@ -195,6 +195,8 @@ No files modified.  Output lands in this plan under Task 4 as the review list.
 - [ ] Renames Jeff rules in: applied in a follow-up task added here (presets regenerate through the generator; UI strings by hand), one build gate, one commit.
 - [ ] `/draft-doc running-notes` -> apply.
 
+**Working docket (rule there):** [`Research Reports/brand-review-2026-09-02.md`](../Research Reports/brand-review-2026-09-02.md).
+
 **Review list (agent pass landed 2026-09-02; spot-checked: Riff Machine, Furman EQ topic title, VSTPlugin entry, Big Rusty Drums provenance, IMP-35 stale row, About-box comment, every NEW preset name, `Hosted Plugin.png` viewed).  Jeff rules per group or per item: rename / keep / defer.**
 
 *G1 - our feature / engine / menu names built on someone else's product name (the Harmless class)*
@@ -274,6 +276,8 @@ The comment policy allows modeled-gear names in comments (nominative fair use). 
 ---
 
 ## Verification (end-to-end smoke)
+
+**Walk sheet:** [`Test Plans/QA-Solstice Smoke.md`](../Test Plans/QA-Solstice Smoke.md) (record results there).
 
 After T1-T3: the seven T1 scenarios plus the three T2 checks, in Debug then
 Release.  Plus: (8) `git grep -c Harmless -- . ":!libs" ":!juce"` is empty; (9)
