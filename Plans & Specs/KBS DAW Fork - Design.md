@@ -1,144 +1,288 @@
-# KBS DAW Fork - Design (living doc, workshop started 2026-09-02)
+# KBS DAW Fork - Design (spec)
 
-**Status: in workshop.**  Decisions land here as Jeff makes them.  The code map is
+**Status: approved design, 2026-09-02** (Jeff: "proceed with making the plan").
+Program plan: [`KBS DAW Fork - Plan.md`](KBS DAW Fork - Plan.md).  First batch:
+[`Batch Plans/lithe-lopping-lynx.md`](Batch Plans/lithe-lopping-lynx.md).  Code map:
 [`Research Reports/lite-shell-map-2026-09-02.md`](Research Reports/lite-shell-map-2026-09-02.md)
-(gap map) + `lite-shell-map-2026-09-02-reports.md` (eleven reader reports verbatim).
-The critic's 11 areas that did not get a second read (render-engine internals, audio
-device init, templates, strip-EQ removal depth, export + loudness + VersionCapture,
-theming, manuals window, project lifecycle shell, Core Library call sites, auto-freeze,
-installer) are implementation-plan detail, mapped at the writing-plans phase.  When the design is approved this becomes the spec the
-implementation plan is written from.
+(+ `-reports.md`, eleven reader reports verbatim).
 
-## What it is
+## 1. What it is
 
-A one-time FORK of BaySickDAW's SHELL, built here in a `KBS DAW/` folder that
-Jeff moves to the KBS side himself.  BaySickDAW continues as the full free
-product; the fork becomes a free, closed-source (no GPL) DAW shell under KBS
-in which every instrument and effect is a hosted VST3 and the built-in
-players / effects of BaySickDAW do not exist.  The fork's mixer is FL-style
-(inserts that already exist, free routing, buses).  The per-instance tab model is
-replaced: the ribbon becomes five icon buttons and instruments live in a list
-window (decision 5, which retired the earlier tabs-from-buses idea).
+A one-time FORK of BaySickDAW's SHELL, built here in `Documents\BaySickDAW\KBS DAW\`
+as its own git repository (ignored by this one), then moved to the KBS side by
+Jeff.  BaySickDAW continues as the full free GPL product.  The fork becomes
+**KBS DAW**: a free, closed-source (no GPL) DAW shell in which every instrument
+and effect is a hosted VST3 and none of BaySickDAW's built-in players or
+effects exist.  Its mixer is FL-style - a growable bank of inserts, any insert
+routes to any insert with a level per route, a bus is just an insert others
+point at.  Instruments live in a list window; the ribbon is five icon buttons.
 
-## Decisions so far (Jeff, 2026-09-02)
+## 2. Decisions (the requirements - Jeff, 2026-09-02)
 
 | # | Question | Decision |
 |---|---|---|
 | 1 | Purpose | BaySickDAW stays the full free product.  The shell ports to KBS as a separate product - free, closed source, no GPL. |
-| 2 | Relationship | (b) One-time fork.  "A lot of moving parts over here that won't be what we are doing over there."  Built here under `KBS DAW/`, then moved; nothing appears on the KBS side until Jeff moves it. |
-| 3 | Keep list | Main frame + contained windows; ribbon + tabs (reworked); Builder (arrangement, audio clips on the grid with our own stretch, automation lanes); Piano Roll, Event Editor, the generator; mixer + routing (reworked); transport / tempo / metronome; audio device + ASIO; MIDI input + MIDI Learn; VST3 hosting for instruments and effects incl. the out-of-process helpers; effect racks on strips holding VST3 slots; project files, undo, settings; offline export with loudness normalize; freeze; manuals window + F1; installer. |
-| 3 | Drop list | Every built-in instrument (Solstice, Synth, Bass, Player, Vocal, NAM/IR, Pedals, Guitars, Basses, RustyDrums, SlideSampler); every built-in effect and pedal DSP; the Core Library fetcher and all factory presets / kits / templates; the Clips, Vox and Inst tab types. |
-| 3a | Live input | Stays, as a property of the mixer strip: routed on the strip, detached from any player. |
-| 3b | Strip EQ | The rack keeps its two EQ slots as load buttons like the other slots: `+ Add Pre EQ` on the left, `+ Add Post EQ` on the right.  They are filled by the free KBS Plugins EQ (Jeff has the KBS side add it).  No built-in EQ engine in the fork. |
-| 3c | MP3 | Kept.  LAME ships as a separate DLL (LGPL: replaceable by the user, credited in About), never statically linked into the closed binary. |
-| 4.1 | Insert count | (b) A starting bank that grows on demand; the maximum is high, FL-scale, and the user can keep adding. |
-| 4.2 | Routing | (a) Any insert routes to any insert, Master by default; a "bus" is just an insert that others point at.  FL-style in full: every route carries its own level knob, any-to-any, no per-insert send cap (today's four-send limit goes). |
-| 4.3 | Sidechain | (a) Any route can be flagged sidechain.  A hosted effect never auto-picks a key input - the user picks it, always. |
-| 4.4 | Per-insert | (a) Audio-input source (none / device channel pair), level, pan, mute, solo, polarity, width, effect slots with the pre-EQ and post-EQ slots at either end, routes out, record-arm to disk, name and color.  Input gain is new (nothing exists today). |
-| 4.5 | Effect slots | 10 per insert plus the two EQ slots.  Consequence: the effects rack window is resized to fit 12. |
-| 4.6 | Instrument to insert | The routing is set ON THE PLAYER, the way FL's channel settings carry the insert field - the instrument window gets an insert selector. |
-| 4.7 | Master | (a) An insert like the others - rack, EQ slots - and the only one that cannot route anywhere. |
-| 4.8 | Multi-out instruments | (a) Each output assignable to its own insert from day one.  Jeff: "definitely needs to be fixed for this port build" - multi-out AND hosted-instrument latency compensation are in scope. |
-| 5 | Tabs-from-buses | **Retired** (workshopped 2026-09-02).  It tied navigation to routing: tabs would churn as you mix, an instrument routed straight to Master has no home except a "Master tab" that is just an instrument list, multi-out instruments (4.8) feed several inserts at once, and grouping-by-bus already exists in the Mixer (groups strips by destination) and the Effects page (bus + members). |
-| 5A | Ribbon | (a) Five icon buttons: Builder, Mixer, Effects, Piano Roll, Instruments.  No per-engine instance tabs.  The freed width is free space - what goes there is open (candidates only: window toggles, master meter, browser, snap / grid, project name); nothing for now. |
-| 5B | Instruments window | (a) A list window like the effects rack: one row per loaded instrument - name, color, the insert selector (4.6), mute, solo, open editor, open piano roll - with "+ Add instrument" at the bottom.  The channel-rack idea minus the step sequencer (the Builder covers that). |
-| 6 | Hosting gaps - in this build | (a) for: sidechain INTO a hosted instrument; bridged plugins reporting latency changes after load; MIDI out of a plugin, plugin-to-plugin MIDI, MIDI-effect plugins; per-instrument MIDI input device + channel and more than one live target; preset browsing for hosted plugins (`.vstpreset` / program list); MIDI Learn onto hosted-plugin parameters; bridging an instrument on demand (the sandbox toggle, rack-slot-only today).  Plus 4.8: multi-out instruments and hosted-instrument latency in PDC. |
-| 6.7 | Resizable plugin windows | (a) In - a drag handle ONLY for plugins that declare host-resize support and can veto or snap sizes; never host-forced (that broke plugins before and was removed).  Plugin-initiated resize keeps working as today. |
-| 6.9 | 32-bit bridge test | (a) - built and installed, never exercised with a real 32-bit VST3.  Open: WHEN.  Jeff has none; Steinberg's SDK example plugins build as Win32 and can serve as the test plugin at the bridge task. |
-| 7.1 | Product name | (a) **KBS DAW**. |
-| 7.2 | User-data root | Its own: `Documents\KBS DAW\` (settings, audio settings, plugin list, keymap, projects), resolved at runtime from the Documents folder - independent of where the source lives, so moving the source needs no data handoff.  Assumed name pending Jeff: `KBS DAW` (a) vs a distinct data-folder name (b). |
-| 7.3 | Project files | (a) Same XML shape, new root tag - a BaySickDAW project is refused cleanly rather than opened with dead engine tabs. |
-| 7.4 | Instrument presets | (a) Keep the page-preset container (plugin state + its rack) as the fork's instrument preset, alongside plugin-native presets (6.5). |
-| 8.1 | In The Weeds | (a) Not in the fork's manual - it publishes the source.  In View + In Depth only. |
-| 8.2 | Manual | (a) Reuse the pipeline (harness, generator, control tables) with the shell chapters only; figures re-shot from the fork. |
-| 8.3 | Notices | (a) Built in from day one: About box listing every third-party component with its licence, a NOTICES file beside the exe, VST and ASIO trademark lines, fontaudio OFL + CC BY texts, the LAME credit. |
-| 8.4 | Installer | (a) The NSIS installer renamed - product, paths, registry keys; packages the LAME DLL and both helpers; no Presets / Kits / Templates inputs. |
-| 9.1 | Where it lives | (a) Its own git repository nested at `Documents\BaySickDAW\KBS DAW\`, ignored by this repo; the folder moves with its history. |
-| 9.2 | Build | (a) Its own `CMakeLists.txt` + `do_build.bat` inside the folder, building into `KBS DAW\build\`, helpers included. |
-| 9.3 | Dependencies | (a) JUCE and the kept libraries (concurrentqueue, WebView2, fontaudio, LAME, the ASIO headers) copied into the fork - self-contained and movable. |
-| 10 | Sequencing | (b) Copy now; brand renames from the docket are applied in both trees later (twice).  QA-Solstice T5 and the QA-ManualPress close wait. |
-| - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1, ruled 2026-09-02; applies to BaySickDAW too). |
+| 2 | Relationship | (b) One-time fork.  Built here under `KBS DAW/`, then moved; nothing appears on the KBS side until Jeff moves it. |
+| 3 | Keep | Main frame + contained windows; ribbon (reworked); Builder (arrangement, audio clips on the grid with our own stretch, automation lanes); Piano Roll, Event Editor, the generator; mixer + routing (reworked); transport / tempo / metronome; audio device + ASIO; MIDI input + MIDI Learn; VST3 hosting for instruments and effects incl. the out-of-process helpers; effect racks holding VST3 slots; project files, undo, settings; offline export with loudness normalize; freeze; manuals window + F1; installer. |
+| 3 | Drop | Every built-in instrument (Solstice, Synth, Bass, Player, Vocal, NAM/IR, Pedals, Guitars, Basses, RustyDrums, SlideSampler); every built-in effect and pedal DSP; the strip EQ engine; the Core Library fetcher and all factory presets / kits / templates; the Clips, Vox, Inst and per-engine tab types. |
+| 3a | Live input | A property of the mixer insert - routed on the insert, detached from any player. |
+| 3b | EQ slots | The rack keeps two EQ slots as load buttons: `+ Add Pre EQ` (left) and `+ Add Post EQ` (right), filled by the free KBS Plugins EQ.  No built-in EQ engine. |
+| 3c | MP3 | Kept.  LAME ships as a separate DLL (LGPL: user-replaceable, credited), never statically linked. |
+| 4.1 | Insert count | A starting bank that grows on demand; FL-scale maximum; the user can keep adding. |
+| 4.2 | Routing | Any insert routes to any insert, Master by default; a bus is just an insert others point at.  Every route carries its own level; any-to-any; no per-insert send cap. |
+| 4.3 | Sidechain | Any route can be flagged sidechain.  A hosted effect never auto-picks a key input; the user picks it. |
+| 4.4 | Per-insert | Audio-input source (none / device channel pair), input gain (new), level, pan, mute, solo, polarity, width, effect slots with the pre-EQ and post-EQ slots at either end, routes out, record-arm to disk, name, color. |
+| 4.5 | Effect slots | 10 per insert plus the two EQ slots (12); the rack window is resized to fit. |
+| 4.6 | Instrument to insert | Set ON THE INSTRUMENT (FL's channel-settings insert field): the instrument's row and window carry an insert selector. |
+| 4.7 | Master | An insert like the others (rack, EQ slots), the only one that cannot route anywhere. |
+| 4.8 | Multi-out | Each output of a multi-output instrument assignable to its own insert from day one; hosted-instrument latency in delay compensation.  In this build. |
+| 5 | Tabs-from-buses | Retired: it tied navigation to routing (tab churn as you mix; no home for Master-routed instruments; multi-out feeds several inserts; grouping-by-bus already exists in the Mixer and Effects views). |
+| 5A | Ribbon | Five icon buttons: Builder, Mixer, Effects, Piano Roll, Instruments.  No per-engine instance tabs.  Freed width is free space; nothing in it for now. |
+| 5B | Instruments window | A list window like the effects rack: one row per loaded instrument - name, color, insert selector (4.6), mute, solo, open editor, open piano roll - with `+ Add instrument` at the bottom. |
+| 6 | Hosting gaps in this build | Sidechain into a hosted instrument; bridged latency updates after load; MIDI out of a plugin, plugin-to-plugin MIDI, MIDI-effect plugins; per-instrument MIDI input device + channel, more than one live target; preset browsing for hosted plugins (`.vstpreset` / program list); MIDI Learn onto hosted-plugin params; bridging an instrument on demand; plus 4.8. |
+| 6.7 | Resizable plugin windows | In - a drag handle ONLY for plugins that declare host-resize support and can veto or snap sizes; never host-forced.  Plugin-initiated resize keeps working. |
+| 6.9 | 32-bit bridge | In; tested at the bridge task with a Win32 build of a Steinberg SDK example plugin (Jeff has no 32-bit VST3). |
+| 7.1 | Name | **KBS DAW**. |
+| 7.2 | User-data root | `Documents\KBS DAW\` resolved at runtime from the Documents folder (settings, audio settings, plugin list, keymap, projects).  Independent of the source location: moving the source needs no data handoff.  Folder name assumed `KBS DAW` pending Jeff. |
+| 7.3 | Project files | Same XML shape, new root tag `KBSDAWProject`; a BaySickDAW project is refused cleanly. |
+| 7.4 | Instrument presets | The page-preset container (plugin state + its rack) stays as the instrument preset, alongside plugin-native presets (6.5). |
+| 8.1 | In The Weeds | Not in the fork's manual (it publishes the source).  In View + In Depth only. |
+| 8.2 | Manual | The pipeline (harness, generator, control tables) reused with shell chapters only; figures re-shot from the fork. |
+| 8.3 | Notices | Built in from day one: About box listing every third-party component with its licence, a `NOTICES.txt` beside the exe, VST and ASIO trademark lines, fontaudio OFL + CC BY texts, the LAME credit. |
+| 8.4 | Installer | The NSIS installer renamed (product, paths, registry keys); packages the LAME DLL and both helpers; no Presets / Kits / Templates inputs. |
+| 9.1 | Where it lives | Its own git repository at `Documents\BaySickDAW\KBS DAW\`, ignored by this repo; the folder moves with its history. |
+| 9.2 | Build | Its own `CMakeLists.txt` + `do_build.bat`, building into `KBS DAW\build\`, helpers included. |
+| 9.3 | Dependencies | JUCE and the kept libraries copied into the fork: self-contained and movable. |
+| 10 | Sequencing | Copy now; brand-docket renames are applied in both trees later.  QA-Solstice T5 and the QA-ManualPress close wait. |
+| 11 | Carve strategy | Copy then cut, ledger-driven, the app runnable at every task boundary; clean-start repository (see section 10). |
+| - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1; both products). |
 
-## Open (in the order the answers depend on each other)
+## 3. Target architecture
 
-4. ~~The mixer model~~ - decided (rows 4.1-4.8).
-5. ~~Tabs from buses~~ - retired; ribbon + Instruments window decided (5A, 5B).
-6. ~~Hosting as the only path~~ - decided (row 6; 6.7 pending Jeff's final word).
-7. ~~Project files, product name, paths, settings~~ - decided (7.1-7.4; 7.2 folder name assumed).
-8. ~~Manual, installer, credits / notices~~ - decided (8.1-8.4).
-9. ~~Where the fork lives~~ - decided (9.1-9.3).
-10. ~~Sequencing~~ - decided (b).
-11. Build strategy for the carve - posed 2026-09-02, pending.
+Same process shape as BaySickDAW - one `AudioProcessor` owning the graph, a
+model layer owning instruments and inserts, pages as non-owning views inside
+contained native child windows - with the engine layer replaced by hosting.
+Internal C++ class names keep their BaySickDAW names where nothing user-facing
+depends on them (`BaySickDAWProcessor`, `BaySickGraph`, `EngineRig`); product
+identity lives in strings, paths, tags and the installer, not in identifiers.
 
-## Code facts that shape the design (from the code map, 2026-09-02)
+| Component | Responsibility in the fork | Today's owner |
+|---|---|---|
+| **Instrument model** | The list of loaded instruments: stable id, name, color, plugin description + state, insert assignment per output, MIDI input device + channel, mute, solo.  Creates / destroys hosted instruments; the only engine kind. | `EngineRig` (`TabKind::Plugins` arm only survives) |
+| **Insert bank** | The growable list of inserts: stable slot index, name, color, input source, input gain, level / pan / mute / solo / polarity / width, rack (12 slots), routes out (dst, level, sidechain flag), arm.  Master = slot 0, no routes out. | `BaySickGraph` + `PluginProcessor` per-strip params, rebuilt from a bank rather than from tab events |
+| **Routing graph** | Edges from routes; cycle detection; topological order; delay compensation incl. hosted-instrument latency; every insert SUMS its predecessors. | `RoutingGraph` (+ the task prologue change) |
+| **Hosting** | Scan, allowlist, in-process + bridged instantiation, editors, state, automation, sidechain (instrument and effect), MIDI in / out / thru, latency reporting, presets, multi-out bus layouts. | `Source/Hosting/*`, `HostedPlugin`, `HostedPluginEffect`, the two helper exes |
+| **Rack** | 12 slots per insert: pre-EQ, 10 free, post-EQ; VST3 only. | `EffectRack` collapsed to `None` + `VST3Plugin` |
+| **Sequencer** | Builder (arrangement, audio clips + our stretch, automation lanes), Piano Roll, Event Editor, Tune Generator; patterns target instruments by stable id. | `PatternManager`, `BuilderPage`, `PianoRoll*` |
+| **Shell UI** | Main frame, contained windows, ribbon (5 icons), Mixer, Effects page, Instruments window, plugin windows, settings dialogs, About / notices, manuals window. | `StandaloneEditor`, `WorkspaceWindow`, `RibbonTabBar`, `MixerPage`, `EffectsPage`, new `InstrumentsWindow` |
+| **Persistence** | `KBSDAWProject` XML: instruments, insert bank, routes, racks, arrangement, automation, settings; undo. | `ProjectManager`, `StandaloneEditor` serialize / restore |
+| **Transport + device** | Playhead, tempo, metronome, audio device + ASIO, MIDI devices. | `StandalonePlayHead`, `StandaloneApp` |
+| **Export + freeze** | Offline render, loudness normalize, per-instrument freeze. | `BuilderPage::runOfflineLoop`, the freeze path |
+
+## 4. Data model changes
+
+**Instrument** (new record; replaces the `(TabKind, pageIndex)` identity):
+`{ id: uuid, name, color, plugin: PluginDescription, state blob, outputs: [ { busIndex, insertSlot } ], midiInputDevice: name-or-"all", midiChannel: 0-16 (0 = all), muted, solo, frozen }`.
+Undo owner tag `inst:<id>`; automation lane prefix `inst_<id>_`; instrument
+preset = `{ state, rack of its primary insert }` (7.4).
+
+**Insert** (new record; replaces `mixer_<family>_<i>`):
+`{ slot: int (stable, 0 = Master), name, color, input: { deviceChannel, stereo } | none, inputGainDb, levelDb, pan, mute, solo, polarity, width, arm, rack: 12 slots, routes: [ { dstSlot, levelDb, sidechain } ] }`.
+Param ids `insert_<slot>_<param>`.  The bank grows by appending slots; slots are
+never renumbered; deleting an insert retires its slot number.
+
+**Route** = an edge with a level; `sidechain=true` edges feed the destination's
+sidechain receive buffers and do not sum into its audio.  Master (slot 0) has
+no routes; every other insert defaults to one route `{ 0, 0 dB, false }`.
+
+**Pattern targeting**: notes and automation in `PatternManager` target an
+instrument by `Instrument.id`, not by `(EngineKind, index)`.  The piano roll's
+context dropdown lists instruments.
+
+**Project XML** root `KBSDAWProject`, children `<Instruments>`, `<Inserts>`
+(with nested `<Routes>` and `<Rack>`), `<Arrangement>`, `<Automation>`,
+`<Settings>`.  A `BaySickDAWProject` root is refused with a message (7.3).
+
+## 5. Data flow
+
+**Audio.** Each instrument renders into the insert(s) its outputs are assigned
+to (one per output bus for multi-out).  Every insert: sum predecessors (routed
+inserts + its own instruments + live input) -> input gain -> pre-EQ slot ->
+10 slots -> post-EQ slot -> polarity / width -> fader / pan -> meters -> out
+along its routes (each scaled by the route level; sidechain routes go to the
+destination's key buffers instead).  Master sums and feeds the device.  Order
+is the topological order from the routing graph; delay compensation includes
+hosted-instrument and rack latency, re-read when a plugin reports a change.
+
+**MIDI.** Devices are opened individually; an instrument receives from its
+selected device (or all) on its selected channel (or all).  Scheduled notes from
+patterns go to the pattern's target instrument.  Plugin MIDI output is
+collected per block and delivered to any instrument that selects that plugin as
+its MIDI source (plugin-to-plugin MIDI, MIDI-effect plugins).
+
+**Persistence.** Save = model records to XML (section 4).  Load = refuse a
+foreign root tag; create inserts from `<Inserts>` first (slots), then
+instruments (bound by slot), then routes (validated against the cycle check),
+then arrangement + automation (validated against existing instrument ids;
+orphans reported through the missing-file report the way missing samples are).
+
+## 6. UI surfaces
+
+- **Ribbon:** five icon buttons (Builder, Mixer, Effects, Piano Roll,
+  Instruments) + transport as today.  The freed width is empty for now.
+- **Instruments window:** the list (5B).  `+ Add instrument` opens the plugin
+  picker (today's allowlist picker).  Row controls: name (rename), color, insert
+  selector (per output for multi-out - a submenu), mute, solo, editor, piano
+  roll, and a right-click menu: replace plugin, duplicate, save / load
+  instrument preset, freeze, bridge on demand, MIDI input device + channel,
+  delete.
+- **Mixer:** the insert bank in slot order, Master pinned; `+ Add insert`; each
+  strip: input source + gain (utility row on every strip), fader, pan, mute,
+  solo, polarity, width, arm, routes (the "+" menu offers every other insert,
+  each with a level and a sidechain toggle), the rack button.  The cable overlay
+  stays.
+- **Effects page:** as today - a bus and what feeds it - over inserts.  The rack
+  view holds 12 slots (pre-EQ | 10 | post-EQ), resized to fit.
+- **Plugin windows:** contained windows as today; drag handle only when the
+  plugin declares host-resize support (6.7).
+- **Settings:** Audio (unchanged), File Settings shrunk to freeze / capture
+  rows, Options without "Get Sound Content".
+- **About / Help:** About lists every component + licence; Help opens the
+  shell-only manual.
+
+## 7. Error handling
+
+- Missing plugin on load: the existing dead-marker path (state retained,
+  slot silent, "Retry" available) - unchanged.
+- Routing cycle: refused at the menu (the cycle check runs before the edge is
+  written); a cycle found in a loaded project drops the offending route and
+  reports it.
+- Plugin crash / deadline: the existing per-slot containment - unchanged;
+  extended to instruments run through the bridge on demand.
+- Foreign project (BaySickDAW root tag): refused with an explanatory message,
+  never half-loaded.
+- Orphaned pattern targets (instrument id not present): reported, notes kept,
+  silent until reassigned.
+- Bridged plugin never answers a latency query: last known value stays; the
+  compensation warning surfaces in the strip.
+
+## 8. Testing
+
+- **Build gate per task**, the fork's own `do_build.bat` judged by the same six
+  exit codes and link lines.
+- **Headless launch smoke per task:** the shot harness constructs the
+  processor, pages and menus with no window or device; running it after every
+  carve task proves the app still constructs (`KBS DAW.exe --shot "Builder"`).
+- **Milestone smokes** (Jeff, Debug then Release): each batch plan carries its
+  own walk sheet; M2's golden test is "empty project, add a VST instrument from
+  the Instruments window, hear it through Master", and every later milestone
+  re-runs it.
+- **No unit-test harness** exists in this codebase beyond the EQ tests (which
+  die with the EQ); none is introduced by the fork.
+
+## 9. Not in scope
+
+Built-in DSP of any kind; VST2 / CLAP / AU hosting; a browser panel; step
+sequencer; project compatibility with BaySickDAW; the freed ribbon space;
+the KBS Plugins EQ itself (KBS side); code signing; an updater.
+
+## 10. Carve strategy and milestones
+
+**Repository:** a clean start (`git init`, first commit = the pruned shell),
+not a `git clone`.  Reason: this repo's `.git` is 1.16 GB and its history
+carries 124 MB of vendored libraries including GPL Rubber Band, 830 preset
+files and every engine ever written - the opposite of "just the files you
+need".  `git blame` for archaeology stays available here; the fork's README
+records the source commit.  (Jeff's caveat 2026-09-02 - flip to a full clone
+by saying so before batch 1 starts.)
+
+**Prune list** (tracked in BaySickDAW, not copied): `Presets/`, `Kits/`,
+`Templates/`, `Resources/Acoustic IRs/`, `Resources/Tape/`,
+`Assets/big_rusty_drums.png`, `libs/rubberband`, `libs/world`,
+`libs/signalsmith-stretch`, `libs/signalsmith-linear`, `libs/sfizz`,
+`libs/NeuralAmpModelerCore`, `Plans & Specs/` (the fork gets its own, seeded
+with this spec + plan), `Files For Claude/`, `.claude/` (the fork gets its own
+CLAUDE.md), `Tools/gen_factory_presets.py`, `Tools/EqTests/`,
+`Tools/rusty_kit_hitboxes.txt`, `run_eq_tests.bat`, `Manuals/src-m3/`,
+`Manuals/src-m2/instrument/`, `Manuals/src-m2/mixing-effects/` (rewritten at
+M5), engine figure groups, the built installer exes.  Copied: `Source/`,
+`juce/`, `libs/{asiosdk,concurrentqueue,fontaudio,lame,webview2}`,
+`Resources/Filmstrips/`, the remaining `Assets/`, `Manuals/` pipeline +
+shell chapters, `Installer/*.nsi`, `CMakeLists.txt`, `do_build.bat`,
+`do_configure.bat`, `make_installer.bat`, `BUILDING.md`, `.gitignore`,
+`.gitattributes`, `THIRD_PARTY_LICENSES.md` (rewritten at M5), a new `LICENSE`.
+
+**Milestones** (each a batch; details in the program plan):
+
+| ID | Milestone | Exit criterion |
+|---|---|---|
+| KBS-Seed (M0 + M1) | Clone-and-prune builds untouched; the carve lands - engines, DSP, effect UI, engine pages, strip EQ, Core Library gone; enums collapsed; dead code hunted | The fork builds green, launches, and a hosted instrument on the legacy Plugins tab plays through Master |
+| KBS-Core (M2) | Instrument model + Instruments window + five-icon ribbon; patterns target instrument ids; project root tag | Golden test: empty project, `+ Add instrument`, hear it through Master, save, reload |
+| KBS-Mixer (M3) | Insert bank, every insert sums, route levels, bus-as-role, sidechain flags, live input + gain per insert, instrument insert selector, multi-out, latency compensation, the 12-slot rack | FL-style walk: route an instrument to an insert, bus two inserts into a third, sidechain a compressor, record live input |
+| KBS-Host (M4) | The remaining hosting gaps (6.1-6.8), 32-bit bridge test (6.9) | Each gap has a scenario on the walk sheet and passes |
+| KBS-Ship (M5) | Identity (name, data root, strings, helper names, bridge id), LAME DLL, notices + About, installer, shell-only manual | Installer output installs and runs on a clean user account; manual opens on F1 with zero engine content |
+
+## 11. Legal prerequisites for the closed-source shell
+
+- Rubber Band (GPL) is not in the shell - it lives only in the vocal tools.  The
+  Builder's clip stretch is our own `PhaseVocoder`.
+- ASIO SDK: Steinberg's proprietary licence branch (free, signed).
+- VST3 SDK (bundled by JUCE): Steinberg's VST3 licence (free, signed).
+- LAME: DLL only (3c), with the LGPL notice and the LAME credit.
+- JUCE: the free tier covers closed-source at current revenue (Jeff,
+  2026-09-01).  The licence text governs at publish time.
+- Ship the notices (8.3).  The fork's `LICENSE` is KBS's EULA, not GPLv3.
+
+## 12. Code facts that shape the design (from the code map, 2026-09-02)
 
 **Size.** `Source/` is 411 files / 234,169 lines; the engine + DSP + effect-UI
-bucket is 114,322 lines (48.8%), so the shell is roughly 120k lines.  The
-coupling to built-in engines is concentrated: `StandaloneEditor.cpp` 120 sites,
+bucket is 114,322 lines (48.8%), so the shell is roughly 120k lines.  Coupling
+to built-in engines is concentrated: `StandaloneEditor.cpp` 120 sites,
 `EffectPresetIO.cpp` 90, `SlotComponent.cpp` 89, `EffectParamMap.cpp` 51,
 `EffectEditorPanels.cpp` 43, `EffectRack` 51, `EngineRig` 30, `RibbonTabBar` 29,
 `PluginProcessor` 36.  `EffectType::` built-in enumerators appear ~430 times
-against 11 `VST3Plugin` sites - the rack collapses to `None` + `VST3Plugin`.
+against 11 `VST3Plugin` sites.
 
-**Mixer / routing - what already exists** (so the FL model is closer than it
-looks): sends carry a level (-60..+6 dB) and pre/post, four per strip; sidechain
-is complete and strip-generic (four receives per strip, delay-matched key taps,
-cycle and topo participation); `RoutingGraph` has cycle detection and Kahn
-topological ordering and imposes no legality of its own; aux-to-aux routing
-already sums; live-input params (`_inputChannelIdx`, `_inputChannelStereo`,
-`_listen`, `_monitorMode`) and `_arm` exist as strip params; the engine-to-strip
-plumbing is generic and already carries hosted VST3 instruments.
+**Mixer / routing - exists today:** sends with level (-60..+6 dB) and pre/post,
+four per strip; strip-generic sidechain (four receives per strip, delay-matched
+key taps, cycle + topo participation); `RoutingGraph` cycle detection + Kahn
+ordering with no legality of its own; aux-to-aux summing; live-input params
+(`_inputChannelIdx`, `_inputChannelStereo`, `_listen`, `_monitorMode`) and
+`_arm` as strip params; generic engine-to-strip plumbing that already carries
+hosted VST3 instruments.
 
-**Mixer / routing - the real gaps:** (1) only the bus and master tasks SUM their
-predecessors - every other task clears and renders its own source, so an
-insert-to-insert edge is built, ordered and silently dropped; (2) strips are
-created by tab/engine events, never as a bank; identity is family + index
-(`mixer_<family>_<i>`), not a bank slot, and the instrument-to-strip binding is
-index-derived at registration with no parameter to reassign it; (3) "bus" is 17
-hard-coded ids with hand-written accessors, not a role a strip can take; (4)
-sends are aux-only and the routing menu is a 10-branch family whitelist; (5)
-live input and arm are gated to the Vox / Inst families; (6) no input gain
-anywhere; (7) hosted-instrument latency is not in PDC; (8) main-out edges are
-unity (no level on the default route).
+**Mixer / routing - the gaps:** (1) only bus and master tasks SUM predecessors;
+every other task clears and renders its own source, so an insert-to-insert edge
+is built, ordered and dropped; (2) strips are created by tab events, never as a
+bank; identity is family + index; the instrument-to-strip binding is
+index-derived with no parameter to reassign it; (3) "bus" is 17 hard-coded ids
+with hand-written accessors; (4) sends are aux-only behind a 10-branch family
+whitelist; (5) live input and arm are gated to Vox / Inst; (6) no input gain;
+(7) hosted-instrument latency is not in PDC; (8) main-out edges are unity.
 
-**Tabs.** Tab identity lives in four records and five parallel enums
-(`TabKind`, `TabType`, `EngineKind`, `StripKind`, `InsertKind`) mapped by hand
-in five places.  With hosted plugins only, `TabKind` collapses to `Plugins`, the
-ribbon already hides zero-instance types, and `PluginsPage` is "deliberately the
-thinnest page".  The bus-to-members enumeration the bus tabs need already
-exists in two places (`MixerPage::layoutScrollContent` bucketing by `_sendTo`;
-`EffectsPage::addBusAndMembers`).  Builder rows are NOT tabs (500 free rows).
+**Tabs.** Identity in four records and five parallel enums (`TabKind`,
+`TabType`, `EngineKind`, `StripKind`, `InsertKind`) mapped by hand in five
+places.  With hosted plugins only, `TabKind` collapses to `Plugins`; the ribbon
+already hides zero-instance types; `PluginsPage` is the thinnest page.  Bus
+membership enumeration exists in `MixerPage::layoutScrollContent` and
+`EffectsPage::addBusAndMembers`.  Builder rows are not tabs.
 
-**Hosting - what is missing for "VST3 is the only path":** sidechain into a
-hosted instrument; hosted-instrument latency in PDC; bridged latency updates
-after load; multi-output instruments (bus 0 only, one strip per tab); MIDI out
-from a plugin / plugin-to-plugin MIDI / MIDI effects; per-track MIDI input
-device or channel filter and more than one live target; `.vstpreset` browsing;
-MIDI Learn onto plugin params; plugin-tab window user-resizable; the 32-bit
-bridge never tested with a real 32-bit VST3.  Complete today: scan / allowlist /
-crash isolation, instruments as first-class engines, effects in any rack slot,
-editor hosting in-process and bridged, state, automation by stable id,
-transport, crash containment, both helpers built and installed.
+**Hosting - missing today:** sidechain into a hosted instrument; hosted
+latency in PDC; bridged latency updates; multi-out (bus 0 only); plugin MIDI
+out / thru; per-track MIDI input and multiple live targets; `.vstpreset`
+browsing; MIDI Learn onto plugin params; user-resizable plugin windows; the
+32-bit bridge untested.  Complete: scan / allowlist / crash isolation,
+instruments as engines, effects in any rack slot, editors in-process and
+bridged, state, automation by stable id, transport, containment, both helpers.
 
-**Build.** No shell / engine split exists in CMake (one flat source list); the
-`BAYSICK_HAS_SFIZZ` / `BAYSICK_HAS_NAM_CORE` gates are dead (headers included
-unconditionally), so engines must go before their libs; LAME is statically
-linked today (becomes a DLL, 3c); JUCE's bundled ASIO headers are what compile.
-Everything path- or name-bound is listed in the map's section 9 (AppPaths root,
-six settings files, project root tag, helper exe names, bridge handshake id,
-installer keys, undo owner tags, lane prefixes).
+**Build.** No shell / engine split in CMake (one flat list); the sfizz and NAM
+gates are dead (headers included unconditionally) so engines go before their
+libs; LAME is statically linked today; JUCE's bundled ASIO headers compile.
+Every path- and name-bound identifier is listed in the map's section 9.
 
-**One report line superseded:** the build reader asserted JUCE needs a paid
-licence for closed source; Jeff's verified answer (2026-09-01) is that the free
-tier covers it at current revenue.  The licence text governs at publish time.
+## 13. Open items
 
-## Legal prerequisites for the closed-source shell (from the DSP Portability Matrix)
-
-- Rubber Band (GPL) is not in the shell - it lives only in the vocal tools,
-  which are dropped.  The Builder's clip stretch is our own `PhaseVocoder`.
-- ASIO SDK: Steinberg's proprietary licence branch (free, signed), not GPLv3.
-- VST3 SDK (bundled by JUCE): Steinberg's VST3 licence (free, signed).
-- LAME: DLL only (3c).
-- JUCE: the free tier covers closed-source at current revenue (Jeff, 2026-09-01).
-- Ship the notices: fontaudio OFL 1.1 + CC BY 4.0 texts, WebView2 notice,
-  VST / ASIO trademark acknowledgements, a complete About / credits surface.
+- 7.2 data-folder name (`KBS DAW` assumed).
+- What, if anything, goes in the freed ribbon width.
+- The brand-docket renames (both trees, 10b).
+- The Tune Generator's eight step names (brand docket item 1, "still open").
