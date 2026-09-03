@@ -35,8 +35,11 @@ out-of-process helper exes, MSVC via `do_build.bat`, CMake, NSIS, LAME as a DLL.
 - Headless smoke after every carve task: `"KBS DAW\build\...\Release\KBS DAW.exe" --shot "Builder"`
   (the harness constructs the processor, pages and menus with no device); a
   crash or a `FAILED` line is a task failure.
-- Commit per task, brief one-liner (Rule 9).  Jeff's Debug-then-Release smoke
-  walks each batch's sheet at the batch boundary.
+- **Group run (Jeff, 2026-09-02):** the five batches run back to back.  Every
+  task ends with its build gate and its commit - NO approval asked per task.
+  The only stops are at the END of each batch, for Jeff's Debug-then-Release
+  smoke on that batch's walk sheet; the next batch starts on his word.  Real
+  spec calls that surface mid-batch are still posed (they are not approvals).
 - Docs: the fork carries its own `Plans & Specs/` seeded with the spec, this
   plan, and per-batch plan + running-notes files; its own `CLAUDE.md`.
 
@@ -130,8 +133,10 @@ at -6 dB each; hear the sum; flag a route sidechain and key a hosted
 compressor from it; arm insert 6 with a live input and record a take onto the
 grid; load a multi-out drum VST, assign kit pieces to its outputs inside the
 plugin, use "Assign remaining outputs to new inserts", and hear the pieces on
-separate inserts; a plugin with 2048 samples of latency stays in time with one
-that has none.
+separate inserts; **Big Rusty Drums through a hosted SFZ player** (Jeff,
+2026-09-02: test it in this batch's smoke) - its pieces on separate inserts,
+by the mechanism ruled in the spec (4.8, SFZ note); a plugin with 2048 samples
+of latency stays in time with one that has none.
 
 ## Batch 4 - KBS-Host (M4): the remaining hosting gaps
 

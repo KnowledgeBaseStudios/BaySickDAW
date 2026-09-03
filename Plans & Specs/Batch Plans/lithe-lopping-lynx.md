@@ -7,9 +7,10 @@
 > **For execution:** inline, `- [ ]` checkboxes as the punch-list.  Every task
 > ends with the fork's build gate (its own `do_build.bat`, judged by the six exit
 > codes + four link lines in `KBS DAW\build_log.txt`) and, from Task 3 on, the
-> headless launch smoke.  Commit per task in the FORK's repository; the only
-> BaySickDAW commit is Task 1's `.gitignore` line.  Jeff's smoke at the batch
-> boundary (the walk sheet at the end).
+> headless launch smoke.  Commit per task in the FORK's repository - no approval
+> asked per task (group-run rule, Jeff 2026-09-02); the only BaySickDAW commit is
+> Task 1's `.gitignore` line.  The one stop is the END of the batch: Jeff's smoke
+> on the walk sheet below, then KBS-Core starts on his word.
 
 ## Context
 
