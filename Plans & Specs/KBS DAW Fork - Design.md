@@ -46,6 +46,68 @@ buses rather than from engine instances.
 9. Where the fork lives while it is built (tracked here or not) and its build.
 10. Sequencing against QA-Solstice T5, the QA-ManualPress close, the V1 campaign.
 
+## Code facts that shape the design (from the code map, 2026-09-02)
+
+**Size.** `Source/` is 411 files / 234,169 lines; the engine + DSP + effect-UI
+bucket is 114,322 lines (48.8%), so the shell is roughly 120k lines.  The
+coupling to built-in engines is concentrated: `StandaloneEditor.cpp` 120 sites,
+`EffectPresetIO.cpp` 90, `SlotComponent.cpp` 89, `EffectParamMap.cpp` 51,
+`EffectEditorPanels.cpp` 43, `EffectRack` 51, `EngineRig` 30, `RibbonTabBar` 29,
+`PluginProcessor` 36.  `EffectType::` built-in enumerators appear ~430 times
+against 11 `VST3Plugin` sites - the rack collapses to `None` + `VST3Plugin`.
+
+**Mixer / routing - what already exists** (so the FL model is closer than it
+looks): sends carry a level (-60..+6 dB) and pre/post, four per strip; sidechain
+is complete and strip-generic (four receives per strip, delay-matched key taps,
+cycle and topo participation); `RoutingGraph` has cycle detection and Kahn
+topological ordering and imposes no legality of its own; aux-to-aux routing
+already sums; live-input params (`_inputChannelIdx`, `_inputChannelStereo`,
+`_listen`, `_monitorMode`) and `_arm` exist as strip params; the engine-to-strip
+plumbing is generic and already carries hosted VST3 instruments.
+
+**Mixer / routing - the real gaps:** (1) only the bus and master tasks SUM their
+predecessors - every other task clears and renders its own source, so an
+insert-to-insert edge is built, ordered and silently dropped; (2) strips are
+created by tab/engine events, never as a bank; identity is family + index
+(`mixer_<family>_<i>`), not a bank slot, and the instrument-to-strip binding is
+index-derived at registration with no parameter to reassign it; (3) "bus" is 17
+hard-coded ids with hand-written accessors, not a role a strip can take; (4)
+sends are aux-only and the routing menu is a 10-branch family whitelist; (5)
+live input and arm are gated to the Vox / Inst families; (6) no input gain
+anywhere; (7) hosted-instrument latency is not in PDC; (8) main-out edges are
+unity (no level on the default route).
+
+**Tabs.** Tab identity lives in four records and five parallel enums
+(`TabKind`, `TabType`, `EngineKind`, `StripKind`, `InsertKind`) mapped by hand
+in five places.  With hosted plugins only, `TabKind` collapses to `Plugins`, the
+ribbon already hides zero-instance types, and `PluginsPage` is "deliberately the
+thinnest page".  The bus-to-members enumeration the bus tabs need already
+exists in two places (`MixerPage::layoutScrollContent` bucketing by `_sendTo`;
+`EffectsPage::addBusAndMembers`).  Builder rows are NOT tabs (500 free rows).
+
+**Hosting - what is missing for "VST3 is the only path":** sidechain into a
+hosted instrument; hosted-instrument latency in PDC; bridged latency updates
+after load; multi-output instruments (bus 0 only, one strip per tab); MIDI out
+from a plugin / plugin-to-plugin MIDI / MIDI effects; per-track MIDI input
+device or channel filter and more than one live target; `.vstpreset` browsing;
+MIDI Learn onto plugin params; plugin-tab window user-resizable; the 32-bit
+bridge never tested with a real 32-bit VST3.  Complete today: scan / allowlist /
+crash isolation, instruments as first-class engines, effects in any rack slot,
+editor hosting in-process and bridged, state, automation by stable id,
+transport, crash containment, both helpers built and installed.
+
+**Build.** No shell / engine split exists in CMake (one flat source list); the
+`BAYSICK_HAS_SFIZZ` / `BAYSICK_HAS_NAM_CORE` gates are dead (headers included
+unconditionally), so engines must go before their libs; LAME is statically
+linked today (becomes a DLL, 3c); JUCE's bundled ASIO headers are what compile.
+Everything path- or name-bound is listed in the map's section 9 (AppPaths root,
+six settings files, project root tag, helper exe names, bridge handshake id,
+installer keys, undo owner tags, lane prefixes).
+
+**One report line superseded:** the build reader asserted JUCE needs a paid
+licence for closed source; Jeff's verified answer (2026-09-01) is that the free
+tier covers it at current revenue.  The licence text governs at publish time.
+
 ## Legal prerequisites for the closed-source shell (from the DSP Portability Matrix)
 
 - Rubber Band (GPL) is not in the shell - it lives only in the vocal tools,
