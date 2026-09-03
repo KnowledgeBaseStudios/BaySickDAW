@@ -30,13 +30,19 @@ buses rather than from engine instances.
 | 3a | Live input | Stays, as a property of the mixer strip: routed on the strip, detached from any player. |
 | 3b | Strip EQ | The rack keeps its two EQ slots as load buttons like the other slots: `+ Add Pre EQ` on the left, `+ Add Post EQ` on the right.  They are filled by the free KBS Plugins EQ (Jeff has the KBS side add it).  No built-in EQ engine in the fork. |
 | 3c | MP3 | Kept.  LAME ships as a separate DLL (LGPL: replaceable by the user, credited in About), never statically linked into the closed binary. |
+| 4.1 | Insert count | (b) A starting bank that grows on demand; the maximum is high, FL-scale, and the user can keep adding. |
+| 4.2 | Routing | (a) Any insert routes to any insert, Master by default; a "bus" is just an insert that others point at.  FL-style in full: every route carries its own level knob, any-to-any, no per-insert send cap (today's four-send limit goes). |
+| 4.3 | Sidechain | (a) Any route can be flagged sidechain.  A hosted effect never auto-picks a key input - the user picks it, always. |
+| 4.4 | Per-insert | (a) Audio-input source (none / device channel pair), level, pan, mute, solo, polarity, width, effect slots with the pre-EQ and post-EQ slots at either end, routes out, record-arm to disk, name and color.  Input gain is new (nothing exists today). |
+| 4.5 | Effect slots | 10 per insert plus the two EQ slots.  Consequence: the effects rack window is resized to fit 12. |
+| 4.6 | Instrument to insert | The routing is set ON THE PLAYER, the way FL's channel settings carry the insert field - the instrument window gets an insert selector. |
+| 4.7 | Master | (a) An insert like the others - rack, EQ slots - and the only one that cannot route anywhere. |
+| 4.8 | Multi-out instruments | (a) Each output assignable to its own insert from day one.  Jeff: "definitely needs to be fixed for this port build" - multi-out AND hosted-instrument latency compensation are in scope. |
 | - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1, ruled 2026-09-02; applies to BaySickDAW too). |
 
 ## Open (in the order the answers depend on each other)
 
-4. The mixer model - insert count, routing rules, sends, sidechain, per-insert
-   properties, instrument-to-insert assignment, Master, multi-out instruments.
-   Jeff defines the FL behavior; the fork matches it.
+4. ~~The mixer model~~ - decided (rows 4.1-4.8).
 5. Tabs from buses - what makes a strip a bus, what a bus tab shows, where an
    instrument lives before it is routed, where Master fits, the instrument list.
 6. Hosting as the only path - what VST3 hosting still lacks (from the code map).
