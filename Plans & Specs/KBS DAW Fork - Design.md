@@ -43,8 +43,20 @@ window (decision 5, which retired the earlier tabs-from-buses idea).
 | 5A | Ribbon | (a) Five icon buttons: Builder, Mixer, Effects, Piano Roll, Instruments.  No per-engine instance tabs.  The freed width is free space - what goes there is open (candidates only: window toggles, master meter, browser, snap / grid, project name); nothing for now. |
 | 5B | Instruments window | (a) A list window like the effects rack: one row per loaded instrument - name, color, the insert selector (4.6), mute, solo, open editor, open piano roll - with "+ Add instrument" at the bottom.  The channel-rack idea minus the step sequencer (the Builder covers that). |
 | 6 | Hosting gaps - in this build | (a) for: sidechain INTO a hosted instrument; bridged plugins reporting latency changes after load; MIDI out of a plugin, plugin-to-plugin MIDI, MIDI-effect plugins; per-instrument MIDI input device + channel and more than one live target; preset browsing for hosted plugins (`.vstpreset` / program list); MIDI Learn onto hosted-plugin parameters; bridging an instrument on demand (the sandbox toggle, rack-slot-only today).  Plus 4.8: multi-out instruments and hosted-instrument latency in PDC. |
-| 6.7 | Resizable plugin windows | Leaning (b) after: host-forced sizing broke plugins before and was removed; the only legitimate form is a drag handle for plugins that declare host-resize support and can veto sizes.  Plugin-initiated resize already works.  Jeff's final call pending. |
+| 6.7 | Resizable plugin windows | (a) In - a drag handle ONLY for plugins that declare host-resize support and can veto or snap sizes; never host-forced (that broke plugins before and was removed).  Plugin-initiated resize keeps working as today. |
 | 6.9 | 32-bit bridge test | (a) - built and installed, never exercised with a real 32-bit VST3.  Open: WHEN.  Jeff has none; Steinberg's SDK example plugins build as Win32 and can serve as the test plugin at the bridge task. |
+| 7.1 | Product name | (a) **KBS DAW**. |
+| 7.2 | User-data root | Its own: `Documents\KBS DAW\` (settings, audio settings, plugin list, keymap, projects), resolved at runtime from the Documents folder - independent of where the source lives, so moving the source needs no data handoff.  Assumed name pending Jeff: `KBS DAW` (a) vs a distinct data-folder name (b). |
+| 7.3 | Project files | (a) Same XML shape, new root tag - a BaySickDAW project is refused cleanly rather than opened with dead engine tabs. |
+| 7.4 | Instrument presets | (a) Keep the page-preset container (plugin state + its rack) as the fork's instrument preset, alongside plugin-native presets (6.5). |
+| 8.1 | In The Weeds | (a) Not in the fork's manual - it publishes the source.  In View + In Depth only. |
+| 8.2 | Manual | (a) Reuse the pipeline (harness, generator, control tables) with the shell chapters only; figures re-shot from the fork. |
+| 8.3 | Notices | (a) Built in from day one: About box listing every third-party component with its licence, a NOTICES file beside the exe, VST and ASIO trademark lines, fontaudio OFL + CC BY texts, the LAME credit. |
+| 8.4 | Installer | (a) The NSIS installer renamed - product, paths, registry keys; packages the LAME DLL and both helpers; no Presets / Kits / Templates inputs. |
+| 9.1 | Where it lives | (a) Its own git repository nested at `Documents\BaySickDAW\KBS DAW\`, ignored by this repo; the folder moves with its history. |
+| 9.2 | Build | (a) Its own `CMakeLists.txt` + `do_build.bat` inside the folder, building into `KBS DAWuild\`, helpers included. |
+| 9.3 | Dependencies | (a) JUCE and the kept libraries (concurrentqueue, WebView2, fontaudio, LAME, the ASIO headers) copied into the fork - self-contained and movable. |
+| 10 | Sequencing | (b) Copy now; brand renames from the docket are applied in both trees later (twice).  QA-Solstice T5 and the QA-ManualPress close wait. |
 | - | Generator name | "Riff Machine" -> **Tune Generator** (brand docket item 1, ruled 2026-09-02; applies to BaySickDAW too). |
 
 ## Open (in the order the answers depend on each other)
@@ -52,11 +64,11 @@ window (decision 5, which retired the earlier tabs-from-buses idea).
 4. ~~The mixer model~~ - decided (rows 4.1-4.8).
 5. ~~Tabs from buses~~ - retired; ribbon + Instruments window decided (5A, 5B).
 6. ~~Hosting as the only path~~ - decided (row 6; 6.7 pending Jeff's final word).
-7. Project files, product name, paths, settings.
-8. Manual, installer, credits / notices; whether In The Weeds exists in a
-   closed-source product.
-9. Where the fork lives while it is built (tracked here or not) and its build.
-10. Sequencing against QA-Solstice T5, the QA-ManualPress close, the V1 campaign.
+7. ~~Project files, product name, paths, settings~~ - decided (7.1-7.4; 7.2 folder name assumed).
+8. ~~Manual, installer, credits / notices~~ - decided (8.1-8.4).
+9. ~~Where the fork lives~~ - decided (9.1-9.3).
+10. ~~Sequencing~~ - decided (b).
+11. Build strategy for the carve - posed 2026-09-02, pending.
 
 ## Code facts that shape the design (from the code map, 2026-09-02)
 
