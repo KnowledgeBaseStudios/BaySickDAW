@@ -1979,6 +1979,8 @@ kit fan-out behavior locked at docket #10 (a/a, default unmapped).
 
 *Post-close reversal: docket 18's empty-state PRESENTATION (empty-state pages + always-visible 0-badge slots) retired at QA-ModelShell TS4's "+" tab bar -- delete-to-zero, the deleted seeding paths, and membership-driven bus hiding all survive. See §9 sixty-fifth Forks entry.*
 
+*Post-close finding 2026-09-03: closing a dynamic tab frees its page index but leaves the pattern roll entry, the strip APVTS params and the automation lanes behind, so the next tab of that family reuses the index and inherits them. See §9 seventy-first Forks entry.*
+
 #### **QA-ModelShell: Engine-Ownership Inversion + True Offline Export + Model-Side Automation + Contained-Window Shell + Effects Windows + VST3 Hosting + Freeze/Loudness Suite** *(NEW -- inserted 2026-07-27 when QA-ProjectSave's Task 7 applicator sweep escalated through export-silent-instruments into Jeff's inversion + tiers rulings; slotted directly after QA-ProjectSave (G4 order: badger -> mammoth -> layout batch -> yak -> stoat -> heron) -- see §9 sixty-fifth Forks entry)*
 **Plan file:** [`Plans & Specs/Batch Plans/grand-inverting-mammoth.md`](Batch Plans/grand-inverting-mammoth.md) *(eight task sets = Jeff's approved groups, per-set commits, ALL functional verification deferred to one batch smoke; paired running notes hold the HELD Work Log entry, the TS7 §1-§11 execution spec, and the layout-batch holds)*
 - **Bucket:** Effects, Players, Mixer / Routing, System Pages, UI / L&F / Theming, Cross-cutting Infrastructure, Other / Platform / Deferred *(proposed seven-bucket set -- HELD Jeff call at apply, per the QA-ProjectSave precedent)*.
@@ -6833,3 +6835,88 @@ boundary for this entry.
 
 **Plan files affected:** this entry; §5 Phase 8 (new) with the QA-Solstice row; §6 note; [`Batch Plans/solar-scrubbing-sparrow.md`](Batch Plans/solar-scrubbing-sparrow.md) + paired running notes (new).
 **Verification:** T1 build gate + the seven-scenario app smoke and T2's three manual checks (in the plan); `git grep Harmless` empty at T3; T4's list to Jeff.
+
+### 2026-09-03 - KBS DAW fork's first batch (KBS-Seed) closed; six findings routed back from the carve (seventy-first Forks entry)
+
+**Trigger:** BaySickDAW's shell was forked 2026-09-02 into `Documents\BaySickDAW\KBS DAW\`
+as its own git repository with no remote, ignored by this one (`.gitignore`, `48fc71c5`).
+It becomes **KBS DAW**: a free, closed-source shell where instruments and effects are hosted
+VST3s.  This is the first mention of the fork in this plan - its own spec, program plan,
+batch plans and running notes live in ITS `Plans & Specs/`, not here.  BaySickDAW continues
+unchanged as the full free GPL product; nothing is ported back.  Its first batch (KBS-Seed,
+seed + prune + carve, ten tasks, commits `7cd97ef`..`f03328b`) closed 2026-09-03 with Jeff's
+Debug-then-Release smoke passing.  Per the fork's Rule 3, findings that are BaySickDAW's
+rather than the fork's route HERE and are not fixed there.
+
+**Findings routed (six):**
+
+1. **Closing a tab leaves its state behind.**  Found on a hosted-plugin tab in the fork's
+   smoke; the shape is family-wide and pre-existing, so it applies to Layer / Bass / Drum /
+   Clips / Vox / Inst tabs here.  `StandaloneEditor::onTabClosed` tears down four things -
+   frees the page-index slot, unregisters the piano-roll engine, removes the mixer strip,
+   and has the rig destroy the engine - and leaves three: the pattern's roll entry for that
+   index (a fixed array, cleared nowhere), the strip's `mixer_<family>_<idx>_*` APVTS params
+   (level / pan / mute / solo / width / sends / EQ), and the tab's automation lanes.  The
+   creator then allocates the LOWEST FREE index, so closing a tab and adding another of the
+   same family reuses the index and inherits all of it.  The user sees the save-page /
+   Delete / Cancel prompt, deletes, re-adds, and everything is still there.  `PluginProcessor`
+   has a `resetStripPrefix` helper of exactly the right shape, but it is only ever called on
+   the Full <-> Basic program swap, never on a tab close.  Not fixed in the fork: its
+   KBS-Core batch replaces `(TabKind, pageIndex)` with stable instrument ids that are never
+   reused, which removes the class rather than patching it.  Fix here needs its own routing
+   call - it touches QA-ModelShell's closed surface (§5 pointer added).
+
+2. **The standalone target has compiled as C++20 for months by accident.**  `CMakeLists.txt`
+   says `set(CMAKE_CXX_STANDARD 17)` and the NAM block's comment claims consumer targets stay
+   C++17 while only the static lib needs C++20 internally.  That is false:
+   `target_compile_features(BaySickNAMCore PUBLIC cxx_std_20)` is a USAGE requirement and
+   propagates to anything linking the target, even through a PRIVATE link.  Proof came from
+   removing NAM in the fork: `BaySickDAWStandalone` dropped to `stdcpp17` and the build failed
+   with 14 errors in `BaySickGraph.cpp` and `PluginProcessor.cpp` (C3493 / C2064, a
+   `constexpr float` read inside a capture-less nested lambda) - files that task never
+   touched.  Verified by comparing generated projects: this tree's
+   `BaySickDAWStandalone.vcxproj` carries `<LanguageStandard>stdcpp20`.  The fork pinned it
+   explicitly.  Here, the stated C++17 is a fiction and the same trap is armed for whenever
+   sfizz or NAM is removed or reordered.  The plugin-host helper is `stdcpp17` in both trees.
+
+3. **`Manuals/assets/generate-manual.py` hardcodes its repo root** as
+   `C:/Users/jeffm/Documents/BaySickDAW` and reads the Callout Registry out of this tree's
+   `Plans & Specs/System Reference/`.  Any checkout at another path, or any copy of the
+   pipeline, silently reads the wrong registry.  The fork derives both from the script's own
+   location.
+
+4. **Two pre-existing Callout Registry dot mismatches**, reported by the generator on every
+   run and passed over with hand coordinates: HMENU (Help Menu) has 3 callouts against 4
+   rows, PRC (Piano Roll Chords) has 1 against 14.
+
+5. **Shot-harness invocation rules**, learned the hard way and worth writing down: run it
+   from PowerShell (the Bash tool starts an interactive `cmd` and hangs), ONE figure per exe
+   run, an output directory with no spaces, and a multi-word figure name must reach the exe
+   still quoted - `ShotHarness::run` tokenises with `preserveQuotedStrings` then unquotes each
+   token, so an unquoted `Effects Panel List` arrives as three separate figure requests.
+
+6. **Carve lessons for any future large mechanical cut**, all paid for in failed gates:
+   audit the diff's REMOVED lines against the intended target set before every gate (a
+   collateral MixerPage cut cost four gates and was only found by symbolizing a crash dump);
+   run every location-qualified edit BEFORE any text substitution in the same file, because a
+   substitution rebuilds the line numbering; brace-walk every file whose code was cut; and a
+   close-brace check must skip blank lines, not only deleted ones.
+
+**Not routed:** everything else the carve found was the fork's own (its enum collapses, its
+dead-code hunt, its manual prune).  The fork's running notes carry those in full.
+
+**Fork doc copies deleted from this tree** (Jeff, 2026-09-03): `Plans & Specs/KBS DAW Fork -
+Design.md`, `Plans & Specs/KBS DAW Fork - Plan.md`,
+`Plans & Specs/Batch Plans/lithe-lopping-lynx.md`, and the untracked
+`Plans & Specs/Running Notes/lithe-lopping-lynx.md`.  They were authored here before the fork
+had a repository and were copied into it at KBS-Seed Task 10; the fork's copies are live and
+are the only ones edited from here on, so leaving these behind would leave two divergent
+sources.  The two `lite-shell-map-2026-09-02*` research reports STAY - they are this tree's
+own code map, produced by reading this tree's source.
+
+**Plan files affected:** this entry; §5 QA-ModelShell entry (post-close pointer for finding
+1).  No §5 batch scope is expanded - none of the six has been slotted to a batch yet, and
+that is Jeff's call.
+
+**Verification:** none applicable.  Nothing in BaySickDAW's source changed; this entry is a
+record and the deletions are of duplicate documents.
